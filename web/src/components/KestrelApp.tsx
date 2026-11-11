@@ -1,6 +1,7 @@
 "use client";
 
-import { OrbitControls } from "@react-three/drei";
+import { Booster } from "./scene/Booster";
+import { DemoLoop } from "./scene/DemoLoop";
 import { GlideCone } from "./scene/GlideCone";
 import { Pad } from "./scene/Pad";
 import { Stage } from "./scene/Stage";
@@ -16,7 +17,8 @@ export default function KestrelApp() {
         <Terrain />
         <Pad blinking={false} />
         <GlideCone glideSlope={DEFAULT_GLIDE_SLOPE} />
-        <OrbitControls target={[800, 400, 0]} maxDistance={9000} minDistance={20} />
+        <Booster />
+        <DemoLoop />
       </Stage>
     </div>
   );

@@ -31,7 +31,7 @@ export function Stage({ children }: { children: ReactNode }) {
         }}
       />
       <Sky />
-      <hemisphereLight args={["#d8a982", "#3a2018", 0.75]} />
+      <hemisphereLight args={["#d8a982", "#3a2018", 1.15]} />
       <directionalLight
         position={sun.toArray()}
         intensity={3.2}
