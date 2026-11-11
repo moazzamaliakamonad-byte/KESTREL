@@ -10,10 +10,10 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` done.
 
 Goal: prove the maths and the solver work before any browser code exists.
 
-- [ ] Install Rust toolchain (see [SETUP.md](SETUP.md))
-- [ ] Cargo workspace with a single `guidance` crate
-- [ ] Confirm Clarabel builds natively **and** for `wasm32-unknown-unknown`
-      (decide early; see [DECISIONS.md](DECISIONS.md) D-003)
+- [x] Install Rust toolchain (see [SETUP.md](SETUP.md))
+- [x] Cargo workspace with a single `guidance` crate
+- [x] Confirm Clarabel builds natively **and** for `wasm32-unknown-unknown`
+      (see [DECISIONS.md](DECISIONS.md) D-003)
 - [ ] Vehicle/problem parameters struct with non-dimensional scaling
 - [ ] Discretize the convexified 3-DoF problem (fixed final time)
 - [ ] Solve it; check thrust bounds, glide slope and tilt limit are respected
