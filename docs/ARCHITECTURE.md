@@ -43,14 +43,13 @@ kestrel/
 │  ├─ sim/        # M1/M2
 │  └─ wasm/       # M1
 ├─ web/           # M1
-├─ docs/
-└─ learn/
+└─ docs/
 ```
 
 ## Data flow per guidance cycle _(planned)_
 
 1. Read noisy state: position `r`, velocity `v`, mass `m`.
-2. Non-dimensionalize (see `learn/03-numerical-scaling.md`, to be written).
+2. Non-dimensionalize (scale length, time and mass so values are near 1).
 3. Build SOCP matrices for `N` time steps.
 4. Solve. On infeasibility, solve the minimum-landing-error problem instead.
 5. Re-dimensionalize; hand trajectory to controller and UI.

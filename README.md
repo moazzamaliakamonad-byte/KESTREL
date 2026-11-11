@@ -29,9 +29,7 @@ Pre-M0. Documentation and planning only; no code yet. See
 5. **Simulator and front end.** Disturbances you control, and a 3D view where
    the planned trajectory visibly re-bends when you interfere.
 
-Longer version: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Teaching
-material, written so the project can be rebuilt from scratch:
-[learn/](learn/README.md).
+Longer version: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Install
 
