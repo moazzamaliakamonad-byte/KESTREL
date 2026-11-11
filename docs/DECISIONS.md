@@ -38,7 +38,9 @@ Template:
 
 ## D-003 — Start with the Clarabel conic solver
 - Date: 2026-11-11
-- Status: proposed (confirm during M0)
+- Status: accepted 2026-11-12 (0.11.1 compiles natively and for
+  `wasm32-unknown-unknown`; solve speed in a browser not yet measured).
+  Default features must stay enabled: 0.11.1 fails to compile without them.
 - Context: The convexified landing problem is an SOCP. Writing a robust
   interior-point solver first would delay every demo.
 - Decision: Use Clarabel (pure Rust, interior point, supports second-order
