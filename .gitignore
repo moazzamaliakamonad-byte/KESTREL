@@ -1,0 +1,17 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# WebAssembly / web build output
+/pkg/
+/web/dist/
+node_modules/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Private planning notes (contains unrelated, unreleased project ideas)
+project-ideas.md
