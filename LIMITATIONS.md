@@ -21,7 +21,7 @@ approximate. Update it whenever a milestone lands.
 These are deliberate and will be revisited at the milestone noted.
 
 | Simplification | Until |
-|---|---|
+| --- | --- |
 | 3-DoF point-mass dynamics (no attitude, no rotation) | M3 |
 | Flat, non-rotating ground; constant gravity | indefinitely |
 | No aerodynamic forces | M3 |
