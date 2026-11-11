@@ -35,7 +35,8 @@ pub fn solve(problem: &LandingProblem) -> Result<Trajectory, GuidanceError> {
     let burn_out = veh.wet_mass / (veh.alpha() * veh.max_thrust);
     let t_max = 0.999 * burn_out;
     let t_min_textbook = veh.dry_mass * speed / veh.max_thrust;
-    if !(t_min_textbook < t_max) {
+    // Explicit NaN test: speed can overflow to ∞ (fine, ≥ t_max) or be NaN.
+    if t_min_textbook.is_nan() || t_min_textbook >= t_max {
         return Err(GuidanceError::Infeasible);
     }
     // A start at rest gives a textbook bound of 0, which is no landing time.
