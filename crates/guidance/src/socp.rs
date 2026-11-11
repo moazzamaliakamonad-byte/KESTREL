@@ -10,8 +10,6 @@
 //! - per interval k = 0..N: thrust acceleration `u_k = T_k / m_k` (3) and
 //!   its slack magnitude `σ_k ≥ ‖u_k‖` (1)
 
-// Consumed by `solve` (next milestone task); allowed until then.
-#![allow(dead_code)]
 // Index loops mirror the maths (k indexes several arrays at once).
 #![allow(clippy::needless_range_loop)]
 
@@ -72,7 +70,8 @@ pub(crate) struct Socp {
     pub scaling: Scaling,
     /// Non-dimensional interval length.
     pub dt_nd: f64,
-    /// Rows of the dynamics equalities (for tests and diagnostics).
+    /// Rows of the dynamics equalities (read by tests only).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub dynamics_rows: Range<usize>,
 }
 
