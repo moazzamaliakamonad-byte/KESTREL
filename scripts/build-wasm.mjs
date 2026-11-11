@@ -2,19 +2,20 @@
 //
 // 1. cargo build -p kestrel-wasm --release --target wasm32-unknown-unknown
 // 2. wasm-bindgen --target web → JS glue in web/src/wasm/
-// 3. move the .wasm binary to web/public/wasm/ (served as a static file)
+// The .wasm stays next to its glue: the bundler (Turbopack) resolves the glue's
+// `new URL("kestrel_wasm_bg.wasm", import.meta.url)` and emits it as an asset
+// with a hashed, base-path-aware URL.
 //
 // Run from anywhere: `node scripts/build-wasm.mjs` (web/ calls it via `npm run wasm`).
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, renameSync, rmSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const glueDir = join(root, "web", "src", "wasm");
-const publicDir = join(root, "web", "public", "wasm");
 const wasmIn = join(root, "target", "wasm32-unknown-unknown", "release", "kestrel_wasm.wasm");
 
 // rustup puts tools here; it is not always on PATH in fresh shells.
@@ -36,11 +37,8 @@ rmSync(glueDir, { recursive: true, force: true });
 mkdirSync(glueDir, { recursive: true });
 run("wasm-bindgen", ["--target", "web", "--out-dir", glueDir, "--out-name", "kestrel_wasm", wasmIn]);
 
-mkdirSync(publicDir, { recursive: true });
-const wasmOut = join(glueDir, "kestrel_wasm_bg.wasm");
-if (!existsSync(wasmOut)) {
+if (!existsSync(join(glueDir, "kestrel_wasm_bg.wasm"))) {
   console.error("build-wasm: wasm-bindgen did not produce kestrel_wasm_bg.wasm");
   process.exit(1);
 }
-renameSync(wasmOut, join(publicDir, "kestrel_wasm_bg.wasm"));
 console.log("build-wasm: done");

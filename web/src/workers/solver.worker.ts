@@ -2,7 +2,6 @@
 // solve never stalls rendering. Protocol: src/lib/solverProtocol.ts.
 
 import init, { example_request, plan_landing } from "@/wasm/kestrel_wasm";
-import { BASE_PATH } from "@/lib/env";
 import type { PageToWorker, WorkerToPage } from "@/lib/solverProtocol";
 import type { PlanRequest, PlanResponse } from "@/lib/types";
 
@@ -12,7 +11,9 @@ const ctx = self as unknown as {
   addEventListener(type: "message", listener: (e: MessageEvent<PageToWorker>) => void): void;
 };
 
-const ready = init({ module_or_path: `${BASE_PATH}/wasm/kestrel_wasm_bg.wasm` });
+// No path: the glue's own `new URL(..., import.meta.url)` points at the
+// bundled, hashed .wasm asset.
+const ready = init();
 
 ready.catch((err: unknown) => {
   ctx.postMessage({ id: -1, fatal: `Could not load the solver: ${String(err)}` });

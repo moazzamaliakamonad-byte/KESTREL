@@ -4,6 +4,7 @@ import { PerformanceMonitor } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { useState, type ReactNode } from "react";
 import * as THREE from "three";
+import { INITIAL_CAMERA } from "./Cameras";
 import { Effects, type Quality } from "./Effects";
 import { HORIZON_COLOR, Sky, SUN_DIRECTION } from "./Sky";
 
@@ -19,7 +20,7 @@ export function Stage({ children }: { children: ReactNode }) {
       flat
       dpr={[1, dpr]}
       gl={{ antialias: false, powerPreference: "high-performance" }}
-      camera={{ fov: 45, near: 1, far: 20000, position: [-900, 700, 3400] }}
+      camera={{ fov: 45, near: 1, far: 20000, position: INITIAL_CAMERA }}
       onCreated={({ scene }) => {
         scene.fog = new THREE.FogExp2(HORIZON_COLOR.clone().multiplyScalar(0.8), 0.00016);
       }}
