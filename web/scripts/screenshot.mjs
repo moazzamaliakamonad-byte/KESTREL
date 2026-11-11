@@ -36,7 +36,9 @@ async function waitForServer() {
 try {
   await waitForServer();
   const browser = await chromium.launch({
-    args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
+    args: process.env.PW_GPU
+      ? ["--use-angle=d3d11", "--enable-gpu", "--ignore-gpu-blocklist"]
+      : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
   });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];

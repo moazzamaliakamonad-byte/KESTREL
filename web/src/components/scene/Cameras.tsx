@@ -30,33 +30,55 @@ export function Cameras() {
   const reduce = useSyncExternalStore(subscribeMotion, reducedMotion, () => false);
   const dragging = useApp((s) => s.dragging);
   const lookAt = useRef(new THREE.Vector3(...ORBIT_TARGET));
+  const lastMode = useRef<string>("orbit");
+  const lastPhase = useRef<string>("loading");
 
-  useFrame(({ camera }, dt) => {
+  useFrame(({ camera, size }, dt) => {
+    // Test/debug probe: physics point → CSS pixel position on the canvas.
+    const w = window as unknown as { __kestrel?: { screenOf?: unknown } };
+    if (w.__kestrel) {
+      w.__kestrel.screenOf = (p: [number, number, number]) => {
+        const v = new THREE.Vector3(...toScene(p)).project(camera);
+        return { x: ((v.x + 1) / 2) * size.width, y: ((1 - v.y) / 2) * size.height };
+      };
+    }
     const s = useApp.getState();
     const sample = live.sample;
     if (!sample) return;
     const finalTime = s.flight?.response.trajectory.final_time ?? Infinity;
     const mode = s.cameraOverride ?? autoMode(s.phase, s.flight?.t ?? 0, finalTime, reduce);
     const booster = new THREE.Vector3(...toScene(sample.position)).add(new THREE.Vector3(0, 6, 0));
-    const k = 1 - Math.exp(-dt * 2.5);
+    const k = 1 - Math.exp(-dt * 6);
+    // Cinematic cuts: jump straight to the new shot when the mode changes.
+    const cut = mode !== lastMode.current;
+    lastMode.current = mode;
 
     if (controls.current) controls.current.enabled = mode === "orbit" && !dragging;
 
     if (mode === "chase") {
-      camera.position.lerp(booster.clone().add(CHASE_OFFSET), k);
-      lookAt.current.lerp(booster, Math.min(1, k * 2));
+      camera.position.lerp(booster.clone().add(CHASE_OFFSET), cut ? 1 : k);
+      lookAt.current.lerp(booster, cut ? 1 : Math.min(1, k * 2));
       camera.lookAt(lookAt.current);
     } else if (mode === "pad") {
-      camera.position.lerp(PAD_POSITION, k);
-      lookAt.current.lerp(booster, Math.min(1, k * 2));
+      camera.position.lerp(PAD_POSITION, cut ? 1 : k);
+      lookAt.current.lerp(booster, cut ? 1 : Math.min(1, k * 2));
       camera.lookAt(lookAt.current);
     } else if (controls.current) {
+      if (s.phase === "editing" && lastPhase.current !== "editing" && lastPhase.current !== "loading") {
+        // Back from a flight (Reset): return to the overview of the approach.
+        camera.position.set(...INITIAL_CAMERA);
+        controls.current.target.set(...ORBIT_TARGET);
+      } else if (cut) {
+        // Entering orbit from a flight shot: orbit around what we were looking at.
+        controls.current.target.copy(lookAt.current);
+      }
       // Orbit: the visitor is in charge while editing; after touchdown, ease
       // the target onto the landed booster to frame it.
       if (s.phase === "touchdown") controls.current.target.lerp(booster, k * 0.6);
       lookAt.current.copy(controls.current.target);
       controls.current.update();
     }
+    lastPhase.current = s.phase;
   });
 
   return (

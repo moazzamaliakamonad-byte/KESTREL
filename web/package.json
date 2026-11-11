@@ -11,7 +11,10 @@
     "start": "npx --yes serve out",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "npm run build && playwright test --grep-invert @measure",
+    "measure": "npm run build && playwright test --grep @measure",
+    "bench": "node scripts/bench-wasm.mjs"
   },
   "dependencies": {
     "@react-three/drei": "10.7.9",
