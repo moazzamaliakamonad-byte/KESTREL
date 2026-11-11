@@ -3,3 +3,7 @@
 //! program.
 //!
 //! Simulation only. Not flight software.
+
+pub mod params;
+
+pub use params::{ParamError, Vec3, Vehicle};
