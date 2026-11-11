@@ -54,11 +54,14 @@ Public API (`crates/guidance/src/lib.rs`), all SI units, pad at origin, `z` up:
   gravity, glide slope, tilt limit.
 - `LandingProblem { vehicle, position, velocity, steps }` (+ `validate`, `example`).
 - `solve(&LandingProblem) -> Result<Trajectory, GuidanceError>` — free final
-  time: 12-point grid, then golden-section search.
-- `solve_fixed_time(&LandingProblem, t_f)` — one convex solve.
+  time: 12-point grid, then golden-section search, with the propellant limit
+  off; the limit is applied once at the best time found.
+- `solve_fixed_time(&LandingProblem, t_f)` — one convex solve, followed by a
+  check that the relaxation was tight (`‖u_k‖ = σ_k`).
 - `Trajectory { t, position, velocity, mass, thrust, final_time }`
   (+ `fuel_used`, `to_csv`). Nodes: N + 1; thrust: N (one per interval).
-- `GuidanceError::{InvalidParams, InvalidProblem, Infeasible, SolverFailed}`.
+- `GuidanceError::{InvalidParams, InvalidProblem, Infeasible, NotLossless,
+  SolverFailed}`.
 
 Internals, one responsibility per file:
 
@@ -78,10 +81,12 @@ Data flow for one fixed-time solve:
    interval; exact constant-acceleration dynamics per interval; lossless
    convexification with Taylor-approximated thrust bounds.
 4. Solve with Clarabel; map status to `Ok` / `Infeasible` / `SolverFailed`.
-5. Convert back to SI.
+5. Check the relaxation is tight on every interval, else `NotLossless`.
+6. Convert back to SI.
 
-Tests: unit tests per module, plus `tests/fixed_time.rs` and
-`tests/free_time.rs`, which check every physical constraint on SI outputs.
+Tests: unit tests per module, plus `tests/fixed_time.rs`, `tests/free_time.rs`
+and `tests/robustness.rs`, which check every physical constraint on SI
+outputs, including vertical descents, tilt limits and tight propellant.
 
 ## Data flow per guidance cycle in the browser _(planned)_
 

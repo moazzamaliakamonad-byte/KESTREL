@@ -13,7 +13,7 @@ before it drops onto a precise spot.
 ## Status
 
 **M0 done (offline, not yet in a browser).** The guidance solves a
-fuel-optimal 3-DoF landing in about 10 ms per convex solve on a laptop CPU,
+fuel-optimal 3-DoF landing in about 8–9 ms per convex solve on a laptop CPU,
 and picks the landing time itself. Measured numbers and every known
 approximation: [LIMITATIONS.md](LIMITATIONS.md). Next: M1, the browser page.
 See [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -36,7 +36,9 @@ python scripts/plot_trajectory.py target/landing.csv target/landing.png   # need
    and a thrust-tilt limit.
 2. **Lossless convexification.** A change of variables turns the non-convex
    problem into a convex second-order cone program (SOCP) with the same
-   optimum, so it solves fast and reliably.
+   optimum when the theory's conditions hold, so it solves fast and
+   reliably. Kestrel checks this on every solve and refuses plans where it
+   failed (see [LIMITATIONS.md](LIMITATIONS.md)).
 3. **Solver.** A pure-Rust conic solver, compiled to WebAssembly.
 4. **Closed loop.** Re-solve from the current (noisy) state several times per
    second (model predictive control).

@@ -33,8 +33,25 @@ approximate. Update it whenever a milestone lands.
   with more intervals.
 - **Thrust limits use conservative Taylor approximations** (tangent line for
   the maximum, quadratic for the minimum, around the full-thrust mass
-  profile). Plans never exceed the true limits; a little performance may be
-  given up.
+  profile). The constraints the solver sees are stricter than the true
+  limits; a little performance may be given up.
+- **Lossless convexification is checked, not assumed.** The relaxation
+  `‖u‖ ≤ σ` is only valid when it is tight at the optimum, and the theory's
+  conditions can fail, e.g. on purely vertical descents, where the solver
+  returned plans with thrust down to 0–71% of the minimum (found in the M0
+  review). Every solve now checks `‖u_k‖ ≥ σ_k·(1 − 10⁻⁴)` on every interval
+  and returns `GuidanceError::NotLossless` instead of a plan if it fails.
+  The landing-time search skips such times. **Consequence:** in those cases
+  the returned plan is valid but only optimal among landing times where the
+  relaxation was tight; it may use slightly more fuel than the true optimum.
+- **Cases checked by tests:** the example, vertical descents from rest and
+  near the ground, tilt limits 10°/45°/90°, an upward-moving start, a
+  tight-propellant case (195 kg), and absurd speeds. Every `Ok` plan in these
+  passes all physical checks. Other inputs are not yet covered by a
+  randomised test (planned before M2).
+- **Landing-time search** assumes fuel versus landing time is unimodal. It
+  searches with the propellant limit off (so narrow feasible windows can't be
+  skipped) and applies the limit once at the best time.
 - Constraints are enforced at nodes (glide slope, ground) and per interval
   (thrust, tilt), not continuously between nodes.
 
@@ -61,9 +78,10 @@ Each entry states hardware, problem size and how it was measured.
 - Build: `cargo run --release -p kestrel-guidance --example land_once`,
   Rust 1.99.1, Clarabel 0.11.1, default settings.
 - Problem: `LandingProblem::example()`, N = 50 intervals (557 variables).
-- Method: wall clock (`std::time::Instant`) around the call, 3 runs.
-- **One fixed-time solve: 8.3–12.6 ms. Full free-time search (~25 solves):
-  290–323 ms.**
+- Method: wall clock (`std::time::Instant`) around the call, 3 runs
+  (re-measured after the review fixes, 2026-11-12).
+- **One fixed-time solve: 7.9–9.3 ms. Full free-time search (~25 solves):
+  226–259 ms.**
 - Result (identical in all runs): landing time 36.62 s, 194.39 kg propellant.
 
 The full search is far too slow to re-run every frame; M2 will need to warm-
@@ -76,7 +94,7 @@ in the paper).
 
 | | Paper | Kestrel |
 | --- | --- | --- |
-| Optimal time of flight | 75 s | 75.55 s |
+| Optimal time of flight | 75 s | 75.56 s |
 | Minimum-thrust segment | "about 40 to 70 seconds" | ~37.3 s to ~66.5 s |
 | Thrust profile | max–min–max | max–min–max |
 | Glide slope activations | twice (mid-flight, touchdown) | twice (visually, same places) |
