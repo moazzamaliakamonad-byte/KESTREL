@@ -1,0 +1,12 @@
+[package]
+name = "kestrel-guidance"
+version = "0.1.0"
+description = "Convex powered-descent guidance (lossless convexification, SOCP)"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "guidance"
+
+[dependencies]
