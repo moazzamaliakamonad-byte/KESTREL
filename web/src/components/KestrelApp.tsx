@@ -3,8 +3,10 @@
 import { useEffect } from "react";
 import { useSolver } from "@/hooks/useSolver";
 import { PAD_CAM_SECONDS } from "@/lib/camera";
-import { canLand } from "@/lib/state";
 import { useApp } from "@/lib/store";
+import { landOrReset } from "@/lib/landOrReset";
+import { Fallback } from "./hud/Fallback";
+import { Hud } from "./hud/Hud";
 import { Booster } from "./scene/Booster";
 import { Cameras } from "./scene/Cameras";
 import { DragHandles } from "./scene/DragHandles";
@@ -17,14 +19,7 @@ import { Terrain } from "./scene/Terrain";
 
 const DEFAULT_GLIDE_SLOPE = (4 * Math.PI) / 180;
 
-/** Land when a plan is ready; reset after a flight. */
-export function landOrReset() {
-  const s = useApp.getState();
-  if (canLand(s)) s.dispatch({ type: "land" });
-  else if (s.phase === "flying" || s.phase === "touchdown") s.dispatch({ type: "reset" });
-}
-
-/** Client root: solver, 3D scene and (Task 9) the HUD. */
+/** Client root: solver, 3D scene and HUD. */
 export default function KestrelApp() {
   useSolver();
   const glideSlope = useApp((s) => s.vehicle?.glide_slope ?? DEFAULT_GLIDE_SLOPE);
@@ -60,6 +55,8 @@ export default function KestrelApp() {
         <DragHandles />
         <Cameras />
       </Stage>
+      <Hud />
+      <Fallback />
     </div>
   );
 }
