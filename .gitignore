@@ -13,5 +13,6 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# Private planning notes (contains unrelated, unreleased project ideas)
+# Private, never pushed: owner's ideas brief and personal learning course
 project-ideas.md
+learn/
