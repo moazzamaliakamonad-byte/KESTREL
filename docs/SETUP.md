@@ -10,8 +10,8 @@ Target machine: Windows 11 (also works on macOS/Linux).
 | Node.js | yes (v24) |
 | Rust (`rustup`, `cargo`) | yes (1.99.1, `x86_64-pc-windows-msvc`) |
 | `wasm32-unknown-unknown` target | yes |
-| MSVC linker (VS 2026 Community) | present |
-| Windows SDK | **no** — linking fails until installed |
+| MSVC linker (VS 2026 Community) | yes |
+| Windows SDK | yes (10.0.26100, installed 2026-11-12) |
 
 ## Windows: the C++ build tools are required
 
