@@ -8,7 +8,27 @@ Target machine: Windows 11 (also works on macOS/Linux).
 | --- | --- |
 | Git | yes (2.53) |
 | Node.js | yes (v24) |
-| Rust (`rustup`, `cargo`) | **no** — needed for M0 |
+| Rust (`rustup`, `cargo`) | yes (1.99.1, `x86_64-pc-windows-msvc`) |
+| `wasm32-unknown-unknown` target | yes |
+| MSVC linker (VS 2026 Community) | present |
+| Windows SDK | **no** — linking fails until installed |
+
+## Windows: the C++ build tools are required
+
+The MSVC Rust toolchain links with Microsoft's `link.exe` and the Windows SDK
+libraries (`kernel32.lib` etc.). Without the SDK, `cargo check` works for
+plain code, but `cargo build`, `cargo test` and any dependency with a build
+script or proc macro fail. Install the "Desktop development with C++"
+workload:
+
+```sh
+"C:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "C:\Program Files\Microsoft Visual Studio\18\Community" --add Microsoft.VisualStudio.Workload.NativeDesktop --includeRecommended
+```
+
+**Git Bash gotcha:** Git ships its own `/usr/bin/link.exe` (a Unix tool) that
+shadows Microsoft's. Run `cargo` from PowerShell or cmd, or a Git Bash where
+`/usr/bin` comes after the MSVC paths. Also, `cargo` may not be on Git Bash's
+`PATH`; it lives in `~/.cargo/bin`.
 
 ## Install Rust
 
