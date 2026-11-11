@@ -25,12 +25,14 @@
     "zustand": "5.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "0.187.0",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
+    "serve": "14.2.4",
     "typescript": "^5",
     "vitest": "5.1.0"
   }

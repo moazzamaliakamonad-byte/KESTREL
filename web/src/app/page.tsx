@@ -1,3 +1,5 @@
+import { ClientRoot } from "@/components/ClientRoot";
+
 export default function Home() {
-  return <main>Kestrel</main>;
+  return <ClientRoot />;
 }
