@@ -6,7 +6,7 @@
 
 **Architecture:** One library crate `kestrel-guidance` (`crates/guidance`, lib name `guidance`). Physical inputs (SI) → non-dimensional scaling → SOCP assembly (lossless convexification, Açıkmeşe & Ploen 2007) → Clarabel → re-dimensionalized `Trajectory`. Free final time via an outer 1-D search. No simulator, no WASM bindings yet (M1).
 
-**Tech Stack:** Rust 1.99 (edition 2024), `clarabel = { version = "0.11.1", default-features = false }`, Python 3 + matplotlib for the plot script only.
+**Tech Stack:** Rust 1.99 (edition 2024), `clarabel = "0.11.1"` (default features; it does not compile without them), Python 3 + matplotlib for the plot script only.
 
 **Spec:** `docs/ROADMAP.md` (M0 section), `docs/ARCHITECTURE.md`, `docs/DECISIONS.md` D-002/D-003. Maths reference: Malyuta et al. arXiv:2106.09125, LCvx section.
 
@@ -30,14 +30,12 @@
 
 ---
 
-### Task 0: Toolchain gate
+### Task 0: Toolchain gate (done 2026-11-12)
 
-Blocked until the Windows SDK is installed (`docs/SETUP.md`).
-
-- [ ] **Step 1:** In PowerShell: `cargo test -p kestrel-guidance` → Expected: compiles, links, `0 passed`.
-- [ ] **Step 2:** Add dependency in `crates/guidance/Cargo.toml`: `clarabel = { version = "0.11.1", default-features = false }`.
-- [ ] **Step 3:** `cargo build -p kestrel-guidance --target wasm32-unknown-unknown` → Expected: success. If it fails, stop and report: this decides D-003.
-- [ ] **Step 4:** Update D-003 in `docs/DECISIONS.md` to `accepted` (or record the failure), tick the ROADMAP boxes "Install Rust", "Cargo workspace", "Confirm Clarabel builds". Commit: `chore: add clarabel dependency and confirm wasm build`.
+- [x] **Step 1:** In PowerShell: `cargo test -p kestrel-guidance` → compiles, links, `0 passed`.
+- [x] **Step 2:** Add dependency in `crates/guidance/Cargo.toml`: `clarabel = "0.11.1"`.
+- [x] **Step 3:** `cargo build -p kestrel-guidance --target wasm32-unknown-unknown` → success.
+- [x] **Step 4:** Update D-003 in `docs/DECISIONS.md` to `accepted` (or record the failure), tick the ROADMAP boxes "Install Rust", "Cargo workspace", "Confirm Clarabel builds". Commit: `chore: add clarabel dependency and confirm wasm build`.
 
 ### Task 1: Vehicle parameters
 
