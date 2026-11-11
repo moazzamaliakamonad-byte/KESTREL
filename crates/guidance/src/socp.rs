@@ -135,7 +135,18 @@ impl Rows {
 }
 
 /// Build the SOCP for one fixed final time `final_time` (seconds).
+#[cfg(test)]
 pub(crate) fn build(problem: &LandingProblem, final_time: f64) -> Result<Socp, GuidanceError> {
+    build_with(problem, final_time, true)
+}
+
+/// As [`build`], optionally leaving out the final dry-mass constraint
+/// (used by the landing-time search; see `solve::solve`).
+pub(crate) fn build_with(
+    problem: &LandingProblem,
+    final_time: f64,
+    enforce_dry_mass: bool,
+) -> Result<Socp, GuidanceError> {
     problem.validate()?;
     if !(final_time.is_finite() && final_time > 0.0) {
         return Err(GuidanceError::InvalidProblem("final time not positive"));
@@ -223,8 +234,10 @@ pub(crate) fn build(problem: &LandingProblem, final_time: f64) -> Result<Socp, G
 
     // ---- Nonnegative cone: inequalities ----
     let mut ineq = Rows::default();
-    let z_dry = (veh.dry_mass / veh.wet_mass).ln();
-    ineq.nonneg(Aff::new(&[(lay.z(n), 1.0)], -z_dry));
+    if enforce_dry_mass {
+        let z_dry = (veh.dry_mass / veh.wet_mass).ln();
+        ineq.nonneg(Aff::new(&[(lay.z(n), 1.0)], -z_dry));
+    }
     let cos_tilt = veh.max_tilt.cos();
     for k in 0..n {
         // z_lo ≤ z_k ≤ z_hi

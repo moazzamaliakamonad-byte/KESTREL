@@ -22,8 +22,15 @@ pub enum GuidanceError {
     InvalidParams(ParamError),
     /// The problem is malformed before any solving (bad state, too few steps…).
     InvalidProblem(&'static str),
-    /// The solver proved no plan satisfies every constraint.
+    /// No plan satisfies every constraint: the solver proved it (or nearly
+    /// so), or the fuel-optimal plan over all landing times needs more
+    /// propellant than the tanks hold.
     Infeasible,
+    /// The convex relaxation was not tight: on `interval`, the thrust
+    /// delivered (`ratio` × the thrust paid for in fuel) is below the
+    /// engine's minimum. The plan is not physically flyable, so it is not
+    /// returned. Seen on purely vertical descents.
+    NotLossless { interval: usize, ratio: f64 },
     /// The solver stopped without an answer or a proof; holds its status.
     SolverFailed(String),
 }
