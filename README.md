@@ -12,8 +12,22 @@ before it drops onto a precise spot.
 
 ## Status
 
-Pre-M0. Documentation and planning only; no code yet. See
-[docs/ROADMAP.md](docs/ROADMAP.md).
+**M0 done (offline, not yet in a browser).** The guidance solves a
+fuel-optimal 3-DoF landing in about 10 ms per convex solve on a laptop CPU,
+and picks the landing time itself. Measured numbers and every known
+approximation: [LIMITATIONS.md](LIMITATIONS.md). Next: M1, the browser page.
+See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+![M0 example landing: path, thrust (max–min–max), tilt and mass](docs/img/m0-example-landing.png)
+
+Try it (needs Rust; Windows also needs the Visual Studio C++ workload, see
+[docs/SETUP.md](docs/SETUP.md)):
+
+```sh
+cargo test
+cargo run --release -p kestrel-guidance --example land_once > target/landing.csv
+python scripts/plot_trajectory.py target/landing.csv target/landing.png   # needs matplotlib
+```
 
 ## How it works (short version)
 

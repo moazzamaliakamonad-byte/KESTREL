@@ -1,7 +1,7 @@
 # Architecture
 
-Status: **planned**. Nothing here exists yet. Sections are marked _(planned)_
-until the code is written, then updated to describe what was actually built.
+Status: the `guidance` crate is **built** (M0). Everything else is
+_(planned)_ and is updated to describe what was actually built when it lands.
 
 ## Big picture
 
@@ -25,11 +25,11 @@ Key separation: **the simulator owns the truth; guidance only sees what the
 sensors report.** This keeps the demo honest: if guidance looks good, it is
 not because it secretly read the true state.
 
-## Components _(planned)_
+## Components
 
 | Component | Responsibility | Milestone |
 | --- | --- | --- |
-| `guidance` crate | Build and solve the convex landing problem; return a trajectory | M0 |
+| `guidance` crate | Build and solve the convex landing problem; return a trajectory | M0 — **built** |
 | `sim` crate | Integrate vehicle dynamics; inject wind, failures, lag, noise | M2 (simple version in M1) |
 | `wasm` crate | Thin bindings exposing guidance + sim to JavaScript | M1 |
 | `web/` | Page, 3D view, controls, panels | M1 |
@@ -46,18 +46,54 @@ kestrel/
 └─ docs/
 ```
 
-## Data flow per guidance cycle _(planned)_
+## The `guidance` crate (built, M0)
+
+Public API (`crates/guidance/src/lib.rs`), all SI units, pad at origin, `z` up:
+
+- `Vehicle` (+ `validate`, `example_mars`) — masses, Isp, thrust bounds,
+  gravity, glide slope, tilt limit.
+- `LandingProblem { vehicle, position, velocity, steps }` (+ `validate`, `example`).
+- `solve(&LandingProblem) -> Result<Trajectory, GuidanceError>` — free final
+  time: 12-point grid, then golden-section search.
+- `solve_fixed_time(&LandingProblem, t_f)` — one convex solve.
+- `Trajectory { t, position, velocity, mass, thrust, final_time }`
+  (+ `fuel_used`, `to_csv`). Nodes: N + 1; thrust: N (one per interval).
+- `GuidanceError::{InvalidParams, InvalidProblem, Infeasible, SolverFailed}`.
+
+Internals, one responsibility per file:
+
+| File | Responsibility |
+| --- | --- |
+| `params.rs` | vehicle constants and validation |
+| `scaling.rs` | reference units so the solver sees numbers near 1 (gravity = 1) |
+| `problem.rs` | problem/trajectory types, input validation, CSV |
+| `socp.rs` | variable layout and the convexified problem as Clarabel's `A, b, cones` |
+| `solve.rs` | Clarabel call, status mapping, back to SI, landing-time search |
+
+Data flow for one fixed-time solve:
+
+1. Validate the problem (vehicle, state finite, inside glide-slope cone).
+2. Non-dimensionalize (length = start distance, mass = wet mass, gravity = 1).
+3. Build the SOCP: variables `r, v, z = ln(m/m_wet)` per node and `u, σ` per
+   interval; exact constant-acceleration dynamics per interval; lossless
+   convexification with Taylor-approximated thrust bounds.
+4. Solve with Clarabel; map status to `Ok` / `Infeasible` / `SolverFailed`.
+5. Convert back to SI.
+
+Tests: unit tests per module, plus `tests/fixed_time.rs` and
+`tests/free_time.rs`, which check every physical constraint on SI outputs.
+
+## Data flow per guidance cycle in the browser _(planned)_
 
 1. Read noisy state: position `r`, velocity `v`, mass `m`.
-2. Non-dimensionalize (scale length, time and mass so values are near 1).
-3. Build SOCP matrices for `N` time steps.
-4. Solve. On infeasibility, solve the minimum-landing-error problem instead.
-5. Re-dimensionalize; hand trajectory to controller and UI.
+2. Solve (warm-started landing time; a full search is ~300 ms, too slow per frame).
+3. On infeasibility, solve the minimum-landing-error problem instead.
+4. Hand trajectory to controller and UI.
 
 ## Open questions
 
-- Does Clarabel compile to `wasm32-unknown-unknown` cleanly, and how fast is
-  it there? (Decides D-003.)
+- How fast is Clarabel in a browser? (It compiles for `wasm32-unknown-unknown`;
+  speed not yet measured.)
 - Run guidance in a Web Worker so a slow solve never freezes rendering?
   Likely yes; decide in M1.
 - Which 3D library for the front end? Decide in M1.
