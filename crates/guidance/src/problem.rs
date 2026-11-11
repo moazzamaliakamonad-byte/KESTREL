@@ -83,6 +83,31 @@ impl Trajectory {
     pub fn fuel_used(&self) -> f64 {
         self.mass[0] - self.mass[self.mass.len() - 1]
     }
+
+    /// One row per node. Thrust columns hold the thrust of the interval that
+    /// starts at that node, so they are empty on the last row.
+    pub fn to_csv(&self) -> String {
+        use std::fmt::Write;
+        let mut out = String::from("t,x,y,z,vx,vy,vz,mass,tx,ty,tz,thrust_mag\n");
+        for k in 0..self.t.len() {
+            let [x, y, z] = self.position[k];
+            let [vx, vy, vz] = self.velocity[k];
+            // Writing into a String cannot fail.
+            let _ = write!(
+                out,
+                "{},{x},{y},{z},{vx},{vy},{vz},{}",
+                self.t[k], self.mass[k]
+            );
+            match self.thrust.get(k) {
+                Some(&[tx, ty, tz]) => {
+                    let mag = (tx * tx + ty * ty + tz * tz).sqrt();
+                    let _ = writeln!(out, ",{tx},{ty},{tz},{mag}");
+                }
+                None => out.push_str(",,,,\n"),
+            }
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -140,6 +165,28 @@ mod tests {
             p.validate(),
             Err(GuidanceError::InvalidProblem("steps < 2"))
         );
+    }
+
+    #[test]
+    fn csv_has_header_one_row_per_node_and_no_thrust_after_landing() {
+        let traj = Trajectory {
+            t: vec![0.0, 1.0, 2.0],
+            position: vec![[1.0, 2.0, 3.0]; 3],
+            velocity: vec![[4.0, 5.0, 6.0]; 3],
+            mass: vec![1905.0, 1900.0, 1895.0],
+            thrust: vec![[0.0, 3000.0, 4000.0]; 2],
+            final_time: 2.0,
+        };
+        let csv = traj.to_csv();
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "t,x,y,z,vx,vy,vz,mass,tx,ty,tz,thrust_mag");
+        assert_eq!(lines.len(), 1 + 3);
+        let first: Vec<&str> = lines[1].split(',').collect();
+        assert_eq!(first.len(), 12);
+        assert_eq!(first[11].parse::<f64>().unwrap(), 5000.0);
+        let last: Vec<&str> = lines[3].split(',').collect();
+        assert_eq!(last.len(), 12);
+        assert!(last[8..].iter().all(|c| c.is_empty()), "{:?}", lines[3]);
     }
 
     #[test]
