@@ -14,14 +14,15 @@ Goal: prove the maths and the solver work before any browser code exists.
 - [x] Cargo workspace with a single `guidance` crate
 - [x] Confirm Clarabel builds natively **and** for `wasm32-unknown-unknown`
       (see [DECISIONS.md](DECISIONS.md) D-003)
-- [ ] Vehicle/problem parameters struct with non-dimensional scaling
-- [ ] Discretize the convexified 3-DoF problem (fixed final time)
-- [ ] Solve it; check thrust bounds, glide slope and tilt limit are respected
-- [ ] Line search over final time (min fuel)
-- [ ] Export the trajectory (CSV or JSON) and plot it
-- [ ] Reproduce a figure from Malyuta et al. (arXiv 2106.09125) qualitatively
-- [ ] Unit tests: constraint satisfaction, lossless check (`‖T‖ = Γ` on the solution)
-- [ ] `learn/` chapter for M0
+- [x] Vehicle/problem parameters struct with non-dimensional scaling
+- [x] Discretize the convexified 3-DoF problem (fixed final time)
+- [x] Solve it; check thrust bounds, glide slope and tilt limit are respected
+- [x] Line search over final time (min fuel)
+- [x] Export the trajectory (CSV or JSON) and plot it
+- [x] Reproduce a figure from Malyuta et al. (arXiv 2106.09125) qualitatively
+      (see [LIMITATIONS.md](../LIMITATIONS.md))
+- [x] Unit tests: constraint satisfaction, lossless check (`‖T‖ = Γ` on the solution)
+- [x] `learn/` chapter for M0 (local only)
 
 ## M1 — In the browser
 
@@ -56,3 +57,5 @@ Goal: the demo that spreads.
 ## Change log
 
 - 2026-11-11 — Roadmap written from the project brief.
+- 2026-11-12 — M0 done: offline 3-DoF fuel-optimal landing, free final time,
+  qualitative match with Malyuta et al. eq. 108 (see LIMITATIONS.md).

@@ -2,6 +2,14 @@
 resolver = "3"
 members = ["crates/guidance"]
 
+# Tests run many solves; the solver is generic code compiled inside our crate,
+# so optimise the test profile itself. Plain `cargo build` stays debuggable.
+[profile.test]
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [workspace.package]
 edition = "2024"
 license = "MIT"
