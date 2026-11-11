@@ -94,6 +94,14 @@ mod tests {
     }
 
     #[test]
+    fn weight_of_reference_mass_is_one_nd() {
+        // Pins the force unit to real physics; round trips alone cannot,
+        // because a wrong unit cancels itself out going there and back.
+        let s = example();
+        assert!((s.to_nd_force(1905.0 * 3.7114) - 1.0).abs() <= 1e-12);
+    }
+
+    #[test]
     fn round_trip_each_quantity() {
         let s = example();
         let x = 1234.5;
