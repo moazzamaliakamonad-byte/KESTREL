@@ -28,12 +28,14 @@ Goal: prove the maths and the solver work before any browser code exists.
 
 Goal: one page that solves and animates one landing.
 
-- [ ] `wasm` crate exposing `solve(state, params) -> trajectory`
-- [ ] Minimal web page (build tool chosen at the time; record in DECISIONS.md)
-- [ ] 3D view of booster, pad and planned trajectory line
-- [ ] Measure solve time in Chrome and Firefox; write it in LIMITATIONS.md
-- [ ] Demo GIF in README; one-command run instructions
-- [ ] `learn/` chapter for M1
+- [x] `wasm` crate exposing `plan_landing(json) -> json` (D-009)
+- [x] Web page: Next.js static export + React Three Fiber (D-005, D-006)
+- [x] 3D view of booster, pad and planned trajectory line, plus drag-to-edit
+      start, live re-planning, cameras, telemetry HUD
+- [~] Measure solve time in Chrome and Firefox; write it in LIMITATIONS.md
+      (Chromium measured; Firefox not yet)
+- [x] Demo GIF in README; one-command run instructions
+- [x] `learn/` chapter for M1 (local only)
 
 ## M2 — Closed loop and "break it"
 
@@ -59,3 +61,5 @@ Goal: the demo that spreads.
 - 2026-11-11 — Roadmap written from the project brief.
 - 2026-11-12 — M0 done: offline 3-DoF fuel-optimal landing, free final time,
   qualitative match with Malyuta et al. eq. 108 (see LIMITATIONS.md).
+- 2026-11-12 — M1 done (except a Firefox measurement): browser page with the
+  solver in WebAssembly, live re-planning while dragging, 3D playback, HUD.

@@ -11,12 +11,20 @@ approximate. Update it whenever a milestone lands.
 - **No real vehicle data.** Vehicle parameters are illustrative, loosely in the
   range of published examples, not taken from any real booster.
 
-## Current state (M0 done)
+## Current state (M1 done)
 
-- Guidance solves offline in Rust, natively. **Nothing runs in a browser yet**
-  (M1). The crate compiles for `wasm32-unknown-unknown`, but no browser solve
-  time has been measured.
-- No closed loop, no disturbances, no simulator yet (M2).
+- The browser page **plays back the plan**; there is no physics simulator,
+  no disturbances and no re-planning during flight yet (M2). What you see
+  flying is exactly the solver's plan.
+- The start state is edited in the vertical x–z plane only (y = 0).
+- **Displayed attitude is cosmetic.** A 3-DoF plan has no vehicle attitude;
+  the booster is drawn pointing along the thrust, eased to upright over the
+  last 40 m. The plan itself may end with thrust tilted up to the tilt limit
+  (e.g. ~44° in the example). A real "touch down upright" constraint is
+  future work (M2/M3).
+- The booster model (12 m × 3.7 m) is illustrative, not to scale with the
+  1.9 t example vehicle's mass, and not any real vehicle.
+- Tested in Chromium 158 (Playwright) only. Other browsers are untested.
 - Fuel versus landing time is assumed unimodal for the golden-section search.
   This holds for the cases tested and is cited by Malyuta et al. for this
   problem class; it is not proven in this code.
@@ -86,6 +94,22 @@ Each entry states hardware, problem size and how it was measured.
 
 The full search is far too slow to re-run every frame; M2 will need to warm-
 start from the previous landing time instead of searching from scratch.
+
+### Solve time in the browser (M1)
+
+Same machine (i7-1185G7, 32 GB, Windows 11), example problem, N = 50, full
+free-time search (one `plan_landing` call), WASM built `--release`.
+
+| Where | Method | Median | Range |
+| --- | --- | --- | --- |
+| Chromium 158, real GPU (`PW_GPU=1 npm run measure`) | 10 re-plans timed in the worker (`performance.now()`) while the 3D page renders | **244 ms** | 218–295 ms |
+| Node 24 V8 (`npm run bench`) | 10 runs after 2 warm-ups, no rendering | 258 ms | 241–297 ms |
+| Chromium 158, software WebGL (`npm run measure`) | as the first row, but rendering on the CPU | 1718 ms | 1499–4444 ms |
+
+So in a browser with a GPU the solver runs at about native speed (M0: 226–259
+ms). On machines without GPU acceleration, rendering competes for the CPU and
+a re-plan can take ~2 s. The demo GIF was recorded while capturing frames,
+which also slows solving; its on-screen solve times are not representative.
 
 ### Comparison with Malyuta et al. (arXiv:2106.09125, eq. 108, Fig. 21)
 
