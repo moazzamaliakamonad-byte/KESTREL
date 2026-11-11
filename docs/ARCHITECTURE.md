@@ -5,7 +5,7 @@ until the code is written, then updated to describe what was actually built.
 
 ## Big picture
 
-```
+```text
  ┌──────────────────────────── browser tab ────────────────────────────┐
  │                                                                     │
  │  UI / 3D view (JS/TS)  ── user interference ──▶  Simulator (Rust)   │
@@ -36,7 +36,7 @@ not because it secretly read the true state.
 
 Proposed workspace layout (create only when the milestone needs it):
 
-```
+```text
 kestrel/
 ├─ crates/
 │  ├─ guidance/   # M0

@@ -5,7 +5,7 @@ entry; if a decision is reversed, add a new one that supersedes it.
 
 Template:
 
-```
+```text
 ## D-NNN — Title
 - Date:
 - Status: proposed | accepted | superseded by D-NNN
