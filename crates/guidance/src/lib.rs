@@ -9,6 +9,7 @@ pub mod problem;
 pub mod scaling;
 mod socp;
 mod solve;
+pub mod track;
 
 pub use params::{ParamError, Vec3, Vehicle};
 pub use problem::{GuidanceError, LandingProblem, Trajectory};

@@ -61,6 +61,27 @@ impl LandingProblem {
         }
     }
 
+    /// A problem starting mid-flight with `mass` kg on board. The solver
+    /// treats the start mass as the "wet" mass, so this relabels it; the
+    /// dry mass (empty tanks) is unchanged.
+    pub fn from_state(
+        vehicle: Vehicle,
+        position: Vec3,
+        velocity: Vec3,
+        mass: f64,
+        steps: usize,
+    ) -> LandingProblem {
+        LandingProblem {
+            vehicle: Vehicle {
+                wet_mass: mass,
+                ..vehicle
+            },
+            position,
+            velocity,
+            steps,
+        }
+    }
+
     /// Reject problems that are malformed before trying to solve them.
     pub fn validate(&self) -> Result<(), GuidanceError> {
         self.vehicle
@@ -124,6 +145,19 @@ mod tests {
     #[test]
     fn example_is_valid() {
         assert_eq!(LandingProblem::example().validate(), Ok(()));
+    }
+
+    #[test]
+    fn from_state_relabels_wet_mass() {
+        let v = Vehicle::example_mars();
+        let p =
+            LandingProblem::from_state(v.clone(), [10.0, 0.0, 500.0], [1.0, 0.0, -9.0], 1700.0, 40);
+        assert_eq!(p.vehicle.wet_mass, 1700.0);
+        assert_eq!(p.vehicle.dry_mass, v.dry_mass);
+        assert_eq!(
+            (p.position, p.velocity, p.steps),
+            ([10.0, 0.0, 500.0], [1.0, 0.0, -9.0], 40)
+        );
     }
 
     #[test]
