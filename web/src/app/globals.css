@@ -1,0 +1,41 @@
+:root {
+  --bg: #0d0a09;
+  --fg: #f2ece4;
+  --muted: #b9aa9b;
+  --accent: #7fe3ff;
+  --warn: #ffb35c;
+  --danger: #ff5a4f;
+  --glass: rgba(20, 14, 12, 0.42);
+  --glass-border: rgba(255, 255, 255, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.app {
+  position: fixed;
+  inset: 0;
+}
+
+.boot {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
