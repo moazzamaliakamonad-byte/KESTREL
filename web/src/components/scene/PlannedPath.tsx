@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { sampleAt, toScene } from "@/lib/playback";
+import { isPreviewCurrent } from "@/lib/state";
 import { useApp } from "@/lib/store";
 import type { PlanResponse, Vec3 } from "@/lib/types";
 
@@ -35,7 +36,8 @@ export function PlannedPath() {
   const phase = useApp((s) => s.phase);
   const preview = useApp((s) => s.preview);
   const flight = useApp((s) => s.flight);
-  const pending = useApp((s) => s.requestedAt !== null);
+  // Dim while a newer plan is coming, including right after the start moved.
+  const pending = useApp((s) => s.requestedAt !== null || !isPreviewCurrent(s));
   const start = useApp((s) => s.start);
   const danger = useRef<THREE.Material & { opacity: number }>(null);
 

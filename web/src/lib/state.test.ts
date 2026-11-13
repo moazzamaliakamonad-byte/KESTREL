@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fixture from "./__fixtures__/example-response.json";
-import { canLand, initialState, reduce, type AppState } from "./state";
+import { canLand, initialState, isPreviewCurrent, reduce, type AppState } from "./state";
 import type { PlanResponse, Vec3 } from "./types";
 
 const ok = fixture as PlanResponse;
@@ -10,7 +10,7 @@ const finalTime = ok.ok ? ok.trajectory.final_time : NaN;
 
 function editingWith(response: PlanResponse, id = 1): AppState {
   let s = reduce(initialState, { type: "ready", start });
-  s = reduce(s, { type: "requested", id, at: 0 });
+  s = reduce(s, { type: "requested", id, at: 0, start });
   return reduce(s, { type: "response", id, response });
 }
 
@@ -34,8 +34,8 @@ describe("state machine", () => {
 
   it("a response for an older request is ignored", () => {
     let s = reduce(initialState, { type: "ready", start });
-    s = reduce(s, { type: "requested", id: 1, at: 0 });
-    s = reduce(s, { type: "requested", id: 2, at: 5 });
+    s = reduce(s, { type: "requested", id: 1, at: 0, start });
+    s = reduce(s, { type: "requested", id: 2, at: 5, start });
     s = reduce(s, { type: "response", id: 1, response: ok });
     expect(s.preview).toBeNull();
     expect(s.requestedAt).toBe(5);
@@ -50,9 +50,28 @@ describe("state machine", () => {
   });
 
   it("land is ignored while a newer solve is pending", () => {
-    const s = reduce(editingWith(ok, 1), { type: "requested", id: 2, at: 9 });
+    const s = reduce(editingWith(ok, 1), { type: "requested", id: 2, at: 9, start });
     expect(canLand(s)).toBe(false);
     expect(reduce(s, { type: "land" }).phase).toBe("editing");
+  });
+
+  it("moving the start makes the current plan unflyable immediately", () => {
+    // Review finding: drag then press Space before the next solve is even
+    // requested must not fly the plan for the old start.
+    const moved = { position: [-1500, 0, 2500] as Vec3, velocity: start.velocity };
+    const s = reduce(editingWith(ok), { type: "setStart", start: moved });
+    expect(canLand(s)).toBe(false);
+    expect(reduce(s, { type: "land" }).phase).toBe("editing");
+  });
+
+  it("an answer solved for an older start does not make it landable", () => {
+    const moved = { position: [-1500, 0, 2500] as Vec3, velocity: start.velocity };
+    let s = reduce(initialState, { type: "ready", start });
+    s = reduce(s, { type: "requested", id: 1, at: 0, start });
+    s = reduce(s, { type: "setStart", start: moved });
+    s = reduce(s, { type: "response", id: 1, response: ok });
+    expect(canLand(s)).toBe(false);
+    expect(isPreviewCurrent(s)).toBe(false);
   });
 
   it("tick advances time and touches down at the end", () => {

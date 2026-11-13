@@ -15,7 +15,10 @@ export interface AppState {
   latestRequestId: number;
   /** When the newest request was sent (ms), or null when it has answered. */
   requestedAt: number | null;
-  preview: { requestId: number; response: PlanResponse } | null;
+  /** The start state the newest request was solved for. */
+  requestedStart: StartState | null;
+  /** The newest answer, and the exact start state it is a plan for. */
+  preview: { requestId: number; response: PlanResponse; start: StartState } | null;
   flight: { response: PlanSuccess; t: number } | null;
   speed: Speed;
   failure: string | null;
@@ -24,7 +27,7 @@ export interface AppState {
 export type Action =
   | { type: "ready"; start: StartState }
   | { type: "setStart"; start: StartState }
-  | { type: "requested"; id: number; at: number }
+  | { type: "requested"; id: number; at: number; start: StartState }
   | { type: "response"; id: number; response: PlanResponse }
   | { type: "land" }
   | { type: "tick"; dt: number }
@@ -37,20 +40,29 @@ export const initialState: AppState = {
   start: { position: [0, 0, 0], velocity: [0, 0, 0] },
   latestRequestId: 0,
   requestedAt: null,
+  requestedStart: null,
   preview: null,
   flight: null,
   speed: 1,
   failure: null,
 };
 
+/**
+ * The preview answers the newest request *and* was solved for the start the
+ * visitor sees now. Moving the start makes it stale at once, before any new
+ * request is even sent.
+ */
+export function isPreviewCurrent(s: AppState): boolean {
+  return (
+    s.preview !== null &&
+    s.preview.requestId === s.latestRequestId &&
+    s.preview.start === s.start
+  );
+}
+
 /** Land is allowed only on a successful plan for the current start state. */
 export function canLand(s: AppState): boolean {
-  return (
-    s.phase === "editing" &&
-    s.preview !== null &&
-    s.preview.response.ok &&
-    s.preview.requestId === s.latestRequestId
-  );
+  return s.phase === "editing" && isPreviewCurrent(s) && !!s.preview?.response.ok;
 }
 
 export function reduce(s: AppState, a: Action): AppState {
@@ -60,10 +72,14 @@ export function reduce(s: AppState, a: Action): AppState {
     case "setStart":
       return s.phase === "editing" ? { ...s, start: a.start } : s;
     case "requested":
-      return { ...s, latestRequestId: a.id, requestedAt: a.at };
+      return { ...s, latestRequestId: a.id, requestedAt: a.at, requestedStart: a.start };
     case "response":
-      if (a.id !== s.latestRequestId) return s;
-      return { ...s, preview: { requestId: a.id, response: a.response }, requestedAt: null };
+      if (a.id !== s.latestRequestId || !s.requestedStart) return s;
+      return {
+        ...s,
+        preview: { requestId: a.id, response: a.response, start: s.requestedStart },
+        requestedAt: null,
+      };
     case "land": {
       if (!canLand(s) || !s.preview?.response.ok) return s;
       return { ...s, phase: "flying", flight: { response: s.preview.response, t: 0 } };

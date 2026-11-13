@@ -1,4 +1,4 @@
-import type { AppState } from "./state";
+import { isPreviewCurrent, type AppState } from "./state";
 import type { ErrorKind } from "./types";
 
 export type Tone = "info" | "ok" | "warn" | "error";
@@ -31,6 +31,8 @@ export function statusText(s: AppState, now: number): { tone: Tone; text: string
         const slow = now - s.requestedAt > SLOW_SOLVE_MS;
         return { tone: "info", text: slow ? "Still planning…" : "Planning…" };
       }
+      // No answer yet, or the answer is for a start the visitor has since moved.
+      if (!isPreviewCurrent(s)) return { tone: "info", text: "Planning…" };
       const r = s.preview?.response;
       if (!r) return { tone: "info", text: "Planning…" };
       if (r.ok) return { tone: "ok", text: "Ready: press Land" };

@@ -9,9 +9,9 @@ const start = { position: [2000, 0, 1500] as Vec3, velocity: [-50, 0, -75] as Ve
 
 function editing(response: PlanResponse | null, pendingAt: number | null = null): AppState {
   let s = reduce(initialState, { type: "ready", start });
-  s = reduce(s, { type: "requested", id: 1, at: 0 });
+  s = reduce(s, { type: "requested", id: 1, at: 0, start });
   if (response) s = reduce(s, { type: "response", id: 1, response });
-  if (pendingAt !== null) s = reduce(s, { type: "requested", id: 2, at: pendingAt });
+  if (pendingAt !== null) s = reduce(s, { type: "requested", id: 2, at: pendingAt, start });
   return s;
 }
 
@@ -41,6 +41,12 @@ describe("status line", () => {
 
   it("shows still planning when a solve is slow", () => {
     expect(statusText(editing(ok, 1000), 4500).text).toBe("Still planning…");
+  });
+
+  it("does not invite landing once the start has moved", () => {
+    const moved = { position: [-1500, 0, 2500] as Vec3, velocity: start.velocity };
+    const s = reduce(editing(ok), { type: "setStart", start: moved });
+    expect(statusText(s, 0).text).toBe("Planning…");
   });
 
   it("invites landing when a plan is ready", () => {

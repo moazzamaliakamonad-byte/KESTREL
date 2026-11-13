@@ -5,7 +5,7 @@ import { useSolver } from "@/hooks/useSolver";
 import { PAD_CAM_SECONDS } from "@/lib/camera";
 import { useApp } from "@/lib/store";
 import { landOrReset } from "@/lib/landOrReset";
-import { Fallback } from "./hud/Fallback";
+import { Fallback, SceneErrorBoundary } from "./hud/Fallback";
 import { Hud } from "./hud/Hud";
 import { Booster } from "./scene/Booster";
 import { Cameras } from "./scene/Cameras";
@@ -45,6 +45,7 @@ export default function KestrelApp() {
 
   return (
     <div className="app">
+      <SceneErrorBoundary>
       <Stage>
         <FlightLoop />
         <Terrain />
@@ -55,6 +56,7 @@ export default function KestrelApp() {
         <DragHandles />
         <Cameras />
       </Stage>
+      </SceneErrorBoundary>
       <Hud />
       <Fallback />
     </div>
