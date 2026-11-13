@@ -106,6 +106,22 @@ free-time search (one `plan_landing` call), WASM built `--release`.
 | Node 24 V8 (`npm run bench`) | 10 runs after 2 warm-ups, no rendering | 258 ms | 241–297 ms |
 | Chromium 158, software WebGL (`npm run measure`) | as the first row, but rendering on the CPU | 1718 ms | 1499–4444 ms |
 
+The rows above were measured on mains power. Re-measured 2026-11-13 **on
+battery** (80%, discharging) with the dev server running, after the review
+fixes, three runs each:
+
+| Where | Median | Range |
+| --- | --- | --- |
+| Chromium 158, real GPU, per solve | 676–707 ms | 358–866 ms |
+| Node 24 V8, per solve | 305–307 ms | 291–384 ms |
+| Chromium 158, real GPU, **after a drag**: eight start changes 140 ms apart, then time until "Ready" | 859–890 ms | — |
+
+So speed depends strongly on the power state (integrated GPU and CPU share
+the budget). After a drag, at most one stale solve finishes before the newest
+one starts (one solve in flight), so the wait is about one to two solves. The
+spec's "~0.5 s after release" is met only on mains power; it has not been
+re-measured plugged in after the fix.
+
 So in a browser with a GPU the solver runs at about native speed (M0: 226–259
 ms). On machines without GPU acceleration, rendering competes for the CPU and
 a re-plan can take ~2 s. The demo GIF was recorded while capturing frames,

@@ -8,15 +8,16 @@ wind, engine failures and mid-flight interference come next (M2).
 ![Kestrel demo: dragging the booster re-plans the landing live, then it flies the plan to touchdown](docs/img/m1-demo.gif)
 
 <sub>Recorded with a frame-capture script, which slows the solver; the solve
-times shown in the GIF (1–2 s) are inflated by it. Measured in Chrome on a
-laptop GPU: **244 ms median** per full plan (see [LIMITATIONS.md](LIMITATIONS.md)).</sub>
+times shown in the GIF (1–2 s) are inflated by it. Measured in Chromium on a
+laptop GPU: **244 ms median** per full plan when plugged in, ~700 ms on battery
+(see [LIMITATIONS.md](LIMITATIONS.md)).</sub>
 
 Named after the kestrel, the small falcon that hovers motionless in a headwind
 before it drops onto a precise spot.
 
 ## Run it
 
-Needs Node 20+, Rust with the `wasm32-unknown-unknown` target and
+Needs Node 22+, Rust with the `wasm32-unknown-unknown` target and
 `wasm-bindgen-cli` 0.2.130 (one-time setup: [docs/SETUP.md](docs/SETUP.md)).
 
 ```sh
@@ -32,7 +33,8 @@ velocity, press **Space** to land.
 - **M0 done:** fuel-optimal 3-DoF landing guidance in Rust (lossless
   convexification, Clarabel), checked against a published example.
 - **M1 done:** the browser page. The solver runs as WebAssembly in a Web
-  Worker, re-plans live while you drag, and the landing plays back in a
+  Worker, re-plans continuously while you drag (one solve at a time, always
+  for the newest position), and the landing plays back in a
   procedural 3D Mars scene with live telemetry.
 - **Next, M2:** closed loop with disturbances and the "break it" controls.
 

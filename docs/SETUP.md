@@ -46,7 +46,7 @@ shadows Microsoft's. Run `cargo` from PowerShell or cmd, or a Git Bash where
 
 ## Web app (M1)
 
-1. Node.js 20+ (this machine: 24).
+1. Node.js 22+ (Vitest 5 requires it; this machine: 24).
 2. The WASM binding generator, at exactly the library's version (D-007):
    ```sh
    cargo install wasm-bindgen-cli --version 0.2.130 --locked
