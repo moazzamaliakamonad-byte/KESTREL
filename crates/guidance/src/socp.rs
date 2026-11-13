@@ -134,20 +134,42 @@ impl Rows {
     }
 }
 
+/// Where the landing must end.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Target {
+    /// At rest on the pad, inside the glide cone the whole way.
+    Pinpoint,
+    /// At rest on the ground as close to the pad as possible: the end point's
+    /// horizontal position is free and the glide cone is dropped. Objective
+    /// `W·e − z_N` with `e ≥ ‖r_N,xy‖`: distance first, then fuel.
+    Closest,
+}
+
+/// Weight of the (non-dimensional) miss distance against final log-mass.
+/// One unit of miss is the whole start distance, so any real miss
+/// outweighs the fuel term.
+const MISS_WEIGHT: f64 = 10.0;
+
 /// Build the SOCP for one fixed final time `final_time` (seconds).
 #[cfg(test)]
 pub(crate) fn build(problem: &LandingProblem, final_time: f64) -> Result<Socp, GuidanceError> {
-    build_with(problem, final_time, true)
+    build_with(problem, final_time, true, Target::Pinpoint)
 }
 
 /// As [`build`], optionally leaving out the final dry-mass constraint
-/// (used by the landing-time search; see `solve::solve`).
+/// (used by the landing-time search; see `solve::solve`), for either target.
 pub(crate) fn build_with(
     problem: &LandingProblem,
     final_time: f64,
     enforce_dry_mass: bool,
+    target: Target,
 ) -> Result<Socp, GuidanceError> {
-    problem.validate()?;
+    let closest = target == Target::Closest;
+    if closest {
+        problem.validate_state()?;
+    } else {
+        problem.validate()?;
+    }
     if !(final_time.is_finite() && final_time > 0.0) {
         return Err(GuidanceError::InvalidProblem("final time not positive"));
     }
@@ -228,9 +250,14 @@ pub(crate) fn build_with(
     let dyn_end = eq.len();
 
     for i in 0..3 {
-        eq.eq(Aff::new(&[(lay.r(n, i), 1.0)], 0.0));
+        // Closest landing: only the altitude of the end point is fixed.
+        if !closest || i == 2 {
+            eq.eq(Aff::new(&[(lay.r(n, i), 1.0)], 0.0));
+        }
         eq.eq(Aff::new(&[(lay.v(n, i), 1.0)], 0.0));
     }
+    // Miss-distance epigraph variable, after the layout's own variables.
+    let miss = lay.len();
 
     // ---- Nonnegative cone: inequalities ----
     let mut ineq = Rows::default();
@@ -273,7 +300,15 @@ pub(crate) fn build_with(
         soc_dims.push(4);
     }
     let tan_gs = veh.glide_slope.tan();
-    if tan_gs > 0.0 {
+    if closest {
+        // e ≥ ‖(r_N,x, r_N,y)‖
+        soc.soc(&[
+            Aff::new(&[(miss, 1.0)], 0.0),
+            Aff::new(&[(lay.r(n, 0), 1.0)], 0.0),
+            Aff::new(&[(lay.r(n, 1), 1.0)], 0.0),
+        ]);
+        soc_dims.push(3);
+    } else if tan_gs > 0.0 {
         for k in 0..=n {
             // tan γ·‖(r_x, r_y)‖ ≤ r_z
             soc.soc(&[
@@ -312,7 +347,7 @@ pub(crate) fn build_with(
         vals.extend_from_slice(&block.vals);
         b.extend_from_slice(&block.b);
     }
-    let nvars = lay.len();
+    let nvars = if closest { lay.len() + 1 } else { lay.len() };
     let a = CscMatrix::new_from_triplets(b.len(), nvars, rows, cols, vals);
 
     let mut cones = vec![
@@ -324,6 +359,9 @@ pub(crate) fn build_with(
     // Objective: maximize final log-mass ⇔ minimize −z_N.
     let mut q = vec![0.0; nvars];
     q[lay.z(n)] = -1.0;
+    if closest {
+        q[miss] = MISS_WEIGHT;
+    }
 
     Ok(Socp {
         p: CscMatrix::zeros((nvars, nvars)),

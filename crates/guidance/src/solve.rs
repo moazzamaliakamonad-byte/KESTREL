@@ -4,7 +4,7 @@ use clarabel::solver::{DefaultSettings, DefaultSolver, IPSolver, SolverStatus};
 
 use crate::params::Vec3;
 use crate::problem::{GuidanceError, LandingProblem, Trajectory};
-use crate::socp::{self, Socp};
+use crate::socp::{self, Socp, Target};
 
 /// Grid points for the coarse scan over landing times.
 const GRID_POINTS: usize = 12;
@@ -103,7 +103,7 @@ impl<'a> Search<'a> {
 
     /// Fuel used for a landing at `final_time`, or +∞ if there is none.
     fn fuel_at(&mut self, final_time: f64) -> f64 {
-        match solve_at(self.problem, final_time, DryMass::Ignore) {
+        match solve_at(self.problem, final_time, DryMass::Ignore, Target::Pinpoint) {
             Ok(traj) => {
                 let fuel = traj.fuel_used();
                 let better = self.best.as_ref().is_none_or(|b| fuel < b.fuel_used());
@@ -140,7 +140,18 @@ pub fn solve_fixed_time(
     problem: &LandingProblem,
     final_time: f64,
 ) -> Result<Trajectory, GuidanceError> {
-    solve_at(problem, final_time, DryMass::Enforce)
+    solve_at(problem, final_time, DryMass::Enforce, Target::Pinpoint)
+}
+
+/// The fallback when no pinpoint landing exists: land at rest, `final_time`
+/// seconds from now, as close to the pad as possible (then with least fuel).
+/// The glide cone is dropped: it is centred on the pad, and the vehicle may
+/// already be outside it.
+pub fn solve_closest(
+    problem: &LandingProblem,
+    final_time: f64,
+) -> Result<Trajectory, GuidanceError> {
+    solve_at(problem, final_time, DryMass::Enforce, Target::Closest)
 }
 
 /// Whether the final mass must stay above the dry mass.
@@ -158,8 +169,9 @@ fn solve_at(
     problem: &LandingProblem,
     final_time: f64,
     dry: DryMass,
+    target: Target,
 ) -> Result<Trajectory, GuidanceError> {
-    let s = socp::build_with(problem, final_time, matches!(dry, DryMass::Enforce))?;
+    let s = socp::build_with(problem, final_time, matches!(dry, DryMass::Enforce), target)?;
     let settings = DefaultSettings {
         verbose: false,
         ..Default::default()
