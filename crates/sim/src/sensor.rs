@@ -39,10 +39,30 @@ pub struct Measurement {
     pub mass: f64,
 }
 
+/// How long the navigation error takes to decorrelate, s.
+pub const CORRELATION_TIME: f64 = 2.0;
+
+/// Below this altitude the landing radar takes over, m.
+pub const RADAR_RANGE: f64 = 200.0;
+
+/// Error scale at altitude `z`: 1 above [`RADAR_RANGE`], then proportional
+/// to range (like a landing radar), never below 10 %.
+fn range_scale(z: f64) -> f64 {
+    (z / RADAR_RANGE).clamp(0.1, 1.0)
+}
+
+/// The navigation error is first-order Gauss–Markov per axis: it wanders
+/// slowly with the stated σ, like the output of a real navigation filter,
+/// rather than jumping independently every reading (white noise at 100 Hz
+/// would mostly be averaged away by the vehicle while saturating the
+/// controller).
 #[derive(Debug, Clone)]
 pub struct Sensor {
     pub noise: Noise,
     rng: Rng,
+    /// Unit-variance error states: position xyz, velocity xyz.
+    error: Option<[f64; 6]>,
+    last_t: f64,
 }
 
 impl Sensor {
@@ -50,13 +70,33 @@ impl Sensor {
         Sensor {
             noise,
             rng: Rng::new(seed),
+            error: None,
+            last_t: 0.0,
         }
     }
 
     pub fn measure(&mut self, truth: &Truth) -> Measurement {
-        let (sp, sv) = (self.noise.pos_sigma, self.noise.vel_sigma);
-        let position = truth.position.map(|x| x + sp * self.rng.gaussian());
-        let velocity = truth.velocity.map(|x| x + sv * self.rng.gaussian());
+        let e = match self.error {
+            // First reading: start from the stationary distribution.
+            None => [(); 6].map(|_| self.rng.gaussian()),
+            Some(mut e) => {
+                let dt = (truth.t - self.last_t).max(0.0);
+                if dt > 0.0 {
+                    let phi = (-dt / CORRELATION_TIME).exp();
+                    let kick = (1.0 - phi * phi).sqrt();
+                    for x in &mut e {
+                        *x = phi * *x + kick * self.rng.gaussian();
+                    }
+                }
+                e
+            }
+        };
+        self.error = Some(e);
+        self.last_t = truth.t;
+        let near = range_scale(truth.position[2]);
+        let (sp, sv) = (near * self.noise.pos_sigma, near * self.noise.vel_sigma);
+        let position = [0, 1, 2].map(|i| truth.position[i] + sp * e[i]);
+        let velocity = [0, 1, 2].map(|i| truth.velocity[i] + sv * e[3 + i]);
         Measurement {
             t: truth.t,
             position,
@@ -91,17 +131,76 @@ mod tests {
         );
     }
 
+    fn at(t: f64) -> Truth {
+        Truth { t, ..truth() }
+    }
+
     #[test]
     fn noise_mean_and_sigma() {
+        // Readings 10 s apart (5 time constants) are nearly independent.
         let mut s = Sensor::new(Noise::HIGH, 9);
         let n = 100_000;
         let errs: Vec<f64> = (0..n)
-            .map(|_| s.measure(&truth()).position[0] - 100.0)
+            .map(|i| s.measure(&at(10.0 * i as f64)).position[0] - 100.0)
             .collect();
         let mean = errs.iter().sum::<f64>() / n as f64;
         let sigma = (errs.iter().map(|e| (e - mean).powi(2)).sum::<f64>() / n as f64).sqrt();
         assert!(mean.abs() < 0.05 * 8.0, "mean {mean}");
         assert!((sigma / 8.0 - 1.0).abs() < 0.02, "sigma {sigma}");
+    }
+
+    #[test]
+    fn error_drifts_slowly() {
+        // Gauss–Markov: over 10 ms the error changes by σ·√(1 − φ²) ≈ 0.1σ.
+        let mut s = Sensor::new(Noise::HIGH, 2);
+        let mut steps = Vec::new();
+        let mut prev = s.measure(&at(0.0)).position[0];
+        for i in 1..=20_000 {
+            let e = s.measure(&at(0.01 * i as f64)).position[0];
+            steps.push(e - prev);
+            prev = e;
+        }
+        let rms = (steps.iter().map(|d| d * d).sum::<f64>() / steps.len() as f64).sqrt();
+        let expected = 8.0 * (1.0 - (-2.0 * 0.01 / CORRELATION_TIME).exp()).sqrt();
+        assert!(
+            (rms / expected - 1.0).abs() < 0.05,
+            "rms step {rms} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn error_shrinks_near_the_ground() {
+        // Landing radar: error proportional to range below 200 m, floor 10 %.
+        let low = |z: f64| Truth {
+            position: [0.0, 0.0, z],
+            ..at(5.0)
+        };
+        for (z, scale) in [
+            (1000.0, 1.0),
+            (200.0, 1.0),
+            (100.0, 0.5),
+            (5.0, 0.1),
+            (0.0, 0.1),
+        ] {
+            let mut a = Sensor::new(Noise::HIGH, 11);
+            let mut b = Sensor::new(Noise::HIGH, 11);
+            let vx = truth().velocity[0];
+            let ea = a.measure(&low(z)).velocity[0] - vx;
+            let eb = b.measure(&low(1000.0)).velocity[0] - vx;
+            assert!(
+                (ea - scale * eb).abs() < 1e-12,
+                "z {z}: {ea} vs {}",
+                scale * eb
+            );
+        }
+    }
+
+    #[test]
+    fn same_time_same_reading() {
+        let mut s = Sensor::new(Noise::HIGH, 4);
+        let a = s.measure(&at(1.0));
+        let b = s.measure(&at(1.0));
+        assert_eq!(a, b, "guidance and controller see one navigation solution");
     }
 
     #[test]
