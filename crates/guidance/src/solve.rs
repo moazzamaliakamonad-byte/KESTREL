@@ -25,13 +25,16 @@ const MAX_REFINEMENTS: usize = 30;
 /// the fuel-optimal landing over all times needs more propellant than the
 /// tanks hold, no landing time works.
 pub fn solve(problem: &LandingProblem) -> Result<Trajectory, GuidanceError> {
-    problem.validate()?;
+    solve_counted(problem).0
+}
+
+/// The range of landing times worth trying, s: no sooner than the momentum
+/// allows at full thrust, and before full-thrust burn-out (where the
+/// log-mass reference is undefined).
+pub(crate) fn landing_time_bounds(problem: &LandingProblem) -> Result<(f64, f64), GuidanceError> {
     let veh = &problem.vehicle;
     let [vx, vy, vz] = problem.velocity;
     let speed = vx.hypot(vy).hypot(vz);
-
-    // Can't stop sooner than the momentum allows at full thrust; must land
-    // before full-thrust burn-out, where the log-mass reference is undefined.
     let burn_out = veh.wet_mass / (veh.alpha() * veh.max_thrust);
     let t_max = 0.999 * burn_out;
     let t_min_textbook = veh.dry_mass * speed / veh.max_thrust;
@@ -40,7 +43,20 @@ pub fn solve(problem: &LandingProblem) -> Result<Trajectory, GuidanceError> {
         return Err(GuidanceError::Infeasible);
     }
     // A start at rest gives a textbook bound of 0, which is no landing time.
-    let t_min = t_min_textbook.max(1e-3 * t_max);
+    Ok((t_min_textbook.max(1e-3 * t_max), t_max))
+}
+
+/// As [`solve`], also returning how many convex solves it ran.
+pub(crate) fn solve_counted(
+    problem: &LandingProblem,
+) -> (Result<Trajectory, GuidanceError>, usize) {
+    if let Err(e) = problem.validate() {
+        return (Err(e), 0);
+    }
+    let (t_min, t_max) = match landing_time_bounds(problem) {
+        Ok(b) => b,
+        Err(e) => return (Err(e), 0),
+    };
 
     let mut search = Search::new(problem);
     let step = (t_max - t_min) / (GRID_POINTS - 1) as f64;
@@ -80,8 +96,11 @@ pub fn solve(problem: &LandingProblem) -> Result<Trajectory, GuidanceError> {
         }
     }
     // Apply the propellant limit at the best time found.
-    let best_time = search.finish()?.final_time;
-    solve_fixed_time(problem, best_time)
+    let solves = search.solves + 1;
+    let result = search
+        .finish()
+        .and_then(|best| solve_fixed_time(problem, best.final_time));
+    (result, solves)
 }
 
 /// Remembers the best landing seen so far while the search tries times.
@@ -90,6 +109,7 @@ struct Search<'a> {
     problem: &'a LandingProblem,
     best: Option<Trajectory>,
     failure: Option<GuidanceError>,
+    solves: usize,
 }
 
 impl<'a> Search<'a> {
@@ -98,11 +118,13 @@ impl<'a> Search<'a> {
             problem,
             best: None,
             failure: None,
+            solves: 0,
         }
     }
 
     /// Fuel used for a landing at `final_time`, or +∞ if there is none.
     fn fuel_at(&mut self, final_time: f64) -> f64 {
+        self.solves += 1;
         match solve_at(self.problem, final_time, DryMass::Ignore, Target::Pinpoint) {
             Ok(traj) => {
                 let fuel = traj.fuel_used();
