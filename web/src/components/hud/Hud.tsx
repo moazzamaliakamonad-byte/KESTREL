@@ -66,8 +66,8 @@ function OutcomeCard() {
   const phase = useApp((st) => st.phase);
   const outcome = useApp((st) => st.flight?.outcome ?? null);
   if (phase !== "touchdown" || !outcome) return null;
-  const { replans, solveMs } = solveStats();
-  const sorted = [...solveMs].sort((a, b) => a - b);
+  const { replans, allMs } = solveStats();
+  const sorted = [...allMs].sort((a, b) => a - b);
   const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
   return (
     <section className={`${s.card} ${s.glass}`} aria-label="Touchdown summary">

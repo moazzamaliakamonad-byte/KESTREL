@@ -33,6 +33,8 @@ let wasm: Promise<unknown> | null = null;
 let flight: Flight | null = null;
 let client: SolverClient | null = null;
 const mpc = createMpc();
+/** Every re-plan time this flight, ms (for the summary and measurements). */
+let allMs: number[] = [];
 
 /** Load the main-thread copy of the WebAssembly module (once). */
 export function loadFlightWasm(): Promise<unknown> {
@@ -48,9 +50,9 @@ export function currentFlight(): Flight | null {
   return flight;
 }
 
-/** Re-plans received this flight and the latest solve times (ms). */
+/** Re-plans received this flight, the latest solve times and all of them (ms). */
 export function solveStats() {
-  return { replans: mpc.replans, solveMs: mpc.solveMs };
+  return { replans: mpc.replans, solveMs: mpc.solveMs, allMs };
 }
 
 /** Start a flight; false if the configuration was rejected. */
@@ -64,6 +66,7 @@ export function stopFlight() {
   flight?.free();
   flight = null;
   mpc.reset();
+  allMs = [];
   live.trail = [];
   live.snapshot = null;
 }
@@ -88,6 +91,7 @@ export function frame(dt: number): Snapshot | null {
     client.replan(request).then(({ response, ms }) => {
       // A reply for a flight that has since ended or been replaced is dropped.
       if (!mpc.received(epoch, ms) || flight !== f) return;
+      allMs.push(ms);
       f.apply_replan(JSON.stringify(response), t);
       const trajectory = JSON.parse(f.plan_json()) as Trajectory | null;
       const ok = (response as { ok?: boolean }).ok === true;

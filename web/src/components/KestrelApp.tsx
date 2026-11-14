@@ -6,6 +6,7 @@ import { useSolver } from "@/hooks/useSolver";
 import { useApp } from "@/lib/store";
 import { landOrReset } from "@/lib/landOrReset";
 import { live } from "@/lib/live";
+import { solveStats } from "@/lib/flightRuntime";
 import { Fallback, SceneErrorBoundary } from "./hud/Fallback";
 import { Hud } from "./hud/Hud";
 import { Booster } from "./scene/Booster";
@@ -38,7 +39,7 @@ export default function KestrelApp() {
     };
     window.addEventListener("keydown", onKey);
     // Read-only handle for end-to-end tests and debugging.
-    (window as unknown as { __kestrel: unknown }).__kestrel = { getState: useApp.getState, live };
+    (window as unknown as { __kestrel: unknown }).__kestrel = { getState: useApp.getState, live, solveStats };
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
