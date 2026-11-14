@@ -2,8 +2,11 @@
 
 **Rocket landing you can break.** The real class of algorithm used for
 propulsive rocket landing, running live in a browser tab. Drag the booster
-anywhere and watch it compute a new fuel-optimal trajectory in real time;
-wind, engine failures and mid-flight interference come next (M2).
+anywhere and watch it compute a new fuel-optimal trajectory in real time.
+Then press Land and break it: gusts, engine failures, thrust lag, sensor noise,
+or grab the booster mid-flight. Guidance re-plans several times a second from
+noisy sensor readings, and when no pinpoint landing exists any more it says so
+and lands as close as it can.
 
 ![Kestrel demo: dragging the booster re-plans the landing live, then it flies the plan to touchdown](docs/img/m1-demo.gif)
 
@@ -26,7 +29,9 @@ cd web && npm install && npm run dev      # → http://localhost:3000
 
 `npm run dev` compiles the Rust solver to WebAssembly first, then serves the
 page. Drag the ring to move the booster, drag the orange dot to set its
-velocity, press **Space** to land.
+velocity, press **Space** to land. During the flight use the **Break it**
+panel (left), or drag the ring on the booster; the **Guidance** panel (right)
+shows the constraint margins and how long each re-plan took.
 
 ## Status
 
@@ -36,7 +41,12 @@ velocity, press **Space** to land.
   Worker, re-plans continuously while you drag (one solve at a time, always
   for the newest position), and the landing plays back in a
   procedural 3D Mars scene with live telemetry.
-- **Next, M2:** closed loop with disturbances and the "break it" controls.
+- **M2 done:** closed loop. A simulator (Rust, separate from guidance) flies
+  the vehicle; guidance sees only noisy sensor readings and re-plans every
+  0.25 s of sim time (**30–43 ms median per re-plan** in Chromium, measured);
+  a tracking controller flies the latest plan between solves. Disturbances
+  from the "Break it" panel; a closest-landing fallback when the pad is out
+  of reach.
 
 Measured numbers and every known approximation:
 [LIMITATIONS.md](LIMITATIONS.md). Plan: [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -53,11 +63,14 @@ Measured numbers and every known approximation:
    failed (see [LIMITATIONS.md](LIMITATIONS.md)).
 3. **Solver.** A pure-Rust conic solver (Clarabel), compiled to WebAssembly
    and run in a Web Worker so the page never freezes.
-4. **Front end.** Next.js (static export) + React Three Fiber. The playback
-   uses the plan's exact constant-acceleration segments, so the animation is
-   the plan, not an approximation of it.
-5. **Next: closed loop.** Re-solve from the current (noisy) state several
-   times per second (model predictive control) while you interfere.
+4. **Closed loop.** A simulator owns the true state; guidance only gets
+   sensor readings. Every 0.25 s of sim time it re-plans from the latest
+   reading (model predictive control), warm-started from the previous plan's
+   landing time (3 small solves instead of ~25). Between re-plans a tracking
+   controller flies the plan. If no pinpoint landing exists, guidance solves
+   a second problem: land at rest as close to the pad as possible.
+5. **Front end.** Next.js (static export) + React Three Fiber. The simulator
+   runs on the page's main thread (WebAssembly), guidance in a Web Worker.
 
 Longer version: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -74,7 +87,7 @@ python scripts/plot_trajectory.py target/landing.csv target/landing.png   # need
 ## Tests
 
 ```sh
-cargo test                      # Rust: guidance + WASM bridge
+cargo test                      # Rust: guidance, simulator, WASM bridge, closed-loop scenarios
 cd web && npm test              # TypeScript unit tests (Vitest)
 cd web && npm run e2e           # opt-in: real-browser end-to-end tests (Playwright)
 ```
