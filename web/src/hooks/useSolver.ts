@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { createScheduler, startChangedWhileEditing } from "@/lib/scheduler";
+import { setSolverClient } from "@/lib/flightRuntime";
 import { createSolverClient } from "@/lib/solverClient";
 import { useApp } from "@/lib/store";
 
@@ -37,6 +38,8 @@ export function useSolver() {
       fail,
     );
 
+    setSolverClient(client);
+
     const scheduler = createScheduler((start) => {
       const vehicle = useApp.getState().vehicle;
       const id = client.request({ ...start, vehicle: vehicle ?? undefined });
@@ -55,6 +58,7 @@ export function useSolver() {
 
     return () => {
       unsubscribe();
+      setSolverClient(null);
       worker.terminate();
     };
   }, []);

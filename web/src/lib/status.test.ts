@@ -55,10 +55,31 @@ describe("status line", () => {
     expect(st.text).toBe("Ready: press Land");
   });
 
-  it("reports landing and touchdown", () => {
-    let s = reduce(editing(ok), { type: "land" });
-    expect(statusText(s, 0).text).toBe("Landing");
-    s = reduce(s, { type: "tick", dt: 1e6 });
-    expect(statusText(s, 0).text).toBe("Touchdown");
+  it("reports what guidance is doing in flight", () => {
+    const flying = reduce(editing(ok), { type: "land" });
+    const say = (patch: object) => statusText(reduce(flying, { type: "flightUpdate", patch }), 0);
+    expect(statusText(flying, 0).text).toBe("Computing the first plan…");
+    expect(say({ mode: "pinpoint" })).toEqual({ tone: "info", text: "Guiding to the pad" });
+    expect(say({ mode: "closest", miss: 247.4 })).toEqual({
+      tone: "warn",
+      text: "No pinpoint landing from here: guiding to the closest point, ≈247 m from the pad",
+    });
+    expect(say({ mode: "closest", miss: 0.3 }).text).toBe("Outside the glide cone: landing without it");
+    expect(say({ mode: "brake" })).toEqual({ tone: "error", text: "No safe landing exists: braking" });
+  });
+
+  it("reports how the flight ended", () => {
+    const flying = reduce(editing(ok), { type: "land" });
+    const end = (o: object) =>
+      statusText(
+        reduce(flying, {
+          type: "touchdown",
+          outcome: { landed: true, speed: 0.5, vertical: 0.5, horizontal: 0, miss: 0.4, fuel_used: 230, ...o },
+        }),
+        0,
+      );
+    expect(end({})).toEqual({ tone: "ok", text: "Landed on the pad" });
+    expect(end({ miss: 247 }).text).toBe("Landed 247 m from the pad");
+    expect(end({ landed: false, speed: 38.2 })).toEqual({ tone: "error", text: "Crashed at 38 m/s" });
   });
 });

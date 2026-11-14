@@ -265,6 +265,9 @@
   color: #7dff9a;
   margin-bottom: 14px;
 }
+.cardTitle.crashed {
+  color: var(--danger);
+}
 .cardGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
