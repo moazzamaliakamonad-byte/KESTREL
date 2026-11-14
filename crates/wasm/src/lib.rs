@@ -3,6 +3,8 @@
 //! `{"ok": false, "error": {"kind": ..., "message": ...}}`.
 
 mod dto;
+pub mod flight;
+mod flight_js;
 
 use dto::{RequestDto, TrajectoryDto, VehicleDto};
 use guidance::{GuidanceError, LandingProblem, Vehicle, solve};
@@ -50,7 +52,10 @@ fn respond(req: RequestDto) -> Value {
     if steps > MAX_STEPS {
         return failure("BadRequest", format!("steps must be at most {MAX_STEPS}"));
     }
-    let vehicle = req.vehicle.map(Vehicle::from).unwrap_or_else(Vehicle::example_mars);
+    let vehicle = req
+        .vehicle
+        .map(Vehicle::from)
+        .unwrap_or_else(Vehicle::example_mars);
     let problem = LandingProblem {
         vehicle,
         position: req.position,
@@ -67,7 +72,7 @@ fn respond(req: RequestDto) -> Value {
     }
 }
 
-fn error_kind(e: &GuidanceError) -> &'static str {
+pub(crate) fn error_kind(e: &GuidanceError) -> &'static str {
     match e {
         GuidanceError::InvalidParams(_) => "InvalidParams",
         GuidanceError::InvalidProblem(_) => "InvalidProblem",
@@ -77,7 +82,7 @@ fn error_kind(e: &GuidanceError) -> &'static str {
     }
 }
 
-fn failure(kind: &str, message: String) -> Value {
+pub(crate) fn failure(kind: &str, message: String) -> Value {
     json!({ "ok": false, "error": { "kind": kind, "message": message } })
 }
 

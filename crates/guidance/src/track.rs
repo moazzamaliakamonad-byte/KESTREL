@@ -95,21 +95,12 @@ pub fn command(
     clamp_magnitude(clamp_tilt(thrust, env.max_tilt), env)
 }
 
-/// Full thrust against the velocity (within the tilt cone): the best a
-/// vehicle with no landing plan can do.
-pub fn brake(velocity: Vec3, env: &Envelope) -> Vec3 {
-    let against = velocity.map(|c| -c);
-    let dir = if norm(against) > 1e-9 {
-        clamp_tilt(against, env.max_tilt)
-    } else {
-        [0.0, 0.0, 1.0]
-    };
-    let dir = if norm(dir) > 1e-12 {
-        dir
-    } else {
-        [0.0, 0.0, 1.0]
-    };
-    dir.map(|c| c / norm(dir) * env.max_thrust)
+/// Full thrust straight up: what a descending vehicle with no landing plan
+/// can do. Vertical speed at impact is what wrecks it, so all the thrust
+/// goes there; tilting against sideways drift (tried first) cost almost all
+/// of the vertical braking. Callers use it only while descending.
+pub fn brake(_velocity: Vec3, env: &Envelope) -> Vec3 {
+    [0.0, 0.0, env.max_thrust]
 }
 
 /// Nearest vector inside the cone of half-angle `max_tilt` around +z.
@@ -276,13 +267,11 @@ mod tests {
     }
 
     #[test]
-    fn brake_opposes_velocity() {
+    fn brake_pushes_straight_up_at_full_thrust() {
+        // Vertical speed is what wrecks a vehicle: spend all thrust on it.
         let e = env();
-        let t = brake([0.0, 0.0, -50.0], &e);
-        assert!((t[2] - e.max_thrust).abs() < 1e-6);
-        let t = brake([40.0, 0.0, -10.0], &e);
-        assert!(t[0] < 0.0 && t[2] > 0.0);
-        assert!(tilt(t) <= e.max_tilt + 1e-9);
-        assert!((norm(t) - e.max_thrust).abs() < 1e-6);
+        for v in [[0.0, 0.0, -50.0], [40.0, 0.0, -10.0]] {
+            assert_eq!(brake(v, &e), [0.0, 0.0, e.max_thrust]);
+        }
     }
 }

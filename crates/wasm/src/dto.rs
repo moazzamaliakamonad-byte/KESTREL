@@ -57,7 +57,7 @@ pub struct RequestDto {
     pub vehicle: Option<VehicleDto>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrajectoryDto {
     pub t: Vec<f64>,
     pub position: Vec<Vec3>,
@@ -79,6 +79,19 @@ impl From<Trajectory> for TrajectoryDto {
             thrust: t.thrust,
             final_time: t.final_time,
             fuel_used,
+        }
+    }
+}
+
+impl From<TrajectoryDto> for Trajectory {
+    fn from(d: TrajectoryDto) -> Self {
+        Trajectory {
+            t: d.t,
+            position: d.position,
+            velocity: d.velocity,
+            mass: d.mass,
+            thrust: d.thrust,
+            final_time: d.final_time,
         }
     }
 }
