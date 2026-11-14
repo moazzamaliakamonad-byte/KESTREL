@@ -35,13 +35,18 @@ function feasiblePoints(response: PlanResponse & { ok: true }) {
 export function PlannedPath() {
   const phase = useApp((s) => s.phase);
   const preview = useApp((s) => s.preview);
-  const flight = useApp((s) => s.flight);
+  const flightPlan = useApp((s) => s.flight?.plan ?? null);
+  const vehicle = useApp((s) => s.vehicle);
   // Dim while a newer plan is coming, including right after the start moved.
   const pending = useApp((s) => s.requestedAt !== null || !isPreviewCurrent(s));
   const start = useApp((s) => s.start);
   const danger = useRef<THREE.Material & { opacity: number }>(null);
 
-  const response = phase === "editing" ? preview?.response : flight?.response;
+  const flown: PlanResponse | null = useMemo(
+    () => (flightPlan && vehicle ? { ok: true, trajectory: flightPlan.trajectory, vehicle } : null),
+    [flightPlan, vehicle],
+  );
+  const response = phase === "editing" ? preview?.response : flown;
   const feasible = useMemo(
     () => (response && response.ok ? feasiblePoints(response) : null),
     [response],

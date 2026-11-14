@@ -41,12 +41,16 @@ Goal: one page that solves and animates one landing.
 
 Goal: the demo that spreads.
 
-- [ ] Simulator separated from guidance; guidance sees only noisy state
-- [ ] Re-solve a few times per second (MPC); tracking controller between solves
-- [ ] Controls: drag booster, wind gusts, engine failure, thrust lag, sensor noise
-- [ ] Infeasible case: fall back to minimum-landing-error problem and say so on screen
-- [ ] Panels: fuel, thrust, constraint margins, solve time
-- [ ] `learn/` chapter for M2
+- [x] Simulator separated from guidance; guidance sees only noisy state
+      (`kestrel-sim` crate, D-012)
+- [x] Re-solve a few times per second (MPC); tracking controller between solves
+      (every 0.25 s of sim time, warm-started, D-013)
+- [x] Controls: drag booster, wind gusts, engine failure, thrust lag, sensor noise
+      (gusts are a sideways force, not an atmosphere model; see LIMITATIONS.md)
+- [x] Infeasible case: fall back to minimum-landing-error problem and say so on screen
+      (closest landing, D-014; braking when even that is impossible)
+- [x] Panels: fuel, thrust, constraint margins, solve time
+- [x] `learn/` chapter for M2 (local only)
 
 ## M3 — 6-DoF and flight-style solver
 
@@ -63,3 +67,6 @@ Goal: the demo that spreads.
   qualitative match with Malyuta et al. eq. 108 (see LIMITATIONS.md).
 - 2026-11-12 — M1 done (except a Firefox measurement): browser page with the
   solver in WebAssembly, live re-planning while dragging, 3D playback, HUD.
+- 2026-11-14 — M2 done: closed loop with a separate simulator, noisy sensing,
+  warm-started re-planning, tracking controller, closest-landing fallback,
+  "break it" controls and live margins.

@@ -6,10 +6,13 @@
 
 pub mod params;
 pub mod problem;
+pub mod replan;
 pub mod scaling;
 mod socp;
 mod solve;
+pub mod track;
 
 pub use params::{ParamError, Vec3, Vehicle};
 pub use problem::{GuidanceError, LandingProblem, Trajectory};
-pub use solve::{solve, solve_fixed_time};
+pub use replan::{Hint, Mode, Replan, replan};
+pub use solve::{solve, solve_closest, solve_fixed_time};

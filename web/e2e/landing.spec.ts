@@ -27,9 +27,37 @@ test("loads, plans in the browser and lands", async ({ page }) => {
   await expect(status(page)).toHaveText("Ready: press Land", { timeout: 60_000 });
   await page.getByRole("button", { name: "×4" }).click();
   await page.keyboard.press("Space");
-  await expect(status(page)).toHaveText("Landing");
-  await expect(status(page)).toHaveText("Touchdown", { timeout: 100_000 });
-  await expect(page.getByLabel("Touchdown summary")).toContainText("0.0 m/s");
+  await expect(status(page)).toHaveText("Guiding to the pad", { timeout: 30_000 });
+  await expect(page.getByTestId("mode")).toHaveText("Pinpoint");
+  await expect(status(page)).toHaveText("Landed on the pad", { timeout: 100_000 });
+  await expect(page.getByLabel("Touchdown summary")).toContainText("Landed");
+  expect(errors).toEqual([]);
+});
+
+test("a gust mid-flight is absorbed and it still lands", async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto("/");
+  await expect(status(page)).toHaveText("Ready: press Land", { timeout: 60_000 });
+  await page.getByRole("button", { name: "×4" }).click();
+  await page.keyboard.press("Space");
+  await expect(status(page)).toHaveText("Guiding to the pad", { timeout: 30_000 });
+  await page.getByRole("button", { name: "Gust →" }).click();
+  await page.getByRole("button", { name: "Gust ←" }).click();
+  await expect(status(page)).toHaveText(/^Landed/, { timeout: 100_000 });
+  expect(errors).toEqual([]);
+});
+
+test("reset mid-flight goes back to editing cleanly", async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.goto("/");
+  await expect(status(page)).toHaveText("Ready: press Land", { timeout: 60_000 });
+  await page.keyboard.press("Space");
+  await expect(status(page)).toHaveText("Guiding to the pad", { timeout: 30_000 });
+  await page.getByRole("button", { name: "Reset" }).click();
+  await expect(status(page)).toHaveText("Ready: press Land", { timeout: 60_000 });
+  // A second flight starts from scratch.
+  await page.keyboard.press("Space");
+  await expect(status(page)).toHaveText("Guiding to the pad", { timeout: 30_000 });
   expect(errors).toEqual([]);
 });
 

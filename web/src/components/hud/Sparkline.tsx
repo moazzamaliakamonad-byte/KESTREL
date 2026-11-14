@@ -12,6 +12,8 @@ const N = 160;
 
 interface Props {
   plan: PlanSuccess | null;
+  /** Sim time at which the plan starts (the cursor is drawn at now − t0). */
+  t0?: number;
   /** Value plotted at time t. */
   value: (plan: PlanSuccess, t: number) => number;
   /** Horizontal guide lines (e.g. thrust limits), with labels. */
@@ -23,7 +25,7 @@ interface Props {
 }
 
 /** A small chart of one quantity over the planned landing, with a moving cursor. */
-export function Sparkline({ plan, value, guides, range, color, label }: Props) {
+export function Sparkline({ plan, t0 = 0, value, guides, range, color, label }: Props) {
   const base = useRef<HTMLCanvasElement>(null);
   const cursor = useRef<HTMLCanvasElement>(null);
 
@@ -82,7 +84,7 @@ export function Sparkline({ plan, value, guides, range, color, label }: Props) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     if (!plan || !live.sample) return;
-    const x = (W * live.sample.t) / plan.trajectory.final_time;
+    const x = (W * Math.max(live.sample.t - t0, 0)) / plan.trajectory.final_time;
     ctx.fillStyle = "rgba(255,255,255,0.85)";
     ctx.fillRect(x - 0.75, 0, 1.5, H);
   });

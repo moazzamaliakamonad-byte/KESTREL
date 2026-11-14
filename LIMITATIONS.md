@@ -11,17 +11,45 @@ approximate. Update it whenever a milestone lands.
 - **No real vehicle data.** Vehicle parameters are illustrative, loosely in the
   range of published examples, not taken from any real booster.
 
-## Current state (M1 done)
+## Current state (M2 done)
 
-- The browser page **plays back the plan**; there is no physics simulator,
-  no disturbances and no re-planning during flight yet (M2). What you see
-  flying is exactly the solver's plan.
+- **The flight is simulated.** A point-mass simulator (RK4,
+  10 ms) flies the vehicle; guidance sees only sensor readings and re-plans
+  every 0.25 s of sim time; a PD tracking controller flies the latest plan in
+  between. What you see is the simulator's truth, not the plan.
+- **Gusts are illustrative.** A gust is a sideways force of 15 % of the
+  healthy maximum thrust (≈2 kN) for 2 s, not an atmosphere or wind model
+  (Mars air is far too thin to push this hard).
+- **Engine failures are known to guidance instantly** (perfect fault
+  detection): the next re-plan uses the reduced limits. Each failure scales
+  both the minimum and maximum thrust by (6 − k)/6; at most three.
+- **Sensor model.** Position and velocity errors are first-order
+  Gauss–Markov per axis (correlation time 2 s; σ low 2 m / 0.2 m/s, high
+  8 m / 0.8 m/s), shrinking linearly below 200 m to 10 % (a stand-in for a
+  landing radar). Mass and time are exact. There is no state estimator; the
+  controller and guidance use the readings directly.
+- **Thrust lag** is a first-order lag on the thrust vector (0, 0.3 or 1 s);
+  guidance does not model it.
+- **Guidance keeps margins** (D-015): it plans to a gate 15 m above the pad
+  (a fixed descent law lands from there), with 85 % of the available thrust
+  and a propellant reserve. Nominal flights therefore burn more propellant
+  than the open-loop optimum (229 kg vs 194 kg for the example start).
+- **"Landed"** means touchdown at ≤ 2 m/s vertical and ≤ 1 m/s horizontal;
+  anything faster is reported as a crash. There is no leg, tip-over or
+  attitude model.
+- **Some disturbance combinations crash**, by physics or by limits of this
+  guidance: two engines out from the example start is unlandable (about
+  1 m/s² of braking where ~2.8 km would be needed); high noise + 1 s lag +
+  an engine failure was observed to end in a crash in the browser. Guidance
+  then says so ("braking") rather than pretending.
+- **Mid-flight grab** freezes sim time while held and teleports the vehicle
+  (velocity unchanged).
 - The start state is edited in the vertical x–z plane only (y = 0).
 - **Displayed attitude is cosmetic.** A 3-DoF plan has no vehicle attitude;
   the booster is drawn pointing along the thrust, eased to upright over the
   last 40 m. The plan itself may end with thrust tilted up to the tilt limit
   (e.g. ~44° in the example). A real "touch down upright" constraint is
-  future work (M2/M3).
+  future work (M3).
 - The booster model (12 m × 3.7 m) is illustrative, not to scale with the
   1.9 t example vehicle's mass, and not any real vehicle.
 - Tested in Chromium 158 (Playwright) only. Other browsers are untested.
@@ -72,8 +100,8 @@ These are deliberate and will be revisited at the milestone noted.
 | 3-DoF point-mass dynamics (no attitude, no rotation) | M3 |
 | Flat, non-rotating ground; constant gravity | indefinitely |
 | No aerodynamic forces | M3 |
-| Thrust direction changes instantly | M2 (thrust lag) / M3 |
-| Perfect state knowledge | M2 (sensor noise) |
+| Thrust direction follows a first-order lag (no gimbal or attitude dynamics) | M3 |
+| No state estimator (raw sensor readings) | not planned |
 | No fuel slosh | stretch goal |
 
 ## Measured results
@@ -126,6 +154,54 @@ So in a browser with a GPU the solver runs at about native speed (M0: 226–259
 ms). On machines without GPU acceleration, rendering competes for the CPU and
 a re-plan can take ~2 s. The demo GIF was recorded while capturing frames,
 which also slows solving; its on-screen solve times are not representative.
+
+### Closed loop (M2)
+
+**Re-plan time in the browser.** Same machine, mains power, Chromium 158
+with the real GPU (`PW_GPU=1 npx playwright test --grep "re-plan time
+during"`): one nominal landing from the example start at ×1, every re-plan
+timed in the worker (`performance.now()` around `replan`).
+
+| Run | Re-plans | Median | p90 | Max |
+| --- | --- | --- | --- | --- |
+| 1 | 139 | 30 ms | 47 ms | 288 ms |
+| 2* | 139 | 35 ms | 46 ms | 308 ms |
+| 3* | 138 | 43 ms | 57 ms | 296 ms |
+
+\* Runs 2 and 3 overlapped with a native Monte-Carlo run using the CPU.
+The maximum is the first plan (a full landing-time search); warm re-plans are
+three fixed-time solves. In the same session a full search for the editing
+preview took a median of 356 ms (10 solves, 252–571 ms), slower than the M1
+measurement (244 ms), with the dev server and builds running alongside.
+
+**Native closed-loop scenarios** (`cargo test --release -p kestrel-wasm
+--test closed_loop -- --nocapture`; seeded, so these numbers repeat exactly;
+the page's loop with solve latency modelled as one 0.25 s period).
+
+| Scenario | Outcome | Touchdown speed | From pad | Propellant | Re-plans |
+| --- | --- | --- | --- | --- | --- |
+| Nominal (example start) | landed | 0.55 m/s | 0.0 m | 228.6 kg | 139 |
+| High noise + 1 s lag (seed 1) | landed | 0.36 m/s | 1.9 m | 291.8 kg | 188 |
+| Gusts → at 5 s, ← at 15 s | landed | 0.55 m/s | 0.0 m | 235.2 kg | 144 |
+| One engine out at 10 s | landed | 0.56 m/s | 0.0 m | 295.9 kg | 191 |
+| Dry mass 1670 kg (pinpoint impossible) | landed, closest mode | 0.55 m/s | 246.6 m | 223.4 kg | 140 |
+
+Unlandable cases (`-- --ignored`), which must crash cleanly:
+
+| Scenario | Outcome | Vertical / horizontal at impact | Propellant |
+| --- | --- | --- | --- |
+| Two engines out at 8 s and 12 s | crash (braking) | 38.6 / 63.2 m/s | 117.1 kg |
+| Three engines out at 1, 1.5, 2 s | crash | 75.3 / 54.4 m/s | 64.6 kg |
+
+**Monte Carlo, high noise** (`cargo test --release -p kestrel-wasm --test
+closed_loop monte_carlo -- --ignored --nocapture`): 50 seeds, nominal start,
+no lag. **50/50 landed**; touchdown speed median 0.58 m/s, max 1.01 m/s;
+distance from the pad median 1.0 m, max 2.9 m. One start, one vehicle and one
+noise level: not a statistical claim about other conditions.
+
+Not measured: noise combined with lag and failures over many seeds; any
+start other than the example; speeds ×2 and ×4, where the worker's solve
+time counts ×2 or ×4 in sim time, so guidance effectively reacts later.
 
 ### Comparison with Malyuta et al. (arXiv:2106.09125, eq. 108, Fig. 21)
 

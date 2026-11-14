@@ -61,8 +61,41 @@ impl LandingProblem {
         }
     }
 
+    /// A problem starting mid-flight with `mass` kg on board. The solver
+    /// treats the start mass as the "wet" mass, so this relabels it; the
+    /// dry mass (empty tanks) is unchanged.
+    pub fn from_state(
+        vehicle: Vehicle,
+        position: Vec3,
+        velocity: Vec3,
+        mass: f64,
+        steps: usize,
+    ) -> LandingProblem {
+        LandingProblem {
+            vehicle: Vehicle {
+                wet_mass: mass,
+                ..vehicle
+            },
+            position,
+            velocity,
+            steps,
+        }
+    }
+
     /// Reject problems that are malformed before trying to solve them.
     pub fn validate(&self) -> Result<(), GuidanceError> {
+        self.validate_state()?;
+        let [x, y, z] = self.position;
+        if z < self.vehicle.glide_slope.tan() * x.hypot(y) {
+            return Err(GuidanceError::InvalidProblem("outside glide slope"));
+        }
+        Ok(())
+    }
+
+    /// As [`LandingProblem::validate`] but without the glide-cone check
+    /// (the closest-landing fallback drops the cone). Still rejects starts
+    /// below the ground.
+    pub fn validate_state(&self) -> Result<(), GuidanceError> {
         self.vehicle
             .validate()
             .map_err(GuidanceError::InvalidParams)?;
@@ -77,9 +110,8 @@ impl LandingProblem {
         if !state_is_finite {
             return Err(GuidanceError::InvalidProblem("state not finite"));
         }
-        let [x, y, z] = self.position;
-        if z < self.vehicle.glide_slope.tan() * x.hypot(y) {
-            return Err(GuidanceError::InvalidProblem("outside glide slope"));
+        if self.position[2] < 0.0 {
+            return Err(GuidanceError::InvalidProblem("below ground"));
         }
         Ok(())
     }
@@ -127,6 +159,19 @@ mod tests {
     }
 
     #[test]
+    fn from_state_relabels_wet_mass() {
+        let v = Vehicle::example_mars();
+        let p =
+            LandingProblem::from_state(v.clone(), [10.0, 0.0, 500.0], [1.0, 0.0, -9.0], 1700.0, 40);
+        assert_eq!(p.vehicle.wet_mass, 1700.0);
+        assert_eq!(p.vehicle.dry_mass, v.dry_mass);
+        assert_eq!(
+            (p.position, p.velocity, p.steps),
+            ([10.0, 0.0, 500.0], [1.0, 0.0, -9.0], 40)
+        );
+    }
+
+    #[test]
     fn rejects_bad_vehicle() {
         let mut p = LandingProblem::example();
         p.vehicle.wet_mass = -5.0;
@@ -149,7 +194,11 @@ mod tests {
         p.position = [0.0, 0.0, -1.0];
         assert_eq!(
             p.validate(),
-            Err(GuidanceError::InvalidProblem("outside glide slope"))
+            Err(GuidanceError::InvalidProblem("below ground"))
+        );
+        assert_eq!(
+            p.validate_state(),
+            Err(GuidanceError::InvalidProblem("below ground"))
         );
     }
 

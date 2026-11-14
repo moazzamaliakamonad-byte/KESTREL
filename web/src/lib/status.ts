@@ -15,6 +15,29 @@ const ERROR_TEXT: Record<ErrorKind, string> = {
   BadRequest: "Bad request",
 };
 
+/** Touchdowns closer than this count as "on the pad", m. */
+export const PAD_RADIUS = 5;
+
+function flightText(s: AppState): { tone: Tone; text: string } {
+  const f = s.flight;
+  switch (f?.mode ?? "none") {
+    case "none":
+      return { tone: "info", text: "Computing the first plan…" };
+    case "pinpoint":
+      return { tone: "info", text: "Guiding to the pad" };
+    case "brake":
+      return { tone: "error", text: "No safe landing exists: braking" };
+    case "closest": {
+      const miss = f?.miss ?? 0;
+      if (miss < 1) return { tone: "warn", text: "Outside the glide cone: landing without it" };
+      return {
+        tone: "warn",
+        text: `No pinpoint landing from here: guiding to the closest point, ≈${Math.round(miss)} m from the pad`,
+      };
+    }
+  }
+}
+
 /** The one-line status shown in the HUD. `now` is `performance.now()`. */
 export function statusText(s: AppState, now: number): { tone: Tone; text: string } {
   switch (s.phase) {
@@ -23,9 +46,14 @@ export function statusText(s: AppState, now: number): { tone: Tone; text: string
     case "failed":
       return { tone: "error", text: s.failure ?? "Something went wrong" };
     case "flying":
-      return { tone: "info", text: "Landing" };
-    case "touchdown":
-      return { tone: "ok", text: "Touchdown" };
+      return flightText(s);
+    case "touchdown": {
+      const o = s.flight?.outcome;
+      if (!o) return { tone: "ok", text: "Touchdown" };
+      if (!o.landed) return { tone: "error", text: `Crashed at ${Math.round(o.speed)} m/s` };
+      if (o.miss < PAD_RADIUS) return { tone: "ok", text: "Landed on the pad" };
+      return { tone: "ok", text: `Landed ${Math.round(o.miss)} m from the pad` };
+    }
     case "editing": {
       if (s.requestedAt !== null) {
         const slow = now - s.requestedAt > SLOW_SOLVE_MS;

@@ -1,7 +1,7 @@
 # Architecture
 
-Status: the `guidance` crate is **built** (M0). Everything else is
-_(planned)_ and is updated to describe what was actually built when it lands.
+Status: M0–M2 are **built**: guidance, simulator, WASM bridge and the
+browser page with the closed loop. M3 (6-DoF) is _(planned)_.
 
 ## Big picture
 
@@ -30,19 +30,19 @@ not because it secretly read the true state.
 | Component | Responsibility | Milestone |
 | --- | --- | --- |
 | `guidance` crate | Build and solve the convex landing problem; return a trajectory | M0 — **built** |
-| `sim` crate | Integrate vehicle dynamics; inject wind, failures, lag, noise | M2 (M1 plays back the plan instead) |
+| `sim` crate | Integrate vehicle dynamics; inject gusts, failures, lag, noise | M2 — **built** |
 | `wasm` crate | JSON-in/JSON-out bridge exposing guidance to JavaScript | M1 — **built** |
 | `web/` | Page, 3D view, controls, panels | M1 — **built** |
 
-Proposed workspace layout (create only when the milestone needs it):
+Workspace layout:
 
 ```text
 kestrel/
 ├─ crates/
-│  ├─ guidance/   # M0
-│  ├─ sim/        # M1/M2
-│  └─ wasm/       # M1
-├─ web/           # M1
+│  ├─ guidance/   # M0 (+ track, replan, closest target in M2)
+│  ├─ sim/        # M2
+│  └─ wasm/       # M1 (+ Flight, replan in M2)
+├─ web/           # M1, M2
 └─ docs/
 ```
 
@@ -109,9 +109,10 @@ web/src/components/hud/             DOM overlay: brand, status, telemetry, chart
                                     touchdown card, failure fallback
 ```
 
-Per frame: `FlightLoop` advances the flight clock (reducer `tick`) and writes
-`live.sample` (the plan sampled at `t`, or the start state while editing);
-the booster, plume, dust, cameras and telemetry read it.
+Per frame: `FlightLoop` writes `live.sample` (the start state while editing;
+since M2 the simulated vehicle during a flight, see below); the booster,
+plume, dust, cameras and telemetry read it. (In M1 it replayed the plan;
+`playback.ts` is still used to draw plans and charts.)
 
 Per edit: dragging dispatches `setStart` → `useSolver` debounces 120 ms →
 worker → response accepted only if it answers the newest request → preview
@@ -123,16 +124,55 @@ Tests: Vitest unit tests in `web/src/lib/*.test.ts` (incl. a Rust-generated
 fixture proving playback reproduces the solver's nodes); opt-in Playwright
 end-to-end tests in `web/e2e/`.
 
-## Data flow per guidance cycle with a closed loop _(planned, M2)_
+## The closed loop (built, M2)
 
-1. Read noisy state: position `r`, velocity `v`, mass `m`.
-2. Solve (warm-started landing time; a full search is ~250 ms, too slow per frame).
-3. On infeasibility, solve the minimum-landing-error problem instead.
-4. Hand trajectory to controller and UI.
+Spec: `docs/superpowers/specs/2026-11-14-m2-closed-loop-design.md`.
+
+```text
+crates/sim       truth only, no guidance dependency
+  sim.rs     point mass r, v, m; RK4 in 10 ms substeps; gusts; touchdown latch
+  engine.rs  six engines: first-order lag, failures scale both limits by (6−k)/6
+  sensor.rs  Gauss–Markov navigation error (τ 2 s), range-scaled below 200 m; seeded
+  rng.rs     SplitMix64 + Box–Muller
+crates/guidance  (additions)
+  track.rs   a = u_plan(τ) + Kp(r_plan − r̂) + Kd(v_plan − v̂), clamped to tilt cone and
+             thrust band; descent law after the plan; brake = full thrust up
+  replan.rs  warm start (3 solves around the hint) → full search → closest landing
+  socp.rs    Target::Closest: free horizontal end point, no glide cone, min 10·miss − z_N
+crates/wasm  (additions)
+  flight.rs     Flight = Sim + Sensor + controller + latest plan; problem() adds the
+                terminal gate (15 m) and propellant reserve; plan() the 85 % thrust margin
+  flight_js.rs  JS class `Flight` (main thread) and `replan(json)` (worker)
+  tests/closed_loop.rs  the page's loop, natively, with solve latency = one period
+web/src/lib
+  flightRuntime.ts  owns the Flight; steps it per frame; schedules re-plans
+  mpc.ts            0.25 s sim-time period, one solve in flight, epochs drop stale replies
+  flightSnapshot.ts snapshot → scene sample and (rare) store patches
+  margins.ts        glide-slope / tilt margins, thrust share
+web/src/components  hud/BreakIt, hud/Margins, hud/ModeBanner, scene/Trail, scene/GrabHandle
+```
+
+Per frame (`FlightLoop` → `flightRuntime.frame`):
+
+1. `flight.step(min(dt, 0.1 s) × speed)`: every 10 ms the sensor reads the
+   truth (with error), the controller computes thrust from that reading and
+   the plan, the engine lags toward it, the simulator integrates. Held still
+   until the first plan arrives, and while the visitor grabs the booster.
+2. If no solve is in flight, 0.25 s of sim time has passed and
+   `flight.wants_replan()` (plan > 2 s left, sensed altitude ≥ 25 m):
+   `flight.measure_request()` → worker `replan` → `flight.apply_replan(answer,
+   t_measured)`. An `Infeasible` answer switches to braking; other failures
+   keep the current plan.
+3. `flight.snapshot()` → `live` (scene, telemetry, margins); mode, engines,
+   miss and outcome go to the store only when they change.
+
+Per re-plan (worker, `guidance::replan` via `flight::plan`): margined problem
+(85 % thrust) first; three fixed-time solves around the previous landing time;
+else the full search; else (or if outside the glide cone) the closest landing;
+retried at full thrust if that is what it takes.
 
 ## Open questions
 
 - Firefox solve time (Chromium measured: ~244 ms with a GPU).
-- Warm-starting the landing-time search for M2's re-planning several times a
-  second.
-- Which 3D library for the front end? Decide in M1.
+- Lossless convexification is not guaranteed when the ground constraint is
+  active (closest landings near the ground); such landing times are skipped.

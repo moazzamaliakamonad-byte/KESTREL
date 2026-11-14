@@ -45,8 +45,7 @@ export function Cameras() {
     const s = useApp.getState();
     const sample = live.sample;
     if (!sample) return;
-    const finalTime = s.flight?.response.trajectory.final_time ?? Infinity;
-    const mode = s.cameraOverride ?? autoMode(s.phase, s.flight?.t ?? 0, finalTime, reduce);
+    const mode = s.cameraOverride ?? autoMode(s.phase, s.flight?.nearTouchdown ?? false, reduce);
     const booster = new THREE.Vector3(...toScene(sample.position)).add(new THREE.Vector3(0, 6, 0));
     const k = 1 - Math.exp(-dt * 6);
     // Cinematic cuts: jump straight to the new shot when the mode changes.

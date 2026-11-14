@@ -6,7 +6,7 @@ import type { PlanResponse, Vec3 } from "./types";
 const ok = fixture as PlanResponse;
 const fail: PlanResponse = { ok: false, error: { kind: "Infeasible", message: "x" } };
 const start = { position: [2000, 0, 1500] as Vec3, velocity: [-50, 0, -75] as Vec3 };
-const finalTime = ok.ok ? ok.trajectory.final_time : NaN;
+const landedOutcome = { landed: true, speed: 0.5, vertical: 0.5, horizontal: 0, miss: 0.1, fuel_used: 230 };
 
 function editingWith(response: PlanResponse, id = 1): AppState {
   let s = reduce(initialState, { type: "ready", start });
@@ -46,7 +46,7 @@ describe("state machine", () => {
     expect(reduce(editingWith(fail), { type: "land" }).phase).toBe("editing");
     const s = reduce(editingWith(ok), { type: "land" });
     expect(s.phase).toBe("flying");
-    expect(s.flight?.t).toBe(0);
+    expect(s.flight).toMatchObject({ mode: "none", engines: 6, outcome: null, plan: null });
   });
 
   it("land is ignored while a newer solve is pending", () => {
@@ -74,20 +74,29 @@ describe("state machine", () => {
     expect(isPreviewCurrent(s)).toBe(false);
   });
 
-  it("tick advances time and touches down at the end", () => {
+  it("a flight update merges into the flight while flying", () => {
     let s = reduce(editingWith(ok), { type: "land" });
-    s = reduce(s, { type: "tick", dt: 1 });
-    expect(s.flight?.t).toBeCloseTo(1);
-    s = reduce(s, { type: "tick", dt: 1e6 });
-    expect(s.phase).toBe("touchdown");
-    expect(s.flight?.t).toBe(finalTime);
+    s = reduce(s, { type: "flightUpdate", patch: { mode: "closest", miss: 240, engines: 5 } });
+    expect(s.flight).toMatchObject({ mode: "closest", miss: 240, engines: 5, outcome: null });
+    // Ignored once the flight is over.
+    s = reduce(s, { type: "touchdown", outcome: landedOutcome });
+    expect(reduce(s, { type: "flightUpdate", patch: { mode: "brake" } }).flight?.mode).toBe("closest");
   });
 
-  it("tick respects playback speed", () => {
-    let s = reduce(editingWith(ok), { type: "setSpeed", speed: 4 });
+  it("touchdown ends the flight with its outcome", () => {
+    let s = reduce(editingWith(ok), { type: "land" });
+    s = reduce(s, { type: "touchdown", outcome: landedOutcome });
+    expect(s.phase).toBe("touchdown");
+    expect(s.flight?.outcome).toEqual(landedOutcome);
+    expect(reduce(editingWith(ok), { type: "touchdown", outcome: landedOutcome }).phase).toBe("editing");
+  });
+
+  it("lag and noise are settings that survive a reset", () => {
+    let s = reduce(editingWith(ok), { type: "setLag", lag: 0.3 });
+    s = reduce(s, { type: "setNoise", noise: "high" });
     s = reduce(s, { type: "land" });
-    s = reduce(s, { type: "tick", dt: 0.5 });
-    expect(s.flight?.t).toBeCloseTo(2);
+    s = reduce(s, { type: "reset" });
+    expect(s.settings).toEqual({ lag: 0.3, noise: "high" });
   });
 
   it("reset returns to editing and keeps the start", () => {

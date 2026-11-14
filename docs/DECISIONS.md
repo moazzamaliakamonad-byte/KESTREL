@@ -102,3 +102,72 @@ Template:
 - Status: accepted
 - Decision: one zustand store wrapping a pure, unit-tested reducer.
 - Consequences: usable from both React components and the R3F render loop.
+
+## D-012 — Simulator in its own crate, stepped on the main thread
+- Date: 2026-11-14
+- Status: accepted
+- Context: M2 needs the truth separated from guidance, advancing every frame,
+  while a re-plan takes tens of milliseconds.
+- Decision: new `kestrel-sim` crate (no dependency on guidance). The page runs
+  a second instance of the same .wasm on the main thread for the `Flight`
+  (simulator + sensors + controller); guidance stays in the worker. A plan is
+  stamped with the sim time of the measurement it was solved from and read at
+  `t − t_measured`, so solve latency is real and compensated.
+- Alternatives: everything in the worker (solves would stall the simulation);
+  simulator in TypeScript (D-002 puts the core in Rust; no native tests).
+- Consequences: the page loads the WASM twice (~650 KB, cached); the closed
+  loop is testable natively (`crates/wasm/tests/closed_loop.rs`).
+
+## D-013 — Warm-started re-plan: three solves around the expected landing time
+- Date: 2026-11-14
+- Status: accepted
+- Context: a full landing-time search is ~25 solves (~250 ms); MPC needs
+  several re-plans a second.
+- Decision: try landing times `t_hint − h, t_hint, t_hint + h` (h = 5 %,
+  0.25–2 s) from the previous plan; keep the cheapest. Full search only if
+  none works. Successive re-plans walk toward the optimum.
+- Measured: median 30–43 ms per re-plan in Chromium (LIMITATIONS.md).
+- Consequences: a re-plan may be slightly off the fuel optimum (≤ 1 % on the
+  example in tests).
+
+## D-014 — Closest-landing fallback with one weighted objective
+- Date: 2026-11-14
+- Status: accepted
+- Context: when no pinpoint landing exists, the brief asks to fall back to a
+  minimum-landing-error problem and say so.
+- Decision: same SOCP with the horizontal end point free and the glide cone
+  dropped; minimise `10·e − z_N` with `e ≥ ‖r_N,xy‖` (non-dimensional), i.e.
+  miss first, then fuel. Searched over 10 landing times (+4 refinements), or
+  3 around the previous one. When even that is infeasible: brake (full
+  thrust straight up while descending) and say a crash is unavoidable.
+- Alternatives: Blackmore et al.'s two-step problem (two solves per time).
+- Consequences: near the ground with the ground constraint active the
+  relaxation is often loose (NotLossless) at short landing times; those
+  times are skipped.
+
+## D-015 — Guidance plans with margins
+- Date: 2026-11-14
+- Status: accepted
+- Context: fuel-optimal plans ride exactly on the thrust limit and empty the
+  tanks; in the closed loop the first disturbance then made every re-plan
+  infeasible (found in the native scenarios).
+- Decision: plan to a terminal gate 15 m above the pad (the controller's
+  descent law lands from there); plan with 85 % of the available maximum
+  thrust, retrying at 100 % only if no landing exists otherwise or that
+  reaches the pad; keep a propellant reserve (2 % of capacity + 12 s of
+  hovering) the plan never uses.
+- Consequences: more propellant than the open-loop optimum (nominal 229 kg
+  vs 194 kg); landings survive noise, 1 s lag, gusts and one engine out.
+
+## D-016 — Navigation error is slowly drifting and range-scaled
+- Date: 2026-11-14
+- Status: accepted
+- Context: white Gaussian noise per 10 ms reading (8 m σ) saturated the
+  controller (±3.8 kN of jitter) while the vehicle averaged it away; real
+  navigation filters output errors that wander slowly, and landing radars
+  get more precise near the ground.
+- Decision: first-order Gauss–Markov error per axis (τ = 2 s) with the
+  stated σ (low: 2 m, 0.2 m/s; high: 8 m, 0.8 m/s), scaled by
+  `clamp(z / 200 m, 0.1, 1)`. Seeded (SplitMix64 + Box–Muller), reproducible.
+- Consequences: "high" noise is survivable; the sensed position is drawn as
+  a magenta ring so visitors can see it wander.

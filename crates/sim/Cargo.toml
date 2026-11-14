@@ -1,0 +1,12 @@
+[package]
+name = "kestrel-sim"
+version = "0.1.0"
+description = "Kestrel simulator: the true vehicle state, engine, disturbances and sensors"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "sim"
+
+[dependencies]

@@ -30,6 +30,24 @@ test("@measure solve time in the browser worker", async ({ page }) => {
   );
 });
 
+// @measure: closed-loop re-plan times during one nominal landing at ×1.
+test("@measure re-plan time during a closed-loop flight", async ({ page }) => {
+  await page.goto("/");
+  const status = page.getByTestId("status");
+  await expect(status).toHaveText("Ready: press Land", { timeout: 60_000 });
+  await page.keyboard.press("Space");
+  await expect(status).toHaveText(/^(Landed|Crashed)/, { timeout: 120_000 });
+  const ms = await page.evaluate(() =>
+    [...(window as unknown as { __kestrel: { solveStats(): { allMs: number[] } } }).__kestrel.solveStats().allMs],
+  );
+  ms.sort((a, b) => a - b);
+  const q = (p: number) => ms[Math.min(ms.length - 1, Math.floor(p * ms.length))].toFixed(0);
+  console.log(
+    `closed loop (${page.context().browser()?.version()}): ${await status.textContent()}; ` +
+      `${ms.length} re-plans, median ${q(0.5)} ms, p90 ${q(0.9)} ms, max ${q(1)} ms`,
+  );
+});
+
 // @measure: latency after a drag (review finding: queued solves made this grow
 // with drag length). Eight start changes 140 ms apart, then time to "Ready".
 test("@measure re-plan latency after a drag", async ({ page }) => {

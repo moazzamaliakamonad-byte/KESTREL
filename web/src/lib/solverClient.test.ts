@@ -50,6 +50,24 @@ describe("solver client", () => {
     expect(errors).toEqual(["could not load wasm"]);
   });
 
+  it("answers each re-plan by its own id, apart from preview solves", async () => {
+    const { worker, posted, reply } = fakeWorker();
+    const previews: number[] = [];
+    const client = createSolverClient(worker, (id) => previews.push(id), () => {});
+    const a = client.replan({ problem: "a" });
+    const b = client.replan({ problem: "b" });
+    const [ma, mb] = posted.slice(-2) as { id: number; kind: string; request: unknown }[];
+    expect(ma).toMatchObject({ kind: "replan", request: { problem: "a" } });
+    const previewId = client.request(req);
+    reply({ id: mb.id, replan: { ok: true, n: 2 }, ms: 7 });
+    reply({ id: ma.id, replan: { ok: true, n: 1 }, ms: 12 });
+    await expect(a).resolves.toEqual({ response: { ok: true, n: 1 }, ms: 12 });
+    await expect(b).resolves.toEqual({ response: { ok: true, n: 2 }, ms: 7 });
+    expect(previews).toEqual([]);
+    reply({ id: previewId, response: ok, ms: 1 });
+    expect(previews).toEqual([previewId]);
+  });
+
   it("loads the example request", async () => {
     const { worker, posted, reply } = fakeWorker();
     const client = createSolverClient(worker, () => {}, () => {});
