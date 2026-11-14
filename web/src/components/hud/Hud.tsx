@@ -7,7 +7,10 @@ import { solveStats } from "@/lib/flightRuntime";
 import { statusText } from "@/lib/status";
 import { useApp } from "@/lib/store";
 import type { PlanSuccess } from "@/lib/types";
+import { BreakIt } from "./BreakIt";
 import { Controls } from "./Controls";
+import { Margins } from "./Margins";
+import { ModeBanner } from "./ModeBanner";
 import { massChart, Sparkline, thrustChart } from "./Sparkline";
 import { Telemetry } from "./Telemetry";
 import s from "./hud.module.css";
@@ -41,7 +44,9 @@ function Status() {
     <div className={`${s.status} ${s.glass} ${s[`tone-${tone}`]}`} role="status" aria-live="polite">
       <span className={s.dot} />
       <span data-testid="status">{text}</span>
-      {solveMs !== null && <span className={s.solveTime}>solve {fmtNumber(solveMs, 0)} ms</span>}
+      {solveMs !== null && state.phase === "editing" && (
+        <span className={s.solveTime}>solve {fmtNumber(solveMs, 0)} ms</span>
+      )}
     </div>
   );
 }
@@ -119,6 +124,9 @@ export function Hud() {
       <Brand />
       <Status />
       <Telemetry />
+      <BreakIt />
+      <Margins />
+      <ModeBanner />
       <Charts />
       <Help />
       <Controls />

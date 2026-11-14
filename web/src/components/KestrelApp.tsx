@@ -13,10 +13,12 @@ import { Cameras } from "./scene/Cameras";
 import { DragHandles } from "./scene/DragHandles";
 import { FlightLoop } from "./scene/FlightLoop";
 import { GlideCone } from "./scene/GlideCone";
+import { GrabHandle } from "./scene/GrabHandle";
 import { Pad } from "./scene/Pad";
 import { PlannedPath } from "./scene/PlannedPath";
 import { Stage } from "./scene/Stage";
 import { Terrain } from "./scene/Terrain";
+import { Trail } from "./scene/Trail";
 
 const DEFAULT_GLIDE_SLOPE = (4 * Math.PI) / 180;
 
@@ -49,8 +51,10 @@ export default function KestrelApp() {
         <Pad blinking={blinking} />
         <GlideCone glideSlope={glideSlope} />
         <PlannedPath />
+        <Trail />
         <Booster />
         <DragHandles />
+        <GrabHandle />
         <Cameras />
       </Stage>
       </SceneErrorBoundary>
