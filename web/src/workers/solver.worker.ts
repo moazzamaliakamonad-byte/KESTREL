@@ -1,7 +1,7 @@
 // Runs the Rust guidance (WebAssembly) off the main thread, so a ~250 ms
 // solve never stalls rendering. Protocol: src/lib/solverProtocol.ts.
 
-import init, { example_request, plan_landing } from "@/wasm/kestrel_wasm";
+import init, { example_request, plan_landing, replan } from "@/wasm/kestrel_wasm";
 import type { PageToWorker, WorkerToPage } from "@/lib/solverProtocol";
 import type { PlanRequest, PlanResponse } from "@/lib/types";
 
@@ -26,6 +26,12 @@ ctx.addEventListener("message", async (e) => {
     return; // already reported
   }
   const msg = e.data;
+  if ("kind" in msg && msg.kind === "replan") {
+    const t0 = performance.now();
+    const replanned: unknown = JSON.parse(replan(JSON.stringify(msg.request)));
+    ctx.postMessage({ id: msg.id, replan: replanned, ms: performance.now() - t0 });
+    return;
+  }
   if ("kind" in msg) {
     ctx.postMessage({ id: 0, example: JSON.parse(example_request()) as PlanRequest });
     return;

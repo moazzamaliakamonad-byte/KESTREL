@@ -30,6 +30,9 @@ export interface SolverClient {
   loadExample(): Promise<PlanRequest>;
   /** Send a solve; returns its id. Only the newest id's answer is delivered. */
   request(req: PlanRequest): number;
+  /** A closed-loop re-plan (`Flight.measure_request().request`). Every
+   * answer is delivered; staleness is the caller's call (see `mpc.ts`). */
+  replan(request: unknown): Promise<{ response: unknown; ms: number }>;
 }
 
 export function createSolverClient(
@@ -39,12 +42,19 @@ export function createSolverClient(
 ): SolverClient {
   const latest = new LatestOnly();
   const exampleWaiters: ((req: PlanRequest) => void)[] = [];
+  // Re-plan ids are their own sequence: replies are told apart by key.
+  let nextReplan = 1;
+  const replanWaiters = new Map<number, (r: { response: unknown; ms: number }) => void>();
 
   worker.addEventListener("message", (e) => {
     const msg = e.data;
     if ("fatal" in msg) onFatal(msg.fatal);
     else if ("example" in msg) exampleWaiters.splice(0).forEach((resolve) => resolve(msg.example));
-    else if (latest.accept(msg.id)) onResult(msg.id, msg.response, msg.ms);
+    else if ("replan" in msg) {
+      const resolve = replanWaiters.get(msg.id);
+      replanWaiters.delete(msg.id);
+      resolve?.({ response: msg.replan, ms: msg.ms });
+    } else if (latest.accept(msg.id)) onResult(msg.id, msg.response, msg.ms);
   });
 
   const post = (m: PageToWorker) => worker.postMessage(m);
@@ -59,6 +69,14 @@ export function createSolverClient(
       const id = latest.next();
       post({ id, request: req });
       return id;
+    },
+    replan(request) {
+      const id = nextReplan++;
+      const answer = new Promise<{ response: unknown; ms: number }>((resolve) =>
+        replanWaiters.set(id, resolve),
+      );
+      post({ id, kind: "replan", request });
+      return answer;
     },
   };
 }
