@@ -1,0 +1,293 @@
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.hud > * {
+  pointer-events: auto;
+}
+
+.brand {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+
+.brand b {
+  letter-spacing: 0.35em;
+  font-size: 15px;
+}
+
+.brand span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.brand a {
+  pointer-events: auto;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.left,
+.right {
+  position: absolute;
+  top: 56px;
+  width: min(300px, calc(100vw - 32px));
+}
+
+.left {
+  left: 16px;
+}
+
+.right {
+  right: 16px;
+}
+
+.panel {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 14px;
+  backdrop-filter: blur(10px);
+  display: grid;
+  gap: 10px;
+}
+
+.panel h2 {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.seg {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.seg button,
+.hit {
+  flex: 1;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg);
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.seg button[aria-pressed="true"] {
+  background: rgba(127, 227, 255, 0.18);
+  border-color: var(--accent);
+}
+
+.hit:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.danger {
+  border-color: rgba(255, 90, 79, 0.6);
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+}
+
+.label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.slider {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.slider b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.slider input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.telemetry .grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid span {
+  color: var(--muted);
+}
+
+.engines {
+  display: flex;
+  gap: 6px;
+}
+
+.engines span {
+  flex: 1;
+  text-align: center;
+  padding: 4px 0;
+  border-radius: 6px;
+  border: 1px solid var(--glass-border);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.engines span[data-state="running"] {
+  background: rgba(127, 227, 255, 0.22);
+  color: var(--fg);
+}
+
+.engines span[data-state="igniting"] {
+  background: rgba(255, 179, 92, 0.25);
+  color: var(--fg);
+}
+
+.engines span[data-state="failed"] {
+  background: rgba(255, 90, 79, 0.35);
+  color: var(--fg);
+}
+
+.flaps {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 36px;
+}
+
+.flaps span {
+  width: 14px;
+  height: 100%;
+  border: 1px solid var(--glass-border);
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+}
+
+.flaps i {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--accent);
+  opacity: 0.7;
+}
+
+.flaps em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+.flaps em.on {
+  color: #fff;
+  text-shadow: 0 0 8px #fff;
+}
+
+.bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+}
+
+.land {
+  border: none;
+  border-radius: 999px;
+  padding: 12px 28px;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  background: var(--accent);
+  color: #0b1a20;
+  cursor: pointer;
+}
+
+.land:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.land kbd {
+  margin-left: 8px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.verdict {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 22px 28px;
+  backdrop-filter: blur(12px);
+  display: grid;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+}
+
+.verdict h1 {
+  font-size: 22px;
+}
+
+.verdict[data-good="false"] h1 {
+  color: var(--danger);
+}
+
+.verdict p {
+  color: var(--muted);
+}
+
+.error {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 80px;
+  background: rgba(255, 90, 79, 0.18);
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+@media (max-width: 720px) {
+  .right {
+    top: auto;
+    bottom: 84px;
+  }
+  .brand span {
+    display: none;
+  }
+}
