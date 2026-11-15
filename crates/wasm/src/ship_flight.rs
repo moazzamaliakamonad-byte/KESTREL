@@ -238,6 +238,8 @@ pub struct ShipFlight {
     est: State,
     ignition_z: f64,
     gust_speed: f64,
+    /// How long a solve is expected to take, s of sim time.
+    solve_time: f64,
 }
 
 impl ShipFlight {
@@ -274,6 +276,7 @@ impl ShipFlight {
             est: x,
             ignition_z: 0.0,
             gust_speed: c.gust_speed.clamp(0.0, 60.0),
+            solve_time: 0.0,
         })
     }
 
@@ -494,6 +497,11 @@ impl ShipFlight {
                 if self.sim.cluster.lit() > self.final_engines() && est[V + 2] > -10.0 {
                     self.sim.cluster.shutdown_to(self.final_engines());
                 }
+                // A leg for more engines than are lit can no longer be
+                // flown: drop it, so the next request is for the last leg.
+                if self.leg.is_some_and(|l| l.engines > self.sim.cluster.lit()) {
+                    self.leg = None;
+                }
                 // The booster on its full set, still fast, with no plan yet
                 // (the first solve is on its way): burn steadily at the
                 // level the ignition rule assumed, so the plan fits.
@@ -535,8 +543,30 @@ impl ShipFlight {
     /// `(t, [(leg, problem)])`. Without a leg yet: one engine to the approach
     /// gate first, else every lit engine to an intermediate gate.
     pub fn problem(&mut self) -> (f64, Vec<(Leg, ShipProblem)>) {
-        let x = self.measure();
-        let t = self.sim.t;
+        let measured = self.measure();
+        // The booster's burn is short and violent: by the time a plan
+        // comes back the booster is somewhere else (at 4 g, 1.5 s of
+        // solving is 100 m/s). So plan from where it will be then: the
+        // measurement carried forward over the expected solve time with
+        // the thrust now commanded, and stamp the plan with that time.
+        let lead = if self.sim.scn.ship.kind == VehicleKind::Booster { self.solve_time } else { 0.0 };
+        let x = match &self.guide {
+            _ if lead <= 0.0 => measured,
+            // Flying a plan: it will be about where the plan says, with
+            // today's tracking error carried along.
+            Guide::Plan { plan, t0 } => {
+                let (now, _) = plan.sample(self.sim.t - t0);
+                let (then, _) = plan.sample(self.sim.t + lead - t0);
+                let mut x = then;
+                for i in R..V + 3 {
+                    x[i] += measured[i] - now[i];
+                }
+                x[M] = (measured[M] + then[M] - now[M]).max(self.sim.scn.dry_mass + 1.0);
+                x
+            }
+            _ => predict(&self.sim.scn, &measured, self.last.thrust_body, lead),
+        };
+        let t = self.sim.t + lead;
         let lit = self.sim.cluster.lit().max(1);
         // Could the final engines alone stop it before the gate? If they
         // plainly cannot, do not spend a solve finding that out.
@@ -545,7 +575,7 @@ impl ShipFlight {
         let needed = x[V + 2] * x[V + 2] / (2.0 * height);
         let spare = self.leg_limits(self.final_engines()).1 / x[M] - scn.planet.gravity();
         let hopeless = scn.ship.kind == VehicleKind::Booster && x[V + 2] < 0.0 && needed > 2.0 * spare.max(0.1);
-        let legs = match self.leg {
+        let legs = match self.leg.filter(|l| l.engines <= lit) {
             Some(leg) => vec![leg],
             None if lit > self.final_engines() && hopeless => vec![self.mid_leg(&x, lit)],
             None if lit > self.final_engines() => vec![self.final_leg(), self.mid_leg(&x, lit)],
@@ -610,6 +640,14 @@ impl ShipFlight {
         });
     }
 
+    /// Tell the flight how long solves are taking (s of sim time), so the
+    /// booster's plans start from where it will be when they arrive.
+    pub fn set_solve_time(&mut self, seconds: f64) {
+        if seconds.is_finite() {
+            self.solve_time = seconds.clamp(0.0, 3.0);
+        }
+    }
+
     pub fn set_gust_speed(&mut self, speed: f64) {
         if speed.is_finite() {
             self.gust_speed = speed.clamp(0.0, 60.0);
@@ -663,6 +701,28 @@ impl ShipFlight {
     pub fn engine_states(&self) -> Vec<&'static str> {
         self.sim.cluster.engines.iter().map(|e| e.as_str()).collect()
     }
+}
+
+/// `x` carried forward `seconds` with body thrust `thrust` held and the
+/// attitude frozen (the shared model, no flaps, fins or wind), in 20 ms
+/// Euler steps. Only the translation is predicted: holding a gimbal
+/// command for a second would spin the prediction.
+pub fn predict(scn: &Scenario, x: &State, thrust: Vec3, seconds: f64) -> State {
+    let mut x = *x;
+    let steps = (seconds / 0.02).ceil().max(0.0) as usize;
+    if steps == 0 {
+        return x;
+    }
+    let h = seconds / steps as f64;
+    let along = [0.0, 0.0, quat::norm(thrust)];
+    for _ in 0..steps {
+        let d = dynamics::f(scn, &x, along, &dynamics::Extra::default());
+        for i in M..V + 3 {
+            x[i] += h * d[i];
+        }
+        x[M] = x[M].max(scn.dry_mass + 1.0);
+    }
+    x
 }
 
 /// Solve the options in order as the worker would; the first that plans

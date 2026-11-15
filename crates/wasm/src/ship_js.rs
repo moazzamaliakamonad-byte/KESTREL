@@ -449,6 +449,11 @@ impl ShipFlightJs {
         self.inner.set_gust_speed(speed);
     }
 
+    /// How long solves are taking, s of sim time (the page measures it).
+    pub fn set_solve_time(&mut self, seconds: f64) {
+        self.inner.set_solve_time(seconds);
+    }
+
     /// Steady wind, m/s.
     pub fn set_wind(&mut self, x: f64, y: f64) {
         self.inner.set_wind(x, y);

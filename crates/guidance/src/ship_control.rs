@@ -169,12 +169,14 @@ pub fn descent(scn: &Scenario, x: &State, aim: [f64; 2], ignition_z: f64) -> Act
     // Never less than 6 s: closer in, the steering would flick from side
     // to side chasing the last metres (the landing burn takes those).
     let t_go = fall_time(scn, x, ignition_z).max(6.0);
-    // Arrive over the aim point with no sideways speed left (the
-    // acceleration that is linear in time and does both):
+    // Arrive over the aim point with as little sideways speed as the fins
+    // allow (the acceleration that is linear in time and does both):
     // a = 6 (aim − r)/t² − 4 v/t. Nulling the position alone arrived
-    // drifting at 20 m/s from a 45 km start, past the tower.
+    // drifting at 20 m/s from a 45 km start, past the tower. (Steering the
+    // point where the burn would bring it to rest was tried: it lit the
+    // engines 200 m out, and a sideways divert at 400 m/s is fought by the
+    // body's own lift.)
     let a_want: [f64; 2] = std::array::from_fn(|i| 6.0 * (aim[i] - r[i]) / (t_go * t_go) - 4.0 * v[i] / t_go);
-
     // Sideways acceleration per radian of lean, from the shared model
     // (negative: the lift points away from the lean).
     let eps = 0.05;
@@ -379,9 +381,10 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
     let off = r[0].hypot(r[1]);
     let h = r[2] - scn.rest_cm_z();
     let side = v[0].hypot(v[1]);
-    let sink = if h > HIGH {
-        // Far above the rest position (guidance had no plan and braked
-        // high up): come down as fast as can still be stopped with a third
+    let sink = if h > HIGH && scn.ship.kind == VehicleKind::Booster {
+        // The booster far above the rest position (guidance had no plan
+        // and braked high up; the ship's flights were tuned without this
+        // and are left alone): come down as fast as can still be stopped with a third
         // of the spare thrust, not at a crawl that empties the tanks.
         let spare = (limits.1 / m - g).max(0.5);
         (2.0 * 0.33 * spare * (h - HIGH)).sqrt().clamp(FAST_SINK, HIGH_SINK)
