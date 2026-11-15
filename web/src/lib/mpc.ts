@@ -29,7 +29,7 @@ export interface Mpc {
   readonly solveMs: readonly number[];
 }
 
-export function createMpc(): Mpc {
+export function createMpc(period: number = REPLAN_PERIOD): Mpc {
   let epoch = 0;
   let inFlight = false;
   let lastSent = Number.NEGATIVE_INFINITY;
@@ -37,7 +37,7 @@ export function createMpc(): Mpc {
   const solveMs: number[] = [];
   return {
     shouldRequest(simT, flightWants) {
-      return flightWants && !inFlight && simT - lastSent >= REPLAN_PERIOD;
+      return flightWants && !inFlight && simT - lastSent >= period;
     },
     sent(simT) {
       inFlight = true;
