@@ -27,13 +27,18 @@ type Pending = (f64, f64, Vec<Leg>, Result<(usize, guidance::scvx::ShipPlan), gu
 
 /// Ask for a re-plan if wanted; solve now, deliver after `REPLAN_PERIOD`.
 fn request(f: &mut ShipFlight, pending: &mut Option<Pending>, last_request: &mut f64) {
+    request_after(f, pending, last_request, REPLAN_PERIOD);
+}
+
+/// As `request`, with the solver taking `latency` seconds of sim time.
+fn request_after(f: &mut ShipFlight, pending: &mut Option<Pending>, last_request: &mut f64, latency: f64) {
     let t = f.sim().t;
     if pending.is_none() && f.wants_replan() && t - *last_request >= REPLAN_PERIOD {
         *last_request = t;
         let (t0, options) = f.problem();
         let r = plan(&options);
         let legs = options.iter().map(|(l, _)| *l).collect();
-        *pending = Some((t0 + REPLAN_PERIOD, t0, legs, r));
+        *pending = Some((t0 + latency, t0, legs, r));
     }
 }
 
@@ -177,6 +182,22 @@ fn earth_fast_entry_is_caught() {
         deliver(&mut f, &mut pending);
         request(&mut f, &mut pending, &mut last_request);
     }
+    assert_eq!(f.sim().outcome, Some(Outcome::Caught));
+}
+
+/// A slow computer: every solve takes 1.5 s of sim time (the booster's
+/// whole 13-engine leg is about 9 s). It must still be caught.
+#[test]
+fn booster_slow_solver_is_caught() {
+    let mut f = ShipFlight::new(ShipFlightConfig { seed: 7, lag: 0.3, noise: Noise::LOW, ..ShipFlightConfig::new(Kind::Booster) }).unwrap();
+    let mut pending: Option<Pending> = None;
+    let mut last_request = f64::NEG_INFINITY;
+    while f.phase() != Phase::Done && f.sim().t < 400.0 {
+        f.step(FRAME);
+        deliver(&mut f, &mut pending);
+        request_after(&mut f, &mut pending, &mut last_request, 1.5);
+    }
+    eprintln!("slow solver: {:?} at t {:.1}, {:.1} t left", f.sim().outcome, f.sim().t, f.sim().propellant() / 1e3);
     assert_eq!(f.sim().outcome, Some(Outcome::Caught));
 }
 

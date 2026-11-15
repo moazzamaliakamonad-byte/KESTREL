@@ -55,6 +55,8 @@ pub const THRUST_MARGIN: f64 = 0.9;
 /// …and on the last engine with this share (thrust-to-weight about 1.6 at
 /// Earth landing mass, near the 1.6 Everyday Astronaut found optimal).
 pub const LATE_MARGIN: f64 = 0.75;
+/// Throttle of the booster's lit engines while it waits for its first plan.
+pub const WAIT_THROTTLE: f64 = 0.6;
 /// In the final approach an engine is shut down when the lit engines'
 /// minimum thrust exceeds this share of the weight (too light to hover).
 pub const HOVER_SHARE: f64 = 0.97;
@@ -492,6 +494,17 @@ impl ShipFlight {
                 if self.sim.cluster.lit() > self.final_engines() && est[V + 2] > -10.0 {
                     self.sim.cluster.shutdown_to(self.final_engines());
                 }
+                // The booster on its full set, still fast, with no plan yet
+                // (the first solve is on its way): burn steadily at the
+                // level the ignition rule assumed, so the plan fits.
+                let waiting = scn.ship.kind == VehicleKind::Booster
+                    && matches!(self.guide, Guide::None)
+                    && self.sim.cluster.lit() > self.final_engines()
+                    && est[V + 2] < -scn.mid_gate_speed;
+                if waiting {
+                    let limits = self.command_limits();
+                    return ship_control::steady_burn(scn, est, WAIT_THROTTLE * limits.1, limits);
+                }
                 ship_control::terminal(scn, est, self.command_limits())
             }
         }
@@ -525,8 +538,16 @@ impl ShipFlight {
         let x = self.measure();
         let t = self.sim.t;
         let lit = self.sim.cluster.lit().max(1);
+        // Could the final engines alone stop it before the gate? If they
+        // plainly cannot, do not spend a solve finding that out.
+        let scn = &self.sim.scn;
+        let height = (x[R + 2] - scn.gate[2]).max(1.0);
+        let needed = x[V + 2] * x[V + 2] / (2.0 * height);
+        let spare = self.leg_limits(self.final_engines()).1 / x[M] - scn.planet.gravity();
+        let hopeless = scn.ship.kind == VehicleKind::Booster && x[V + 2] < 0.0 && needed > 2.0 * spare.max(0.1);
         let legs = match self.leg {
             Some(leg) => vec![leg],
+            None if lit > self.final_engines() && hopeless => vec![self.mid_leg(&x, lit)],
             None if lit > self.final_engines() => vec![self.final_leg(), self.mid_leg(&x, lit)],
             None => vec![self.final_leg()],
         };

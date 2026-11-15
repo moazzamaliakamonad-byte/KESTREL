@@ -69,6 +69,10 @@ pub const SLIDE: f64 = 4.0;
 /// Above this height over the rest position the terminal phase sinks fast
 /// (up to FAST_SINK, m/s); below it only once centred, at SINK, m.
 pub const FINAL_HEIGHT: f64 = 8.0;
+/// Above this height over the rest position the descent is as fast as can
+/// be stopped (up to HIGH_SINK, m/s), m.
+pub const HIGH: f64 = 100.0;
+pub const HIGH_SINK: f64 = 60.0;
 /// Below this height the fast descent continues only near the axis, m.
 pub const APPROACH_HEIGHT: f64 = 20.0;
 pub const FAST_SINK: f64 = 5.0;
@@ -350,6 +354,18 @@ pub fn flip(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
     fly_force(scn, x, force, crate::scvx::upright_like(q), [0.0; 3], limits)
 }
 
+/// Burn steadily at `thrust` along the body axis while coming upright:
+/// what the booster does between lighting its engines and receiving its
+/// first plan. Close to what the plan will ask for, so the plan still
+/// fits when it arrives (braking flat out meanwhile did not: a 1.5 s solve
+/// in the browser left the booster stopped a kilometre up).
+pub fn steady_burn(scn: &Scenario, x: &State, thrust: f64, limits: (f64, f64)) -> Actuation {
+    let q = dynamics::attitude(x);
+    let t = thrust.clamp(limits.0, limits.1);
+    let force = quat::rotate(q, [0.0, 0.0, t]);
+    fly_force(scn, x, force, crate::scvx::upright_like(q), [0.0; 3], limits)
+}
+
 /// Upright; over the catch axis / pad (x = y = 0), then sinking at [`SINK`].
 pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
     let m = x[M];
@@ -363,7 +379,13 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
     let off = r[0].hypot(r[1]);
     let h = r[2] - scn.rest_cm_z();
     let side = v[0].hypot(v[1]);
-    let sink = if h > APPROACH_HEIGHT || (h > FINAL_HEIGHT && off < 3.0 * scn.centring) {
+    let sink = if h > HIGH {
+        // Far above the rest position (guidance had no plan and braked
+        // high up): come down as fast as can still be stopped with a third
+        // of the spare thrust, not at a crawl that empties the tanks.
+        let spare = (limits.1 / m - g).max(0.5);
+        (2.0 * 0.33 * spare * (h - HIGH)).sqrt().clamp(FAST_SINK, HIGH_SINK)
+    } else if h > APPROACH_HEIGHT || (h > FINAL_HEIGHT && off < 3.0 * scn.centring) {
         (0.1 * h).clamp(SINK, FAST_SINK)
     } else if h > FINAL_HEIGHT {
         0.0
