@@ -227,3 +227,37 @@ fn trace(kind: Kind) {
     }
     eprintln!("outcome {:?}", f.sim().outcome);
 }
+
+/// Debug aid: fly any start. `KIND=booster START=x,z,vx,vz cargo test … start_probe -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn start_probe() {
+    let kind = Kind::parse(&std::env::var("KIND").unwrap_or_else(|_| "booster".into())).expect("KIND");
+    let s: Vec<f64> = std::env::var("START").expect("START").split(',').map(|v| v.parse().expect("number")).collect();
+    let mut f = ShipFlight::new(ShipFlightConfig {
+        position: [s[0], 0.0, s[1]],
+        velocity: [s[2], 0.0, s[3]],
+        seed: 7,
+        lag: 0.3,
+        noise: Noise::LOW,
+        ..ShipFlightConfig::new(kind)
+    })
+    .unwrap();
+    let mut pending: Option<Pending> = None;
+    let mut last_request = f64::NEG_INFINITY;
+    let (mut vmax, mut next) = (0.0f64, 0.0);
+    while f.phase() != Phase::Done && f.sim().t < 900.0 {
+        f.step(FRAME);
+        deliver(&mut f, &mut pending);
+        request(&mut f, &mut pending, &mut last_request);
+        let x = f.sim().x;
+        let v = dynamics::velocity(&x);
+        vmax = vmax.max(model::quat::norm(v));
+        if f.sim().t >= next {
+            next += 10.0;
+            let r = dynamics::position(&x);
+            eprintln!("t {:5.0} {:12} r ({:8.0},{:7.0}) v ({:6.0},{:6.0}) tilt {:4.0}", f.sim().t, f.phase().label(kind), r[0], r[2], v[0], v[2], model::quat::tilt(dynamics::attitude(&x)).to_degrees());
+        }
+    }
+    eprintln!("outcome {:?} at t {:.0}, top speed {:.0} m/s, propellant left {:.1} t", f.sim().outcome, f.sim().t, vmax, f.sim().propellant() / 1e3);
+}

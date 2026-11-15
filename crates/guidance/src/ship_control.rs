@@ -62,6 +62,8 @@ pub const KD_TERMINAL: f64 = 0.7;
 /// Largest sideways acceleration in the terminal phase, m/s² (absolute: a
 /// share of g was far too weak in Mars gravity).
 pub const LATERAL_ACCEL: f64 = 0.4;
+/// …and the booster's when slowing its slide, m/s².
+pub const BRAKE_ACCEL: f64 = 1.2;
 /// Largest sideways speed in the terminal phase, m/s.
 pub const SLIDE: f64 = 4.0;
 /// Above this height over the rest position the terminal phase sinks fast
@@ -160,11 +162,14 @@ pub fn descent(scn: &Scenario, x: &State, aim: [f64; 2], ignition_z: f64) -> Act
     let rho = scn.density(r[2]);
     let speed = quat::norm(v).max(1.0);
     let back = quat::scale(v, -1.0 / speed);
-    // Never less than 4 s: closer in, the steering would flick from side
+    // Never less than 6 s: closer in, the steering would flick from side
     // to side chasing the last metres (the landing burn takes those).
-    let t_go = ((r[2] - ignition_z) / (-v[2]).max(10.0)).max(4.0);
-    let miss = [aim[0] - (r[0] + v[0] * t_go), aim[1] - (r[1] + v[1] * t_go)];
-    let a_want = [2.0 * miss[0] / (t_go * t_go), 2.0 * miss[1] / (t_go * t_go)];
+    let t_go = fall_time(scn, x, ignition_z).max(6.0);
+    // Arrive over the aim point with no sideways speed left (the
+    // acceleration that is linear in time and does both):
+    // a = 6 (aim − r)/t² − 4 v/t. Nulling the position alone arrived
+    // drifting at 20 m/s from a 45 km start, past the tower.
+    let a_want: [f64; 2] = std::array::from_fn(|i| 6.0 * (aim[i] - r[i]) / (t_go * t_go) - 4.0 * v[i] / t_go);
 
     // Sideways acceleration per radian of lean, from the shared model
     // (negative: the lift points away from the lean).
@@ -396,9 +401,12 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
         kd * (want[1] - v[1]),
         2.0 * (-sink - v[2]),
     ];
-    // One cap throughout: switching between two acted like a relay and the
-    // ship circled the pad.
-    let lat_cap = LATERAL_ACCEL;
+    // One cap throughout for the ship: switching between two acted like a
+    // relay and it circled the pad. The booster may brake harder than it
+    // speeds up: it slides in toward the mast, and at the gentle cap a
+    // 3 m/s arrival needed 11 m to stop.
+    let braking = a[0] * v[0] + a[1] * v[1] < 0.0;
+    let lat_cap = if braking && scn.ship.kind == VehicleKind::Booster { BRAKE_ACCEL } else { LATERAL_ACCEL };
     let h = a[0].hypot(a[1]);
     let a = if h > lat_cap {
         [a[0] * lat_cap / h, a[1] * lat_cap / h, a[2]]
@@ -412,14 +420,83 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
     fly_force(scn, x, force, q_des, [0.0; 3], limits)
 }
 
+/// Seconds until the booster, falling engines first with drag, reaches
+/// height `z_to` (1-D). At the present sink rate alone the estimate was
+/// half the truth high up, where the air has yet to slow the fall.
+pub fn fall_time(scn: &Scenario, x: &State, z_to: f64) -> f64 {
+    let g = scn.planet.gravity();
+    let m = x[M];
+    let z0 = x[dynamics::R + 2];
+    let mut speed = (-dynamics::velocity(x)[2]).max(10.0);
+    if z0 <= z_to {
+        return 0.0;
+    }
+    let drag = quat::norm(aero::body_force(&scn.ship, 1.0, [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0]).0);
+    const STEPS: usize = 80;
+    let dz = (z0 - z_to) / STEPS as f64;
+    let mut t = 0.0;
+    for i in 0..STEPS {
+        let z = z0 - (i as f64 + 0.5) * dz;
+        let a = g - scn.density(z) * drag * speed * speed / m;
+        let next = (speed * speed + 2.0 * a * dz).max(100.0).sqrt();
+        t += dz / (0.5 * (speed + next));
+        speed = next;
+    }
+    t
+}
+
 /// Height to light the engines: enough to stop at 70 % of full thrust,
 /// with margin, never below the scenario's floor.
+///
+/// Ship: from the present speed, thrust alone (it falls at a steady speed
+/// and flips before braking).
+///
+/// Booster: it may be falling at three times the speed it will have when
+/// the thick air has slowed it, and the air goes on braking it during the
+/// burn. So both are integrated in 1-D: the fall from here with drag
+/// (speed at each height), and, upward from the gate, the fastest speed
+/// from which thrust plus drag still stops in time. The engines light
+/// where the two meet. (Judging by the present speed and thrust alone lit
+/// them 12 km up from a 45 km start, and the tanks ran dry.)
 pub fn ignition_altitude(scn: &Scenario, x: &State, max_thrust: f64) -> f64 {
     let g = scn.planet.gravity();
+    let m = x[M];
+    let decel = (0.7 * max_thrust / m - g).max(0.5);
+    let z0 = x[dynamics::R + 2];
     let vz = dynamics::velocity(x)[2].min(0.0);
-    let decel = (0.7 * max_thrust / x[M] - g).max(0.5);
-    (scn.gate[2] + 1.4 * vz * vz / (2.0 * decel)).max(scn.ignition_floor)
+    if scn.ship.kind == VehicleKind::Ship {
+        return (scn.gate[2] + IGNITION_MARGIN * vz * vz / (2.0 * decel)).max(scn.ignition_floor);
+    }
+    // Axial drag per unit of ρ·speed² (engines first, falling and braking).
+    let drag = quat::norm(aero::body_force(&scn.ship, 1.0, [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0]).0);
+    let gate = scn.gate[2];
+    if z0 <= gate {
+        return z0.max(scn.ignition_floor);
+    }
+    const STEPS: usize = 160;
+    let dz = (z0 - gate) / STEPS as f64;
+    // Fastest speed² at each height from which the burn still stops.
+    let mut stop = [0.0f64; STEPS + 1];
+    for i in 1..=STEPS {
+        let z = gate + (i as f64 - 0.5) * dz;
+        let a = decel + scn.density(z) * drag * stop[i - 1] / m;
+        stop[i] = stop[i - 1] + 2.0 * a * dz;
+    }
+    // The fall from here, top down.
+    let mut speed2 = vz * vz;
+    for i in (1..=STEPS).rev() {
+        let z = gate + i as f64 * dz;
+        if IGNITION_MARGIN * speed2 >= stop[i] {
+            return z.max(scn.ignition_floor);
+        }
+        let a = g - scn.density(z - 0.5 * dz) * drag * speed2 / m;
+        speed2 = (speed2 + 2.0 * a * dz).max(0.0);
+    }
+    gate.max(scn.ignition_floor)
 }
+
+/// The burn is planned to stop in 1/1.4 of the height it has.
+const IGNITION_MARGIN: f64 = 1.4;
 
 fn normalize(v: Vec3) -> Vec3 {
     let n = quat::norm(v);

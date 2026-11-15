@@ -248,7 +248,7 @@ impl Ship {
 pub const APPROACH_OFFSET: f64 = 20.0;
 
 /// The booster's approach gate's distance from the catch axis, m.
-pub const BOOSTER_OFFSET: f64 = 8.0;
+pub const BOOSTER_OFFSET: f64 = 12.0;
 
 /// The tower on Earth (all *illustrative* except the ~145 m height).
 #[derive(Debug, Clone, Copy, PartialEq)]

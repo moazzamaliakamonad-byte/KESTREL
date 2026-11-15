@@ -94,7 +94,7 @@ sequence.
 2. **Landing-burn start-up**: the 13 engines light (ignition altitude from
    the same stopping rule as the ship); the attitude is brought upright.
 3. **Landing burn**: SCvx on 13 engines to an intermediate gate (50 m/s
-   down), then SCvx on the centre 3 to the approach gate 8 m out from the
+   down), then SCvx on the centre 3 to the approach gate 12 m out from the
    catch axis.
 4. **Final approach**: the shared terminal controller slides over the axis
    and sinks onto the arms at 1 m/s.
