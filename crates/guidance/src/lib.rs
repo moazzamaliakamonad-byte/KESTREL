@@ -8,6 +8,7 @@ pub mod params;
 pub mod problem;
 pub mod replan;
 pub mod scaling;
+pub mod scvx;
 mod socp;
 mod solve;
 pub mod track;

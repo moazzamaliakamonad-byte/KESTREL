@@ -200,6 +200,7 @@ name = "kestrel-guidance"
 version = "0.1.0"
 dependencies = [
  "clarabel",
+ "kestrel-model",
 ]
 
 [[package]]
