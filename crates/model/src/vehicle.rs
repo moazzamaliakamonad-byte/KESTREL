@@ -142,10 +142,10 @@ impl Ship {
         [0.0, 0.0, -self.cm_height]
     }
 
-    /// `(min, max)` thrust with `n` engines running, N.
+    /// `(min, max)` thrust with `n` engines running (each at 40–100 %), N.
     pub fn thrust_limits(&self, n: u8) -> (f64, f64) {
         let n = f64::from(n);
-        (self.engine_max * self.throttle_min, self.engine_max * n)
+        (self.engine_max * self.throttle_min * n, self.engine_max * n)
     }
 }
 

@@ -8,8 +8,10 @@
 //! Simulation only. Not flight software.
 
 pub mod engine;
+pub mod raptors;
 pub mod rng;
 pub mod sensor;
+pub mod ship;
 pub mod sim;
 
 /// A 3-vector `[x, y, z]`, SI units, pad at the origin, `z` up.
@@ -23,3 +25,5 @@ pub use engine::Engine;
 pub use rng::Rng;
 pub use sensor::{Measurement, Noise, Sensor};
 pub use sim::{Gust, Params, Sim, Truth};
+pub use raptors::{Cluster, EngineState};
+pub use ship::{Command, CrashReason, Outcome, ShipSim, WindGust};

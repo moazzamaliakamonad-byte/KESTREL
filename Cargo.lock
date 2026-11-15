@@ -209,6 +209,9 @@ version = "0.1.0"
 [[package]]
 name = "kestrel-sim"
 version = "0.1.0"
+dependencies = [
+ "kestrel-model",
+]
 
 [[package]]
 name = "kestrel-wasm"
