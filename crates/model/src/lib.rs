@@ -9,4 +9,4 @@ pub mod vehicle;
 
 pub use dynamics::{Extra, State};
 pub use quat::{Quat, Vec3};
-pub use vehicle::{Catch, Planet, Scenario, Ship};
+pub use vehicle::{Catch, GridFins, Planet, Scenario, Ship, Tuning, VehicleKind};

@@ -62,7 +62,7 @@ pub fn f(scn: &Scenario, x: &State, thrust: Vec3, extra: &Extra) -> State {
     let ship = &scn.ship;
     let m = x[M].max(1.0);
     let (v, q, w) = (velocity(x), attitude(x), rates(x));
-    let rho = scn.planet.density(x[R + 2]);
+    let rho = scn.density(x[R + 2]);
     let (fa, ta) = aero::body_force(ship, rho, q, quat::sub(v, extra.wind));
 
     let force = quat::add(quat::add(quat::rotate(q, thrust), fa), extra.force);
