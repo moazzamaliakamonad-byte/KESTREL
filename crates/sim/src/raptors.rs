@@ -1,6 +1,8 @@
-//! The ship's three sea-level engines: ignition, a shared gimbal that slews
-//! at a limited rate, throttle with an optional first-order lag, shutdown
-//! (commanded by the flight software; no relight) and failures.
+//! The landing engines (the ship's three sea-level engines, or the
+//! booster's inner thirteen with the centre three first): ignition, a
+//! shared gimbal that slews at a limited rate, throttle with an optional
+//! first-order lag, shutdown (commanded by the flight software; no relight)
+//! and failures.
 //!
 //! All lit engines share one thrust direction and throttle (a simplification:
 //! real engines gimbal individually and sit off the axis).
@@ -31,12 +33,10 @@ impl EngineState {
     }
 }
 
-/// At most this many engines may fail ("engine out" button).
-pub const MAX_FAILED: usize = 2;
-
 #[derive(Debug, Clone)]
 pub struct Cluster {
-    pub engines: [EngineState; 3],
+    /// One per landing engine; on the booster 0–2 are the centre three.
+    pub engines: Vec<EngineState>,
     /// Throttle lag time constant, s (0 = instant).
     pub lag: f64,
     /// Thrust now, body axes, N.
@@ -53,7 +53,7 @@ pub struct Cluster {
 impl Cluster {
     pub fn new(ship: &Ship) -> Cluster {
         Cluster {
-            engines: [EngineState::Off; 3],
+            engines: vec![EngineState::Off; usize::from(ship.engine_count.max(1))],
             lag: 0.0,
             thrust: [0.0; 3],
             direction: [0.0, 0.0, 1.0],
@@ -104,9 +104,24 @@ impl Cluster {
         }
     }
 
+    /// At most this many engines may fail: one always survives.
+    pub fn max_failed(&self) -> usize {
+        self.engines.len() - 1
+    }
+
+    /// Fail engine `i`. False if it is already failed, does not exist, or
+    /// the limit is reached.
+    pub fn fail(&mut self, i: usize) -> bool {
+        if i >= self.engines.len() || self.engines[i] == EngineState::Failed || self.failed() >= self.max_failed() {
+            return false;
+        }
+        self.engines[i] = EngineState::Failed;
+        true
+    }
+
     /// Fail one engine (a running one first). False if the limit is reached.
     pub fn fail_next(&mut self) -> bool {
-        if self.failed() >= MAX_FAILED {
+        if self.failed() >= self.max_failed() {
             return false;
         }
         let pick = [
@@ -280,6 +295,28 @@ mod tests {
         assert!((quat::norm(c.thrust) - 1.2e6).abs() < 1.0);
         c.ignite_all();
         assert_eq!(c.lit(), 1, "shut-down engines do not relight");
+    }
+
+    #[test]
+    fn booster_has_thirteen_and_keeps_the_centre_three() {
+        let mut c = Cluster::new(&Ship::super_heavy_class());
+        assert_eq!(c.engines.len(), 13);
+        c.ignite_all();
+        c.step([0.0, 0.0, 3e7], 1.5);
+        assert_eq!(c.running(), 13);
+        assert!((quat::norm(c.thrust) - 3e7).abs() < 1.0);
+        assert!(c.fail(1) && !c.fail(1) && !c.fail(99));
+        c.shutdown_to(3);
+        // The centre three are 0..3; one of them failed, so 3 stays lit.
+        assert_eq!(c.engines[0], EngineState::Running);
+        assert_eq!(c.engines[1], EngineState::Failed);
+        assert_eq!(c.engines[2], EngineState::Running);
+        assert_eq!(c.engines[3], EngineState::Running);
+        assert_eq!(c.lit(), 3);
+        for i in 0..13 {
+            c.fail(i);
+        }
+        assert_eq!(c.failed(), 12, "one always survives");
     }
 
     #[test]

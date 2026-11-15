@@ -6,7 +6,7 @@
 use model::aero::{self, FLAPS};
 use model::dynamics::{self, Extra, State, M, Q, V, W};
 use model::quat::{self, Vec3};
-use model::{Planet, Scenario};
+use model::{Planet, Scenario, VehicleKind};
 
 use crate::raptors::Cluster;
 
@@ -15,6 +15,8 @@ pub const SUBSTEP: f64 = 0.01;
 /// Flap exposure slew rate, 1/s, and lowest exposure (folded).
 pub const FLAP_RATE: f64 = 1.0;
 pub const FLAP_MIN: f64 = 0.05;
+/// Grid-fin slew rate, rad/s (*illustrative*).
+pub const FIN_RATE: f64 = 1.0;
 /// RCS fires on an axis when the request exceeds this.
 pub const RCS_DEADBAND: f64 = 0.2;
 /// Wind gust profile: total length and ramps, s.
@@ -38,7 +40,9 @@ pub const LAND_TILT_DEG: f64 = 5.0;
 pub struct Command {
     /// Thrust, body axes, N (zero = no thrust wanted).
     pub thrust_body: Vec3,
-    /// Flap exposures, order of `model::aero::FLAPS`.
+    /// Control surfaces. Ship: flap exposures, order of
+    /// `model::aero::FLAPS`. Booster: grid-fin deflections, rad, order of
+    /// `model::aero::FIN_RADIAL` (the fourth is unused).
     pub flaps: [f64; FLAPS],
     /// Torque request per body axis, each in [−1, 1] (bang-bang RCS).
     pub rcs: Vec3,
@@ -119,6 +123,8 @@ pub struct ShipSim {
     pub flaps: [f64; FLAPS],
     pub rcs_firing: [bool; RCS_COUNT],
     pub gusts: Vec<WindGust>,
+    /// Steady wind, inertial, m/s (the same at every height).
+    pub wind: Vec3,
     pub legs_down: bool,
     pub arms_closed: bool,
     pub outcome: Option<Outcome>,
@@ -131,14 +137,16 @@ pub struct ShipSim {
 impl ShipSim {
     pub fn new(scn: Scenario, x: State) -> ShipSim {
         let cluster = Cluster::new(&scn.ship);
+        let trim = scn.ship.surface_trim();
         ShipSim {
             scn,
             x,
             t: 0.0,
             cluster,
-            flaps: [0.5; FLAPS],
+            flaps: [trim; FLAPS],
             rcs_firing: [false; RCS_COUNT],
             gusts: Vec::new(),
+            wind: [0.0; 3],
             legs_down: false,
             arms_closed: false,
             outcome: None,
@@ -150,7 +158,7 @@ impl ShipSim {
     pub fn wind_at(&self, t: f64) -> Vec3 {
         self.gusts
             .iter()
-            .fold([0.0; 3], |acc, g| quat::add(acc, g.wind(t)))
+            .fold(self.wind, |acc, g| quat::add(acc, g.wind(t)))
     }
 
     pub fn propellant(&self) -> f64 {
@@ -205,9 +213,14 @@ impl ShipSim {
             self.cluster.cut();
         }
         self.cluster.step(cmd.thrust_body, h);
+        let kind = self.scn.ship.kind;
+        let (lo, hi, rate) = match (kind, self.scn.ship.fins) {
+            (VehicleKind::Booster, Some(f)) => (-f.max_deflection, f.max_deflection, FIN_RATE),
+            _ => (FLAP_MIN, 1.0, FLAP_RATE),
+        };
         for i in 0..FLAPS {
-            let want = cmd.flaps[i].clamp(FLAP_MIN, 1.0);
-            let d = (want - self.flaps[i]).clamp(-FLAP_RATE * h, FLAP_RATE * h);
+            let want = if cmd.flaps[i].is_finite() { cmd.flaps[i].clamp(lo, hi) } else { self.flaps[i] };
+            let d = (want - self.flaps[i]).clamp(-rate * h, rate * h);
             self.flaps[i] += d;
         }
         let (rcs_torque, firing) = self.rcs(cmd.rcs);
@@ -220,8 +233,11 @@ impl ShipSim {
             let wind = self.wind_at(t);
             let q = dynamics::attitude(x);
             let w_air = quat::sub(dynamics::velocity(x), wind);
-            let rho = self.scn.planet.density(x[dynamics::R + 2]);
-            let (ff, ft) = aero::flap_force(&self.scn.ship, rho, q, w_air, flaps);
+            let rho = self.scn.density(x[dynamics::R + 2]);
+            let (ff, ft) = match kind {
+                VehicleKind::Ship => aero::flap_force(&self.scn.ship, rho, q, w_air, flaps),
+                VehicleKind::Booster => aero::fin_force(&self.scn.ship, rho, q, w_air, flaps),
+            };
             let extra = Extra {
                 force: ff,
                 torque: quat::add(ft, rcs_torque),
@@ -509,6 +525,53 @@ mod tests {
     fn off_axis_misses_the_arms() {
         let sim = descend_onto_arms(2.5, 1.0);
         assert_eq!(sim.outcome, Some(Outcome::Crashed(CrashReason::MissedArms)));
+    }
+
+    #[test]
+    fn booster_fins_slew_clamp_and_turn_it() {
+        let s = Scenario::booster();
+        let x = state(s.start_mass, [0.0, 0.0, 8000.0], [0.0, 0.0, -300.0], upright(), [0.0; 3]);
+        let mut sim = ShipSim::new(s, x);
+        assert_eq!(sim.flaps, [0.0; 4]);
+        // δ1 − δ0 > 0 is a + torque about y: the top tips toward +x.
+        let cmd = Command {
+            flaps: [-9.0, 9.0, 0.0, 0.0],
+            ..Command::default()
+        };
+        sim.step(&cmd, 0.1);
+        assert!((sim.flaps[1] - 0.1).abs() < 1e-9, "slews at 1 rad/s: {:?}", sim.flaps);
+        sim.step(&cmd, 1.0);
+        let lim = sim.scn.ship.fins.unwrap().max_deflection;
+        assert!((sim.flaps[1] - lim).abs() < 1e-9 && (sim.flaps[0] + lim).abs() < 1e-9);
+        assert!(dynamics::rates(&sim.x)[1] > 0.0);
+    }
+
+    #[test]
+    fn booster_slow_on_axis_is_caught() {
+        let s = Scenario::booster();
+        let x = state(s.dry_mass + 30e3, [0.2, 0.0, s.floor_z + 6.0], [0.0, 0.0, -1.0], upright(), [0.0; 3]);
+        let mut sim = ShipSim::new(s, x);
+        sim.cluster.ignite_all();
+        sim.cluster.step([0.0, 0.0, 1.0], 1.5);
+        sim.cluster.shutdown_to(3);
+        for _ in 0..400 {
+            let cmd = Command {
+                thrust_body: [0.0, 0.0, sim.x[M] * 9.80665],
+                flaps: [0.0; 4],
+                ..Command::default()
+            };
+            sim.step(&cmd, 0.05);
+        }
+        assert_eq!(sim.outcome, Some(Outcome::Caught));
+    }
+
+    #[test]
+    fn steady_wind_adds_to_gusts() {
+        let mut sim = earth_at([0.0, 0.0, 5000.0], [0.0; 3], upright());
+        sim.wind = [3.0, -4.0, 0.0];
+        sim.gusts.push(WindGust { start: 0.0, dir: [1.0, 0.0, 0.0], speed: 10.0 });
+        assert_eq!(sim.wind_at(2.0), [13.0, -4.0, 0.0]);
+        assert_eq!(sim.wind_at(100.0), [3.0, -4.0, 0.0]);
     }
 
     fn mars_touchdown(q: model::Quat, speed: f64) -> ShipSim {
