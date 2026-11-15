@@ -187,6 +187,33 @@ fn earth_fast_entry_is_caught() {
     assert_eq!(f.sim().outcome, Some(Outcome::Caught));
 }
 
+/// The browser's conditions, swept: solve latency, the solve time the page
+/// reports (prediction lead) and the frame step (sim speed 2 at 30 fps is
+/// 1/15 s). Debug aid: `--ignored --nocapture`.
+#[test]
+#[ignore]
+fn booster_browser_sweep() {
+    for (latency, lead, frame) in [(0.5, 0.0, FRAME), (0.5, 0.5, FRAME), (0.3, 0.3, FRAME), (0.3, 0.3, 1.0 / 15.0), (0.5, 0.55, 1.0 / 15.0), (0.25, 0.3, 0.1), (0.1, 0.15, FRAME), (1.0, 1.0, FRAME), (0.8, 0.85, 1.0 / 15.0)] {
+        for seed in [7u64, 11, 23] {
+            let mut f = ShipFlight::new(ShipFlightConfig { seed, lag: 0.3, noise: Noise::LOW, ..ShipFlightConfig::new(Kind::Booster) }).unwrap();
+            f.set_solve_time(lead);
+            let mut pending: Option<Pending> = None;
+            let mut last_request = f64::NEG_INFINITY;
+            let (mut ok, mut bad) = (0, 0);
+            while f.phase() != Phase::Done && f.sim().t < 400.0 {
+                f.step(frame);
+                match deliver(&mut f, &mut pending) {
+                    Some(true) => ok += 1,
+                    Some(false) => bad += 1,
+                    None => {}
+                }
+                request_after(&mut f, &mut pending, &mut last_request, latency);
+            }
+            eprintln!("latency {latency} lead {lead} frame {frame:.3} seed {seed}: {:?} t {:.0} plans {ok} failed {bad} prop {:.0} t", f.sim().outcome, f.sim().t, f.sim().propellant() / 1e3);
+        }
+    }
+}
+
 /// A slow computer: every solve takes a full second of sim time (the
 /// booster's whole 13-engine leg is about 9 s). It must still be caught.
 /// (At 1.5 s it is not: see LIMITATIONS.md.)

@@ -544,28 +544,17 @@ impl ShipFlight {
     /// gate first, else every lit engine to an intermediate gate.
     pub fn problem(&mut self) -> (f64, Vec<(Leg, ShipProblem)>) {
         let measured = self.measure();
-        // The booster's burn is short and violent: by the time a plan
-        // comes back the booster is somewhere else (at 4 g, 1.5 s of
-        // solving is 100 m/s). So plan from where it will be then: the
-        // measurement carried forward over the expected solve time with
-        // the thrust now commanded, and stamp the plan with that time.
-        let lead = if self.sim.scn.ship.kind == VehicleKind::Booster { self.solve_time } else { 0.0 };
-        let x = match &self.guide {
-            _ if lead <= 0.0 => measured,
-            // Flying a plan: it will be about where the plan says, with
-            // today's tracking error carried along.
-            Guide::Plan { plan, t0 } => {
-                let (now, _) = plan.sample(self.sim.t - t0);
-                let (then, _) = plan.sample(self.sim.t + lead - t0);
-                let mut x = then;
-                for i in R..V + 3 {
-                    x[i] += measured[i] - now[i];
-                }
-                x[M] = (measured[M] + then[M] - now[M]).max(self.sim.scn.dry_mass + 1.0);
-                x
-            }
-            _ => predict(&self.sim.scn, &measured, self.last.thrust_body, lead),
-        };
+        // The booster's first plan: it is braking at 4 g with no plan to
+        // follow, so by the time the plan comes back it is somewhere else
+        // (a second of solving is 60 m/s). Plan from where it will be
+        // then: the measurement carried forward over the expected solve
+        // time at the thrust now commanded, stamped with that time.
+        // Later re-plans start from the measurement: the booster is on a
+        // plan and near it, and predicting along that plan was tried and
+        // made every re-plan fight the last (it hit the tower).
+        let first = self.sim.scn.ship.kind == VehicleKind::Booster && !matches!(self.guide, Guide::Plan { .. });
+        let lead = if first { self.solve_time } else { 0.0 };
+        let x = if lead > 0.0 { predict(&self.sim.scn, &measured, self.last.thrust_body, lead) } else { measured };
         let t = self.sim.t + lead;
         let lit = self.sim.cluster.lit().max(1);
         // Could the final engines alone stop it before the gate? If they
