@@ -41,6 +41,9 @@ pub const ZETA: f64 = 0.8;
 /// Largest body rate the attitude loop asks for from an angle error, rad/s
 /// (35°/s): a quicker flip spends less time pushing the ship sideways.
 pub const RATE_LIMIT: f64 = 0.610_865_238_198_015_2;
+/// The attitude loop's bandwidth is capped so that this angle error (rad,
+/// ~6°) does not saturate the gimbal.
+const AUTHORITY_ANGLE: f64 = 0.1;
 /// Belly flop attitude loop (slower: flaps are weak).
 pub const WN_FLAP: f64 = 0.8;
 /// Largest correction of the planned thrust direction, rad (8°). More, and
@@ -54,8 +57,7 @@ pub const KP_TERMINAL: f64 = 0.12;
 pub const KD_TERMINAL: f64 = 0.7;
 /// Largest sideways acceleration in the terminal phase, m/s² (absolute: a
 /// share of g was far too weak in Mars gravity).
-pub const LATERAL_ACCEL: f64 = 0.6;
-pub const FINAL_LATERAL_ACCEL: f64 = 0.2;
+pub const LATERAL_ACCEL: f64 = 0.4;
 /// Largest sideways speed in the terminal phase, m/s.
 pub const SLIDE: f64 = 4.0;
 /// Above this height over the rest position the terminal phase sinks fast
@@ -185,11 +187,12 @@ pub fn belly_flop(scn: &Scenario, x: &State, target_x: f64, ignition_z: f64) -> 
 fn fly_force(scn: &Scenario, x: &State, force: Vec3, q_des: Quat, w_des: Vec3, limits: (f64, f64)) -> Actuation {
     let q = dynamics::attitude(x);
     let body = aero_torque(scn, x);
-    let tau = attitude_torque(scn, x, q_des, w_des, WN);
-    let need: Vec3 = std::array::from_fn(|i| tau[i] - body[i]);
     let fb = quat::rotate_inv(q, force);
     let l = scn.ship.cm_height;
     let tz = fb[2].clamp(limits.0, limits.1);
+    let wn = bandwidth(scn, x, tz);
+    let tau = attitude_torque(scn, x, q_des, w_des, wn);
+    let need: Vec3 = std::array::from_fn(|i| tau[i] - body[i]);
     // r_T × T = (l T_y, −l T_x, 0).
     let mut lat = [-need[1] / l, need[0] / l];
     let cap = scn.ship.gimbal_max.tan() * tz;
@@ -229,6 +232,15 @@ pub fn powered(scn: &Scenario, x: &State, reference: (&State, Vec3), limits: (f6
     fly_force(scn, x, force, q_des, dynamics::rates(xr), limits)
 }
 
+/// Attitude-loop bandwidth the gimbal can actually give at thrust `tz`,
+/// rad/s: a heavy ship on one engine (Mars) saturates a fixed-gain loop and
+/// wobbles.
+fn bandwidth(scn: &Scenario, x: &State, tz: f64) -> f64 {
+    let j = scn.ship.inertia(x[M]);
+    let alpha = scn.ship.cm_height * scn.ship.gimbal_max.tan() * tz / j[0].max(j[1]);
+    WN.min((alpha / AUTHORITY_ANGLE).sqrt()).max(0.3)
+}
+
 /// The flip: every lit engine at minimum throttle along the body axis, the
 /// gimbal swinging the ship upright at no more than [`RATE_LIMIT`].
 pub fn flip(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
@@ -257,7 +269,10 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
     } else {
         // Full sink rate when centred, a slow one when nearly so, a hover
         // when far off (a hard centred-and-still test hovered for ages).
-        if off < scn.centring && side < 1.0 {
+        // Never sink onto the arms or legs while still sliding.
+        if side > scn.settle_side_speed {
+            0.0
+        } else if off < scn.centring {
             SINK
         } else if off < 2.0 * scn.centring {
             0.3 * SINK
@@ -265,20 +280,29 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
             0.0
         }
     };
+    // The sideways loop runs through the attitude loop: slow it down with
+    // it, or it circles the axis (seen on Mars).
+    let k = bandwidth(scn, x, m * g) / WN;
+    let kd = KD_TERMINAL * k;
     // Velocity command toward the axis, at most SLIDE m/s.
-    let mut want = [-KP_TERMINAL / KD_TERMINAL * r[0], -KP_TERMINAL / KD_TERMINAL * r[1]];
+    let mut want = [-KP_TERMINAL / KD_TERMINAL * k * r[0], -KP_TERMINAL / KD_TERMINAL * k * r[1]];
+    // Close enough: only damp the slide, don't keep chasing the exact
+    // axis (that position loop circled the pad on Mars).
+    if off < scn.centring {
+        want = [0.0, 0.0];
+    }
     let n = want[0].hypot(want[1]);
     if n > SLIDE {
         want = [want[0] * SLIDE / n, want[1] * SLIDE / n];
     }
     let a = [
-        KD_TERMINAL * (want[0] - v[0]),
-        KD_TERMINAL * (want[1] - v[1]),
+        kd * (want[0] - v[0]),
+        kd * (want[1] - v[1]),
         2.0 * (-sink - v[2]),
     ];
-    // Gentle in the final metres: the arms take the ship only within 3° of upright.
-    // (but full authority while still sliding, or it overshoots the axis).
-    let lat_cap = if h > FINAL_HEIGHT || side > 0.5 { LATERAL_ACCEL } else { FINAL_LATERAL_ACCEL };
+    // One cap throughout: switching between two acted like a relay and the
+    // ship circled the pad.
+    let lat_cap = LATERAL_ACCEL;
     let h = a[0].hypot(a[1]);
     let a = if h > lat_cap {
         [a[0] * lat_cap / h, a[1] * lat_cap / h, a[2]]

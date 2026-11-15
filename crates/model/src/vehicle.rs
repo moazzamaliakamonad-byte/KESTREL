@@ -191,6 +191,8 @@ pub struct Scenario {
     /// The final descent starts once the axis is this close to its target, m
     /// (the arms need ~1 m; legs can stand anywhere near the pad).
     pub centring: f64,
+    /// …and it sinks only while sliding slower than this, m/s.
+    pub settle_side_speed: f64,
 }
 
 impl Scenario {
@@ -224,27 +226,31 @@ impl Scenario {
             ignition_floor: 1000.0,
             switch_fraction: 0.45,
             centring: 1.0,
+            settle_side_speed: 0.5,
             ship,
         }
     }
 
     /// Mars: after entry, a long supersonic burn to a landing on legs.
-    /// 90 t of landing propellant (*illustrative*).
+    /// 100 t of landing propellant (*illustrative*).
     pub fn mars() -> Scenario {
         let ship = Ship::starship_class();
         let touchdown_cm = ship.cm_height + ship.leg_drop;
         Scenario {
             planet: Planet::Mars,
-            start_mass: 350e3,
+            start_mass: 360e3,
             dry_mass: 260e3,
-            gate: [0.0, 0.0, touchdown_cm + 15.0],
-            gate_velocity: [0.0, 0.0, -1.0],
+            // Hand over to the terminal descent well above the ground:
+            // short-horizon plans near the end converge poorly.
+            gate: [0.0, 0.0, touchdown_cm + 60.0],
+            gate_velocity: [0.0, 0.0, -3.0],
             floor_z: touchdown_cm,
             clearance_x: None,
             catch: None,
             ignition_floor: 0.0,
             switch_fraction: 0.8,
             centring: 5.0,
+            settle_side_speed: 0.8,
             ship,
         }
     }

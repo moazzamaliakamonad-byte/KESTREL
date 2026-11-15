@@ -120,7 +120,6 @@ fn earth_nominal_is_caught() {
 }
 
 #[test]
-#[ignore = "Mars closed loop runs out of propellant in the last leg; being fixed"]
 fn mars_nominal_lands() {
     let r = fly(Kind::Mars, Noise::LOW, 0.3, &[], &[]);
     assert_eq!(r.outcome, Some(Outcome::Landed));
@@ -196,8 +195,9 @@ fn trace(kind: Kind) {
                 _ => [f64::NAN; 3],
             };
             eprintln!(
-                "t {t:6.2} {:12} r ({:7.1},{:6.1},{:7.1}) v ({:6.1},{:6.1},{:6.1}) nose ({:5.2},{:5.2}) T {:5.2} MN n {} prop {:5.1} t | ref ({:7.1},{:7.1})",
+                "t {t:6.2} {:12} r ({:7.1},{:6.1},{:7.1}) v ({:6.1},{:6.1},{:6.1}) nose ({:5.2},{:5.2}) w {:?} T {:5.2} MN n {} prop {:5.1} t | ref ({:7.1},{:7.1})",
                 f.phase().as_str(), r[0], r[1], r[2], v[0], v[1], v[2], nose[0], nose[2],
+                dynamics::rates(&x).map(|c| (c.to_degrees() * 10.0).round() / 10.0),
                 quat::norm(s.cluster.thrust) / 1e6, s.cluster.lit(), s.propellant() / 1e3, pr[0], pr[2]
             );
         }

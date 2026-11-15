@@ -128,12 +128,16 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
     for i in 0..NX {
         zero.push(vec![(l.x(0, i), 1.0)], -p.x0[i]);
     }
-    // Final gate: position, velocity, upright (q_x = q_y = 0), at rest.
+    // Final gate: position, velocity, upright (q_x = q_y = 0), not turning
+    // in pitch or yaw. Roll rate is left free: the gimbal makes no roll
+    // torque, so a measured roll rate would make the gate unreachable.
     let last = k - 1;
     for i in 0..3 {
         zero.push(vec![(l.x(last, R + i), 1.0)], -p.gate_r[i]);
         zero.push(vec![(l.x(last, V + i), 1.0)], -p.gate_v[i]);
-        zero.push(vec![(l.x(last, W + i), 1.0)], 0.0);
+        if i < 2 {
+            zero.push(vec![(l.x(last, W + i), 1.0)], 0.0);
+        }
     }
     zero.push(vec![(l.x(last, Q + 1), 1.0)], 0.0);
     zero.push(vec![(l.x(last, Q + 2), 1.0)], 0.0);
