@@ -43,3 +43,26 @@ export function rotateScene(q: SQuat, v: Vec3): Vec3 {
   const [x, y, z, w] = q;
   return rotate([w, x, y, z], v);
 }
+
+/** Shortest-arc physics quaternion taking +z onto the unit vector `d`. */
+export function quatFromZ(d: Vec3): PQuat {
+  const n = Math.hypot(d[0], d[1], d[2]);
+  if (n < 1e-9) return [1, 0, 0, 0];
+  const [x, y, z] = [d[0] / n, d[1] / n, d[2] / n];
+  // axis = ẑ × d = (−y, x, 0); w = 1 + ẑ·d (then normalize).
+  const w = 1 + z;
+  if (w < 1e-9) return [0, 0, 1, 0];
+  const m = Math.hypot(w, x, y);
+  return [w / m, -y / m, x / m, 0];
+}
+
+/** Inverse rotation: an inertial vector into body axes. */
+export function rotateInv(q: PQuat, v: Vec3): Vec3 {
+  return rotate([q[0], -q[1], -q[2], -q[3]], v);
+}
+
+/** The attitude a vehicle starts with (as Rust's `start_state`): the ship belly down with its nose toward −x, the booster engines first along its fall. */
+export function startAttitude(vehicle: "ship" | "booster", velocity: Vec3): PQuat {
+  if (vehicle === "ship") return [0, -Math.SQRT1_2, 0, Math.SQRT1_2];
+  return quatFromZ([-velocity[0], -velocity[1], -velocity[2]]);
+}

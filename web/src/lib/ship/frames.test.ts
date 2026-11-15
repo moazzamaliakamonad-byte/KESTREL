@@ -29,3 +29,29 @@ describe("ship frames", () => {
     expect(h).toBeGreaterThan(0);
   });
 });
+
+import { quatFromZ, rotateInv, startAttitude } from "./frames";
+
+describe("start attitudes", () => {
+  it("quatFromZ turns +z onto the direction", () => {
+    for (const d of [[0, 0, 1], [1, 0, 0], [0.3, -0.4, 0.5], [0, 0, -1]] as Vec3[]) {
+      const n = Math.hypot(...d);
+      const out = rotate(quatFromZ(d), [0, 0, 1]);
+      out.forEach((c, i) => expect(c).toBeCloseTo(d[i] / n, 9));
+    }
+  });
+
+  it("the booster starts engines first: its axis opposes the velocity", () => {
+    const v: Vec3 = [-30, 10, -420];
+    const axis = rotate(startAttitude("booster", v), [0, 0, 1]);
+    const n = Math.hypot(...v);
+    axis.forEach((c, i) => expect(c).toBeCloseTo(-v[i] / n, 9));
+  });
+
+  it("the ship starts belly down with its nose toward −x", () => {
+    const q = startAttitude("ship", [0, 0, -80]);
+    expect(rotate(q, [0, 0, 1])[0]).toBeCloseTo(-1);
+    expect(rotate(q, [1, 0, 0])[2]).toBeCloseTo(-1);
+    expect(rotateInv(q, rotate(q, [1, 2, 3]))[1]).toBeCloseTo(2);
+  });
+});

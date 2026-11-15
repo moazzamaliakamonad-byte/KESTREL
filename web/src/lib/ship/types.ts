@@ -1,13 +1,17 @@
 import type { PQuat, Vec3 } from "./frames";
 
-export type ScenarioKind = "earth" | "mars";
-export type ShipPhase = "belly-flop" | "flip" | "landing-burn" | "terminal" | "done";
+/** A flight kind as Rust names it: the ship on Earth, the ship on Mars, the booster (Earth). */
+export type ScenarioKind = "earth" | "mars" | "booster";
+export type Vehicle = "ship" | "booster";
+export type Planet = "earth" | "mars";
+export type ShipPhase = "belly-flop" | "flip" | "descent" | "startup" | "landing-burn" | "terminal" | "done";
 export type EngineState = "off" | "igniting" | "running" | "shutdown" | "failed";
 export type Outcome = "caught" | "landed" | "crashed";
 
-/** `ShipFlight.snapshot()` (crates/wasm/src/ship_js.rs). */
+/** `ShipFlight.snapshot()` (crates/wasm/src/ship_js.rs). SI units. */
 export interface ShipSnapshot {
   t: number;
+  vehicle: Vehicle;
   phase: ShipPhase;
   position: Vec3;
   velocity: Vec3;
@@ -15,14 +19,29 @@ export interface ShipSnapshot {
   omega: Vec3;
   tilt_deg: number;
   mass: number;
+  dry_mass: number;
   propellant: number;
-  engines: [EngineState, EngineState, EngineState];
+  /** One per landing engine (ship 3; booster 13, the centre three first). */
+  engines: EngineState[];
+  /** Body axes, N. */
   thrust: Vec3;
+  thrust_inertial: Vec3;
   thrust_mag: number;
+  thrust_limits: [number, number];
   gimbal_deg: number;
+  /** Ship: flap exposures 0–1. Booster: grid-fin deflections, rad (three used). */
   flaps: [number, number, number, number];
   rcs: boolean[];
   q_dyn: number;
+  mach: number;
+  /** Thrust over mass, in g. */
+  accel_g: number;
+  /** Inertial, N. */
+  aero_force: Vec3;
+  weight: number;
+  density: number;
+  /** Stagnation-point heating estimate, W/m² (not part of the dynamics). */
+  heat_flux: number;
   legs: boolean;
   arms: boolean;
   wind: Vec3;
@@ -35,12 +54,26 @@ export interface ShipSnapshot {
   end_velocity: Vec3 | null;
 }
 
+/** Physics options; a missing field keeps the scenario's value. */
+export interface Tuning {
+  density_scale?: number;
+  gimbal_max_deg?: number;
+  throttle_min?: number;
+  isp?: number;
+  ignition_time?: number;
+}
+
 /** `ship_scenario(kind)`. */
 export interface ScenarioInfo {
   scenario: ScenarioKind;
-  planet: ScenarioKind;
+  planet: Planet;
+  vehicle: Vehicle;
   gravity: number;
   start: { position: Vec3; velocity: Vec3 };
+  /** Landing propellant, kg. */
+  propellant: number;
+  aim: [number, number];
+  tuning: Required<Tuning>;
   ship: {
     length: number;
     radius: number;
@@ -50,6 +83,11 @@ export interface ScenarioInfo {
     leg_radius: number;
     engine_max: number;
     engines: number;
+    final_engines: number;
+    isp: number;
+    throttle_min: number;
+    fin_station: number | null;
+    fin_max_deg: number | null;
     fore_station: number;
     aft_station: number;
     flap_y: number;
@@ -60,6 +98,23 @@ export interface ScenarioInfo {
   gate: Vec3;
   rest_cm_z: number;
   catch: { arm_z: number; mast_x: number; mast_half: number; tower_top: number; capture_radius: number } | null;
+}
+
+/** What `ShipFlight.create` and `preview_ship` take. */
+export interface FlightConfig {
+  scenario: ScenarioKind;
+  position: Vec3;
+  velocity: Vec3;
+  seed?: number;
+  lag?: number;
+  noise?: "off" | "low" | "high";
+  tuning?: Tuning;
+  /** kg */
+  propellant?: number;
+  /** m/s (x, y) */
+  wind?: [number, number];
+  gust_speed?: number;
+  failed?: number[];
 }
 
 /** `ShipFlight.plan_json()`. */
@@ -79,4 +134,5 @@ export interface Preview {
   outcome: Outcome | null;
   reason: string | null;
   t: number;
+  propellant?: number;
 }
