@@ -59,8 +59,7 @@ fn deliver(f: &mut ShipFlight, pending: &mut Option<Pending>) -> Option<bool> {
 /// Fly to the end. Events fire at sim times; a solve requested at `t` is
 /// applied at `t + REPLAN_PERIOD`, stamped `t`.
 fn fly(kind: Kind, noise: Noise, lag: f64, events: &[(f64, Event)], ignition_events: &[Event]) -> Report {
-    let (position, velocity) = kind.default_start();
-    let mut f = ShipFlight::new(ShipFlightConfig { kind, position, velocity, seed: 7, lag, noise }).unwrap();
+    let mut f = ShipFlight::new(ShipFlightConfig { seed: 7, lag, noise, ..ShipFlightConfig::new(kind) }).unwrap();
     let m0 = f.sim().x[dynamics::M];
     let mut pending: Option<Pending> = None;
     let mut last_request = f64::NEG_INFINITY;
@@ -138,6 +137,31 @@ fn earth_gust_in_belly_flop_is_caught() {
 }
 
 #[test]
+fn booster_nominal_is_caught() {
+    let r = fly(Kind::Booster, Noise::LOW, 0.3, &[], &[]);
+    assert_eq!(r.outcome, Some(Outcome::Caught));
+    assert!(r.replans > 3);
+}
+
+#[test]
+fn booster_centre_engine_out_at_ignition_is_caught() {
+    let r = fly(Kind::Booster, Noise::LOW, 0.3, &[], &[Event::EngineOut]);
+    assert_eq!(r.outcome, Some(Outcome::Caught));
+}
+
+#[test]
+fn booster_gusts_in_descent_is_caught() {
+    let r = fly(Kind::Booster, Noise::LOW, 0.3, &[(8.0, Event::Gust(1.0)), (20.0, Event::Gust(-1.0))], &[]);
+    assert_eq!(r.outcome, Some(Outcome::Caught));
+}
+
+#[test]
+#[ignore]
+fn trace_booster() {
+    trace(Kind::Booster);
+}
+
+#[test]
 #[ignore]
 fn earth_high_noise_and_lag() {
     let r = fly(Kind::Earth, Noise::HIGH, 1.0, &[], &[]);
@@ -159,13 +183,12 @@ fn trace_mars() {
 
 fn trace(kind: Kind) {
     use model::quat;
-    let (position, velocity) = kind.default_start();
     let noise = match std::env::var("TRACE_NOISE").as_deref() {
         Ok("low") => Noise::LOW,
         Ok("high") => Noise::HIGH,
         _ => Noise::OFF,
     };
-    let mut f = ShipFlight::new(ShipFlightConfig { kind, position, velocity, seed: 7, lag: 0.3, noise }).unwrap();
+    let mut f = ShipFlight::new(ShipFlightConfig { seed: 7, lag: 0.3, noise, ..ShipFlightConfig::new(kind) }).unwrap();
     let mut next_print = 0.0;
     let mut last_request = f64::NEG_INFINITY;
     let mut pending: Option<Pending> = None;
@@ -196,7 +219,7 @@ fn trace(kind: Kind) {
             };
             eprintln!(
                 "t {t:6.2} {:12} r ({:7.1},{:6.1},{:7.1}) v ({:6.1},{:6.1},{:6.1}) nose ({:5.2},{:5.2}) w {:?} T {:5.2} MN n {} prop {:5.1} t | ref ({:7.1},{:7.1})",
-                f.phase().as_str(), r[0], r[1], r[2], v[0], v[1], v[2], nose[0], nose[2],
+                f.phase().label(kind), r[0], r[1], r[2], v[0], v[1], v[2], nose[0], nose[2],
                 dynamics::rates(&x).map(|c| (c.to_degrees() * 10.0).round() / 10.0),
                 quat::norm(s.cluster.thrust) / 1e6, s.cluster.lit(), s.propellant() / 1e3, pr[0], pr[2]
             );

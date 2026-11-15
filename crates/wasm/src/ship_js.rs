@@ -1,4 +1,4 @@
-//! The ship's closed loop as JavaScript sees it: a `ShipFlight` class on the
+//! The ship's and the booster's closed loop as JavaScript sees it: a `ShipFlight` class on the
 //! main thread, `plan_ship` for the worker, `preview_ship` for the page's
 //! "where will it go" line. JSON in and out; nothing here panics or throws
 //! (D-009). Simulation only.
@@ -11,6 +11,7 @@ use guidance::GuidanceError;
 use guidance::scvx::{ShipPlan, ShipProblem};
 use model::dynamics::{self, State};
 use model::quat::{self, Vec3};
+use model::{Scenario, Tuning, VehicleKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sim::Noise;
@@ -31,6 +32,58 @@ struct ConfigDto {
     lag: f64,
     #[serde(default)]
     noise: Option<String>,
+    /// Physics options; every field optional.
+    #[serde(default)]
+    tuning: TuningDto,
+    /// Landing propellant, kg.
+    #[serde(default)]
+    propellant: Option<f64>,
+    /// Steady wind, m/s (x, y).
+    #[serde(default)]
+    wind: Option<[f64; 2]>,
+    #[serde(default)]
+    gust_speed: Option<f64>,
+    /// Landing engines failed from the start.
+    #[serde(default)]
+    failed: Vec<usize>,
+}
+
+/// Physics options as the page sends them (angles in degrees). A missing
+/// field keeps the scenario's value.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+struct TuningDto {
+    #[serde(default)]
+    density_scale: Option<f64>,
+    #[serde(default)]
+    gimbal_max_deg: Option<f64>,
+    #[serde(default)]
+    throttle_min: Option<f64>,
+    #[serde(default)]
+    isp: Option<f64>,
+    #[serde(default)]
+    ignition_time: Option<f64>,
+}
+
+impl TuningDto {
+    fn onto(&self, base: Tuning) -> Tuning {
+        Tuning {
+            density_scale: self.density_scale.unwrap_or(base.density_scale),
+            gimbal_max: self.gimbal_max_deg.map_or(base.gimbal_max, f64::to_radians),
+            throttle_min: self.throttle_min.unwrap_or(base.throttle_min),
+            isp: self.isp.unwrap_or(base.isp),
+            ignition_time: self.ignition_time.unwrap_or(base.ignition_time),
+        }
+    }
+
+    fn of(t: &Tuning) -> TuningDto {
+        TuningDto {
+            density_scale: Some(t.density_scale),
+            gimbal_max_deg: Some(t.gimbal_max.to_degrees()),
+            throttle_min: Some(t.throttle_min),
+            isp: Some(t.isp),
+            ignition_time: Some(t.ignition_time),
+        }
+    }
 }
 
 fn noise_level(name: &str) -> Option<Noise> {
@@ -48,13 +101,20 @@ fn config(json: &str) -> Option<ShipFlightConfig> {
         None => Noise::OFF,
         Some(n) => noise_level(n)?,
     };
+    let kind = Kind::parse(&c.scenario)?;
+    let base = ShipFlightConfig::new(kind);
     Some(ShipFlightConfig {
-        kind: Kind::parse(&c.scenario)?,
         position: c.position,
         velocity: c.velocity,
         seed: c.seed,
         lag: c.lag,
         noise,
+        tuning: Some(c.tuning.onto(kind.scenario().tuning())),
+        propellant: c.propellant,
+        wind: c.wind.unwrap_or([0.0; 2]),
+        gust_speed: c.gust_speed.unwrap_or(base.gust_speed),
+        failed: c.failed,
+        ..base
     })
 }
 
@@ -98,6 +158,9 @@ struct OptionDto {
 #[derive(Debug, Serialize, Deserialize)]
 struct RequestDto {
     scenario: String,
+    /// The flight's physics options: the worker must plan with them.
+    #[serde(default)]
+    tuning: TuningDto,
     options: Vec<OptionDto>,
 }
 
@@ -154,9 +217,10 @@ impl PlanDto {
     }
 }
 
-fn request_of(kind: Kind, options: &[(Leg, ShipProblem)]) -> RequestDto {
+fn request_of(kind: Kind, scn: &Scenario, options: &[(Leg, ShipProblem)]) -> RequestDto {
     RequestDto {
         scenario: kind.as_str().to_string(),
+        tuning: TuningDto::of(&scn.tuning()),
         options: options
             .iter()
             .map(|(leg, p)| OptionDto {
@@ -176,7 +240,9 @@ fn problems_of(req: RequestDto) -> Option<Vec<(Leg, ShipProblem)>> {
     req.options
         .into_iter()
         .map(|o| {
-            let mut scn = kind.scenario();
+            let base = kind.scenario();
+            let tuning = req.tuning.onto(base.tuning());
+            let mut scn = base.tuned(&tuning);
             let leg: Leg = o.leg.into();
             scn.gate = leg.gate;
             scn.gate_velocity = leg.gate_velocity;
@@ -229,8 +295,9 @@ pub fn preview_ship(config_json: &str) -> String {
     let Ok(mut f) = ShipFlight::new(c) else {
         return failure("BadRequest", "start not allowed".into()).to_string();
     };
+    let kind = f.kind;
     let mut path = vec![dynamics::position(&f.sim().x)];
-    let mut phases = vec![json!({"t": 0.0, "phase": f.phase().as_str()})];
+    let mut phases = vec![json!({"t": 0.0, "phase": f.phase().label(kind)})];
     let mut since = 0.0;
     let mut last_phase = f.phase();
     while f.phase() != Phase::Done && f.sim().t < 400.0 {
@@ -249,11 +316,15 @@ pub fn preview_ship(config_json: &str) -> String {
         }
         if f.phase() != last_phase {
             last_phase = f.phase();
-            phases.push(json!({"t": f.sim().t, "phase": last_phase.as_str(), "position": dynamics::position(&f.sim().x)}));
+            phases.push(json!({"t": f.sim().t, "phase": last_phase.label(kind), "position": dynamics::position(&f.sim().x)}));
         }
     }
     let (outcome, reason) = outcome_str(f.sim().outcome);
-    json!({"ok": true, "path": path, "phases": phases, "outcome": outcome, "reason": reason, "t": f.sim().t}).to_string()
+    json!({
+        "ok": true, "path": path, "phases": phases, "outcome": outcome, "reason": reason, "t": f.sim().t,
+        "propellant": f.sim().propellant(),
+    })
+    .to_string()
 }
 
 /// The scenario's fixed numbers the page draws and edits with.
@@ -268,6 +339,10 @@ pub fn ship_scenario(kind: &str) -> String {
         "ok": true,
         "scenario": k.as_str(),
         "planet": match s.planet { model::Planet::Earth => "earth", model::Planet::Mars => "mars" },
+        "vehicle": vehicle_str(s.ship.kind),
+        "propellant": s.start_mass - s.dry_mass,
+        "aim": s.aim,
+        "tuning": TuningDto::of(&s.tuning()),
         "gravity": s.planet.gravity(),
         "start": {"position": position, "velocity": velocity},
         "ship": {
@@ -279,6 +354,11 @@ pub fn ship_scenario(kind: &str) -> String {
             "leg_radius": s.ship.leg_radius,
             "engine_max": s.ship.engine_max,
             "engines": s.ship.engine_count,
+            "final_engines": s.ship.final_engines,
+            "isp": s.ship.isp,
+            "throttle_min": s.ship.throttle_min,
+            "fin_station": s.ship.fins.map(|f| f.station),
+            "fin_max_deg": s.ship.fins.map(|f| f.max_deflection.to_degrees()),
             "fore_station": s.ship.fore.station,
             "aft_station": s.ship.aft.station,
             "flap_y": s.ship.flap_y,
@@ -296,7 +376,14 @@ pub fn ship_scenario(kind: &str) -> String {
     .to_string()
 }
 
-/// One ship flight, owned by the page.
+fn vehicle_str(k: VehicleKind) -> &'static str {
+    match k {
+        VehicleKind::Ship => "ship",
+        VehicleKind::Booster => "booster",
+    }
+}
+
+/// One flight (ship or booster), owned by the page.
 #[wasm_bindgen(js_name = ShipFlight)]
 pub struct ShipFlightJs {
     inner: ShipFlight,
@@ -304,7 +391,8 @@ pub struct ShipFlightJs {
 
 #[wasm_bindgen(js_class = ShipFlight)]
 impl ShipFlightJs {
-    /// `{scenario: "earth"|"mars", position, velocity, seed?, lag?, noise?}`;
+    /// `{scenario: "earth"|"mars"|"booster", position, velocity, seed?, lag?,
+    /// noise?, tuning?, propellant?, wind?, gust_speed?, failed?}`;
     /// `undefined` if not valid.
     pub fn create(config_json: &str) -> Option<ShipFlightJs> {
         let inner = ShipFlight::new(config(config_json)?).ok()?;
@@ -322,7 +410,7 @@ impl ShipFlightJs {
     /// `{t, request}` for the worker.
     pub fn measure_request(&mut self) -> String {
         let (t, options) = self.inner.problem();
-        json!({"t": t, "request": request_of(self.inner.kind, &options)}).to_string()
+        json!({"t": t, "request": request_of(self.inner.kind, &self.inner.sim().scn, &options)}).to_string()
     }
 
     /// Install the worker's answer to a request measured at sim time `t`.
@@ -352,8 +440,28 @@ impl ShipFlightJs {
         self.inner.gust(dir);
     }
 
+    /// A gust blowing toward the horizontal direction `(dx, dy)`.
+    pub fn gust_toward(&mut self, dx: f64, dy: f64) {
+        self.inner.gust_toward(dx, dy);
+    }
+
+    pub fn set_gust_speed(&mut self, speed: f64) {
+        self.inner.set_gust_speed(speed);
+    }
+
+    /// Steady wind, m/s.
+    pub fn set_wind(&mut self, x: f64, y: f64) {
+        self.inner.set_wind(x, y);
+    }
+
     pub fn engine_out(&mut self) -> bool {
         self.inner.engine_out()
+    }
+
+    /// Fail landing engine `i` (0-based; on the booster 0–2 are the centre
+    /// three). False if it cannot fail (already failed, or the last one).
+    pub fn fail_engine(&mut self, i: usize) -> bool {
+        self.inner.fail_engine(i)
     }
 
     pub fn set_lag(&mut self, seconds: f64) {
@@ -389,7 +497,25 @@ impl ShipFlightJs {
         let v = dynamics::velocity(&x);
         let q = dynamics::attitude(&x);
         let w_air = quat::sub(v, s.wind_at(s.t));
-        let rho = s.scn.planet.density(x[dynamics::R + 2]);
+        let rho = s.scn.density(x[dynamics::R + 2]);
+        let (t_min, t_max) = s.cluster.limits();
+        // Aerodynamic force now (body plus control surfaces), inertial, N.
+        let (f_body, _) = model::aero::body_force(&s.scn.ship, rho, q, w_air);
+        let (f_surf, _) = match s.scn.ship.kind {
+            VehicleKind::Ship => model::aero::flap_force(&s.scn.ship, rho, q, w_air, s.flaps),
+            VehicleKind::Booster => model::aero::fin_force(&s.scn.ship, rho, q, w_air, s.flaps),
+        };
+        // Stagnation-point heating, W/m² (Sutton–Graves, 4.5 m nose radius:
+        // an estimate for the picture; heating is not part of the dynamics).
+        let k_sg = match s.scn.planet {
+            model::Planet::Earth => 1.7415e-4,
+            model::Planet::Mars => 1.9027e-4,
+        };
+        let heat_flux = k_sg * (rho / s.scn.ship.radius).sqrt() * quat::norm(w_air).powi(3);
+        let speed_of_sound = match s.scn.planet {
+            model::Planet::Earth => 340.0 - 0.004 * x[dynamics::R + 2].clamp(0.0, 11_000.0),
+            model::Planet::Mars => 240.0,
+        };
         let thrust = s.cluster.thrust;
         let tn = quat::norm(thrust);
         let gimbal = if tn > 0.0 { (thrust[2] / tn).clamp(-1.0, 1.0).acos().to_degrees() } else { 0.0 };
@@ -401,7 +527,18 @@ impl ShipFlightJs {
         };
         json!({
             "t": s.t,
-            "phase": f.phase().as_str(),
+            "vehicle": vehicle_str(s.scn.ship.kind),
+            "phase": f.phase().label(f.kind),
+            "thrust_limits": [t_min, t_max],
+            "mach": quat::norm(w_air) / speed_of_sound,
+            "accel_g": quat::norm(thrust) / (x[dynamics::M] * model::vehicle::G0),
+            "dry_mass": s.scn.dry_mass,
+            "aero_force": quat::add(f_body, f_surf),
+            "thrust_inertial": quat::rotate(q, thrust),
+            "weight": x[dynamics::M] * s.scn.planet.gravity(),
+            "density": rho,
+            "heat_flux": heat_flux,
+            "command": {"thrust": f.last_command().thrust_body, "surfaces": f.last_command().flaps, "rcs": f.last_command().rcs},
             "position": dynamics::position(&x),
             "velocity": v,
             "quat": q,
@@ -487,10 +624,36 @@ mod tests {
     }
 
     #[test]
+    fn booster_config_options_reach_the_flight_and_the_worker() {
+        let cfg = r#"{"scenario":"booster","position":[1200,0,14000],"velocity":[-30,0,-420],
+            "tuning":{"gimbal_max_deg":10,"density_scale":1.2},"propellant":120000,
+            "wind":[5,-3],"gust_speed":25,"failed":[4,7]}"#;
+        let mut f = ShipFlightJs::create(cfg).unwrap();
+        let s = parse(&f.snapshot());
+        assert_eq!(s["vehicle"], "booster");
+        assert_eq!(s["phase"], "descent");
+        assert_eq!(s["engines"].as_array().unwrap().len(), 13);
+        assert_eq!(s["engines"][4], "failed");
+        assert_eq!(s["engines"][7], "failed");
+        assert_eq!(s["propellant"], 120000.0);
+        assert_eq!(s["wind"], json!([5.0, -3.0, 0.0]));
+        assert!(f.fail_engine(0) && !f.fail_engine(0));
+        let scn = &f.inner.sim().scn;
+        assert!((scn.ship.gimbal_max.to_degrees() - 10.0).abs() < 1e-9);
+        assert_eq!(scn.density_scale, 1.2);
+        // The request carries the options to the worker.
+        let req = parse(&f.measure_request());
+        assert_eq!(req["request"]["tuning"]["density_scale"], 1.2);
+        let info = parse(&ship_scenario("booster"));
+        assert_eq!(info["vehicle"], "booster");
+        assert_eq!(info["ship"]["engines"], 13);
+    }
+
+    #[test]
     fn snapshot_has_the_panels_fields() {
         let f = ShipFlightJs::create(EARTH).unwrap();
         let s = parse(&f.snapshot());
-        for k in ["t", "phase", "position", "quat", "engines", "flaps", "rcs", "q_dyn", "propellant"] {
+        for k in ["t", "phase", "position", "quat", "engines", "flaps", "rcs", "q_dyn", "propellant", "aero_force", "heat_flux", "mach", "weight"] {
             assert!(!s[k].is_null(), "missing {k}");
         }
         assert_eq!(s["phase"], "belly-flop");

@@ -1,17 +1,20 @@
-//! One closed-loop ship flight: the 6-DoF simulator (truth), the sensors,
+//! One closed-loop flight of the ship or the booster: the 6-DoF simulator (truth), the sensors,
 //! the flight phases and controllers, and the latest SCvx plan. Planning
 //! itself happens elsewhere (the page's worker, or synchronously in tests):
 //! this hands out measurements and accepts plans stamped with the
 //! measurement time. Every control step reads the sensors, never the truth.
 //!
-//! Phases, as on the real vehicle's return:
-//! 1. **Belly flop**: engines off, flaps fly the ship toward the flip point.
-//! 2. **Flip**: every healthy engine lights at minimum throttle; a scripted
-//!    attitude controller swings the ship upright (≤ 25°/s).
+//! Phases, as on the real vehicles' returns:
+//! 1. **Belly flop** (ship) / **descent** (booster): engines off; flaps or
+//!    grid fins fly the vehicle toward the ignition point.
+//! 2. **Flip** (ship) / **start-up** (booster): every healthy landing
+//!    engine lights at minimum throttle; a scripted attitude controller
+//!    brings the vehicle upright (≤ 35°/s).
 //! 3. **Landing burn**, in legs with a fixed number of engines each, planned
-//!    by SCvx: on one engine straight to the approach gate if it can stop
-//!    in time, else on every lit engine to an intermediate gate higher up,
-//!    then on one engine to the approach gate.
+//!    by SCvx: on the final engines (ship 1, booster 3) straight to the
+//!    approach gate if they can stop in time, else on every lit engine
+//!    (ship 3, booster 13) to an intermediate gate higher up, then on the
+//!    final engines to the approach gate.
 //! 4. **Terminal**: slide over the catch axis / pad and settle onto the arms
 //!    or the legs.
 //!
@@ -22,10 +25,10 @@ use guidance::scvx::{self, ShipPlan, ShipProblem};
 use guidance::ship_control::{self, Actuation};
 use model::dynamics::{self, M, R, State, V};
 use model::quat::{self, Vec3};
-use model::{Planet, Scenario};
+use model::{Planet, Scenario, Tuning, VehicleKind};
 use sim::ship::{Command, SUBSTEP, ShipSim, WindGust};
 use sim::sensor::{Measurement, Noise, Sensor};
-use sim::{EngineState, Rng, Truth};
+use sim::{Rng, Truth};
 
 /// Sim time between re-plan requests, s.
 pub const REPLAN_PERIOD: f64 = 0.5;
@@ -52,9 +55,10 @@ pub const THRUST_MARGIN: f64 = 0.9;
 /// …and on the last engine with this share (thrust-to-weight about 1.6 at
 /// Earth landing mass, near the 1.6 Everyday Astronaut found optimal).
 pub const LATE_MARGIN: f64 = 0.75;
-/// Speed at the intermediate gate, m/s (down).
-pub const MID_GATE_SPEED: f64 = 25.0;
-/// Wind gust speed, m/s.
+/// In the final approach an engine is shut down when the lit engines'
+/// minimum thrust exceeds this share of the weight (too light to hover).
+pub const HOVER_SHARE: f64 = 0.97;
+/// Default wind gust speed, m/s.
 pub const GUST_SPEED: f64 = 15.0;
 /// Attitude sensor error σ (rad) and rate error σ (rad/s), high noise.
 pub const ATT_SIGMA_HIGH: (f64, f64) = (0.003_490_658_503_988_659, 0.000_872_664_625_997_164_9);
@@ -78,12 +82,26 @@ impl Phase {
             Phase::Done => "done",
         }
     }
+
+    /// The phase's name for a vehicle: the booster's unpowered fall and
+    /// engine start-up are not a belly flop and a flip.
+    pub fn label(self, kind: Kind) -> &'static str {
+        match (kind, self) {
+            (Kind::Booster, Phase::BellyFlop) => "descent",
+            (Kind::Booster, Phase::Flip) => "startup",
+            _ => self.as_str(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
+    /// The ship back to the tower on Earth.
     Earth,
+    /// The ship onto its legs on Mars.
     Mars,
+    /// The booster back to the tower on Earth.
+    Booster,
 }
 
 impl Kind {
@@ -91,6 +109,7 @@ impl Kind {
         match s {
             "earth" => Some(Kind::Earth),
             "mars" => Some(Kind::Mars),
+            "booster" => Some(Kind::Booster),
             _ => None,
         }
     }
@@ -98,12 +117,14 @@ impl Kind {
         match self {
             Kind::Earth => "earth",
             Kind::Mars => "mars",
+            Kind::Booster => "booster",
         }
     }
     pub fn scenario(self) -> Scenario {
         match self {
             Kind::Earth => Scenario::earth(),
             Kind::Mars => Scenario::mars(),
+            Kind::Booster => Scenario::booster(),
         }
     }
     /// Default start: (position, velocity).
@@ -111,14 +132,7 @@ impl Kind {
         match self {
             Kind::Earth => ([700.0, 0.0, 5000.0], [-25.0, 0.0, -75.0]),
             Kind::Mars => ([1500.0, 0.0, 14_000.0], [-40.0, 0.0, -450.0]),
-        }
-    }
-    /// Where the belly flop aims to be at ignition (x), m. On Earth the flip
-    /// pushes the ship toward the tower, so it starts out beyond the gate.
-    pub fn flip_target_x(self) -> f64 {
-        match self {
-            Kind::Earth => 450.0,
-            Kind::Mars => 0.0,
+            Kind::Booster => ([900.0, 0.0, 14_000.0], [-30.0, 0.0, -420.0]),
         }
     }
 }
@@ -131,11 +145,59 @@ pub struct ShipFlightConfig {
     pub seed: u64,
     pub lag: f64,
     pub noise: Noise,
+    /// Physics options (None = the scenario's own).
+    pub tuning: Option<Tuning>,
+    /// Landing propellant at the start, kg (None = the scenario's own).
+    pub propellant: Option<f64>,
+    /// Steady wind, m/s (x, y).
+    pub wind: [f64; 2],
+    /// Speed of the gusts the page can throw, m/s.
+    pub gust_speed: f64,
+    /// Landing engines that never light (indices).
+    pub failed: Vec<usize>,
 }
 
-/// Belly down, nose toward the tower (−x).
+impl ShipFlightConfig {
+    /// The scenario's default start with nothing changed.
+    pub fn new(kind: Kind) -> ShipFlightConfig {
+        let (position, velocity) = kind.default_start();
+        ShipFlightConfig {
+            kind,
+            position,
+            velocity,
+            seed: 1,
+            lag: 0.0,
+            noise: Noise::OFF,
+            tuning: None,
+            propellant: None,
+            wind: [0.0; 2],
+            gust_speed: GUST_SPEED,
+            failed: Vec::new(),
+        }
+    }
+
+    /// The scenario this configuration flies (options applied).
+    pub fn scenario(&self) -> Scenario {
+        let mut scn = self.kind.scenario();
+        if let Some(t) = &self.tuning {
+            scn = scn.tuned(t);
+        }
+        if let Some(p) = self.propellant.filter(|p| p.is_finite()) {
+            let standard = scn.start_mass - scn.dry_mass;
+            scn.start_mass = scn.dry_mass + p.clamp(1e3, 3.0 * standard);
+        }
+        scn
+    }
+}
+
+/// The start attitude. Ship: belly down, nose toward the tower (−x).
+/// Booster: engines first, its axis along the fall.
 pub fn start_state(scn: &Scenario, r: Vec3, v: Vec3) -> State {
-    dynamics::state(scn.start_mass, r, v, ship_control::belly_attitude(0.0), [0.0; 3])
+    let q = match scn.ship.kind {
+        VehicleKind::Ship => ship_control::belly_attitude(0.0),
+        VehicleKind::Booster => ship_control::descent_attitude(v),
+    };
+    dynamics::state(scn.start_mass, r, v, q, [0.0; 3])
 }
 
 /// One leg of the landing burn: this many engines, to this gate.
@@ -173,18 +235,24 @@ pub struct ShipFlight {
     last: Actuation,
     est: State,
     ignition_z: f64,
+    gust_speed: f64,
 }
 
 impl ShipFlight {
     pub fn new(c: ShipFlightConfig) -> Result<ShipFlight, &'static str> {
-        let scn = c.kind.scenario();
-        let ok = c.position.iter().chain(&c.velocity).all(|v| v.is_finite());
-        if !ok || c.position[2] < 1500.0 || !(0.0..=5.0).contains(&c.lag) {
+        let scn = c.scenario();
+        let ok = c.position.iter().chain(&c.velocity).chain(&c.wind).all(|v| v.is_finite());
+        if !ok || c.position[2] < 1500.0 || !(0.0..=5.0).contains(&c.lag) || !c.gust_speed.is_finite() {
             return Err("bad flight configuration");
         }
         let x = start_state(&scn, c.position, c.velocity);
+        let trim = scn.ship.surface_trim();
         let mut sim = ShipSim::new(scn, x);
         sim.cluster.lag = c.lag;
+        sim.wind = [c.wind[0].clamp(-40.0, 40.0), c.wind[1].clamp(-40.0, 40.0), 0.0];
+        for i in &c.failed {
+            sim.cluster.fail(*i);
+        }
         Ok(ShipFlight {
             kind: c.kind,
             sim,
@@ -198,11 +266,12 @@ impl ShipFlight {
             grabbed: false,
             last: Actuation {
                 thrust_body: [0.0; 3],
-                flaps: [ship_control::FLAP_TRIM; 4],
+                flaps: [trim; 4],
                 rcs: [0.0; 3],
             },
             est: x,
             ignition_z: 0.0,
+            gust_speed: c.gust_speed.clamp(0.0, 60.0),
         })
     }
 
@@ -276,30 +345,36 @@ impl ShipFlight {
         self.sim.scn.ship.thrust_limits(self.sim.cluster.lit().max(1))
     }
 
+    /// Engines flown to the end: the vehicle's final count, or fewer if
+    /// fewer are left.
+    fn final_engines(&self) -> u8 {
+        self.sim.scn.ship.final_engines.min(self.sim.cluster.healthy()).max(1)
+    }
+
     /// Planned thrust range for a leg on `n` engines, N.
     pub fn leg_limits(&self, n: u8) -> (f64, f64) {
         let (lo, hi) = self.sim.scn.ship.thrust_limits(n);
-        let k = if n == 1 { LATE_MARGIN } else { THRUST_MARGIN };
+        let k = if n <= self.final_engines() { LATE_MARGIN } else { THRUST_MARGIN };
         (lo, (hi * k).max(lo * 1.05))
     }
 
-    /// The last leg: one engine to the approach gate.
+    /// The last leg: the final engines to the approach gate.
     fn final_leg(&self) -> Leg {
         Leg {
-            engines: 1,
+            engines: self.final_engines(),
             gate: self.sim.scn.gate,
             gate_velocity: self.sim.scn.gate_velocity,
             last: true,
         }
     }
 
-    /// An intermediate gate above the approach gate, from which one engine
-    /// (with its margin) stops the ship with room to spare.
+    /// An intermediate gate above the approach gate, from which the final
+    /// engines (with their margin) stop the vehicle with room to spare.
     fn mid_leg(&self, x: &State, engines: u8) -> Leg {
         let scn = &self.sim.scn;
         let g = scn.planet.gravity();
-        let decel = (self.leg_limits(1).1 / x[M] - g).max(0.5);
-        let v = MID_GATE_SPEED;
+        let decel = (self.leg_limits(self.final_engines()).1 / x[M] - g).max(0.5);
+        let v = scn.mid_gate_speed;
         let z = scn.gate[2] + 1.5 * v * v / (2.0 * decel) + 50.0;
         Leg {
             engines,
@@ -344,13 +419,13 @@ impl ShipFlight {
                     }
                     self.phase = Phase::Flip;
                 }
-                ship_control::belly_flop(&scn, &est, self.kind.flip_target_x(), self.ignition_z)
+                ship_control::unpowered(&scn, &est, self.ignition_z)
             }
             Phase::Flip => {
                 let limits = self.command_limits();
                 if self.sim.cluster.running() == 0 {
                     // Spinning up: keep the flaps flying, ask for thrust.
-                    let mut a = ship_control::belly_flop(&scn, &est, self.kind.flip_target_x(), self.ignition_z);
+                    let mut a = ship_control::unpowered(&scn, &est, self.ignition_z);
                     a.thrust_body = [0.0, 0.0, limits.0];
                     a
                 } else {
@@ -365,7 +440,13 @@ impl ShipFlight {
             }
             Phase::Burn => self.burn(&scn, &est, t),
             Phase::Terminal => {
-                self.sim.cluster.shutdown_to(1);
+                self.sim.cluster.shutdown_to(self.final_engines());
+                // Too light to hover on what is lit: drop one more.
+                let lit = self.sim.cluster.lit();
+                let weight = est[M] * scn.planet.gravity();
+                if lit > 1 && self.command_limits().0 > HOVER_SHARE * weight {
+                    self.sim.cluster.shutdown_to(lit - 1);
+                }
                 ship_control::terminal(&scn, &est, self.command_limits())
             }
             Phase::Done => self.last,
@@ -392,7 +473,7 @@ impl ShipFlight {
                     (2.0 * GATE_POSITION, 2.0 * GATE_VELOCITY)
                 };
                 if tau >= plan.final_time || Self::near(est, leg.gate, leg.gate_velocity, tol) {
-                    self.sim.cluster.shutdown_to(1);
+                    self.sim.cluster.shutdown_to(self.final_engines());
                     if leg.last {
                         self.phase = Phase::Terminal;
                     } else {
@@ -408,8 +489,8 @@ impl ShipFlight {
                 // No plan (yet): brake upright toward the axis. Several lit
                 // engines at minimum throttle out-push the weight, so once
                 // the fall is mostly arrested keep only one.
-                if self.sim.cluster.lit() > 1 && est[V + 2] > -10.0 {
-                    self.sim.cluster.shutdown_to(1);
+                if self.sim.cluster.lit() > self.final_engines() && est[V + 2] > -10.0 {
+                    self.sim.cluster.shutdown_to(self.final_engines());
                 }
                 ship_control::terminal(scn, est, self.command_limits())
             }
@@ -446,7 +527,7 @@ impl ShipFlight {
         let lit = self.sim.cluster.lit().max(1);
         let legs = match self.leg {
             Some(leg) => vec![leg],
-            None if lit > 1 => vec![self.final_leg(), self.mid_leg(&x, lit)],
+            None if lit > self.final_engines() => vec![self.final_leg(), self.mid_leg(&x, lit)],
             None => vec![self.final_leg()],
         };
         let options = legs
@@ -490,17 +571,44 @@ impl ShipFlight {
         }
     }
 
+    /// A gust along ±x (the tower's line), at the configured speed.
     pub fn gust(&mut self, dir: f64) {
-        let d = if dir < 0.0 { -1.0 } else { 1.0 };
+        self.gust_toward(if dir < 0.0 { -1.0 } else { 1.0 }, 0.0);
+    }
+
+    /// A gust blowing toward the horizontal direction `(dx, dy)`.
+    pub fn gust_toward(&mut self, dx: f64, dy: f64) {
+        let n = dx.hypot(dy);
+        if !n.is_finite() || n < 1e-9 {
+            return;
+        }
         self.sim.gusts.push(WindGust {
             start: self.sim.t,
-            dir: [d, 0.0, 0.0],
-            speed: GUST_SPEED,
+            dir: [dx / n, dy / n, 0.0],
+            speed: self.gust_speed,
         });
+    }
+
+    pub fn set_gust_speed(&mut self, speed: f64) {
+        if speed.is_finite() {
+            self.gust_speed = speed.clamp(0.0, 60.0);
+        }
+    }
+
+    /// Steady wind, m/s (x, y).
+    pub fn set_wind(&mut self, x: f64, y: f64) {
+        if x.is_finite() && y.is_finite() {
+            self.sim.wind = [x.clamp(-40.0, 40.0), y.clamp(-40.0, 40.0), 0.0];
+        }
     }
 
     pub fn engine_out(&mut self) -> bool {
         self.sim.cluster.fail_next()
+    }
+
+    /// Fail landing engine `i`.
+    pub fn fail_engine(&mut self, i: usize) -> bool {
+        self.sim.cluster.fail(i)
     }
 
     pub fn set_lag(&mut self, seconds: f64) {
@@ -531,8 +639,8 @@ impl ShipFlight {
     }
 
     /// Engine states as text, for the panels.
-    pub fn engine_states(&self) -> [&'static str; 3] {
-        self.sim.cluster.engines.map(EngineState::as_str)
+    pub fn engine_states(&self) -> Vec<&'static str> {
+        self.sim.cluster.engines.iter().map(|e| e.as_str()).collect()
     }
 }
 
@@ -555,12 +663,9 @@ pub fn plan(options: &[(Leg, ShipProblem)]) -> Result<(usize, ShipPlan), Guidanc
 /// path (every 0.5 s) and the state at ignition.
 pub fn predict_glide(kind: Kind, position: Vec3, velocity: Vec3) -> Option<(Vec<Vec3>, State)> {
     let mut f = ShipFlight::new(ShipFlightConfig {
-        kind,
         position,
         velocity,
-        seed: 1,
-        lag: 0.0,
-        noise: Noise::OFF,
+        ..ShipFlightConfig::new(kind)
     })
     .ok()?;
     let mut path = vec![position];

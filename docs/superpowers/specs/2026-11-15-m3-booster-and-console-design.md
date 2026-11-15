@@ -37,7 +37,7 @@ sequence.
 | Ascent propellant | 3 650 t | Wikipedia, Block 3 (drawn/described only; ascent is not simulated) |
 | Grid fins | **3**, electric, in a 90/90/180° arrangement; two carry the catch hardpoints | Wikipedia. (Block 1/2 had 4; the owner's brief said 4 — the current vehicle has 3, so 3 are modelled.) |
 | Attitude thrusters | cold gas from ullage gas | Wikipedia |
-| Landing propellant | header tanks (LOX header tank; methane via the downcomer) | Wikipedia; quantity not published → *illustrative* 90 t |
+| Landing propellant | header tanks (LOX header tank; methane via the downcomer) | Wikipedia; quantity not published → *illustrative* 120 t |
 | Landing burn | 13 engines light, then all but the centre 3 shut down; the 3 steer it into the arms | Wikipedia, NPR / The Register (Flight 5) |
 | Burn altitude / speed, catch speed, fin size and deflection, gimbal range, arm heights, aerodynamic coefficients, centre of mass, inertia | — | not published → *illustrative* |
 | Full stack height | 124.4 m (72.3 + 52.1) | Wikipedia |
@@ -59,7 +59,7 @@ sequence.
 - **Too light to hover**: if the lit engines' minimum thrust exceeds the
   weight in the terminal phase, one more engine is shut down (the booster
   ends on two when nearly empty). Illustrative behaviour.
-- **Offshore aim, then divert**: the unpowered descent aims 250 m out from
+- **Offshore aim, then divert**: the unpowered descent aims 120 m out from
   the tower (+x); the landing-burn plan carries it in. The real vehicle
   does the same for range safety; the distance is illustrative.
 - **Tuning** (physics options) is one serializable struct applied to the
@@ -71,7 +71,7 @@ sequence.
 ## Booster model (illustrative unless in the table)
 
 - 72.3 m × 9 m; centre of mass 26 m above the base; inertia per kg
-  `(440, 440, 18)` m²; 275 t empty + 90 t landing propellant.
+  `(440, 440, 18)` m²; 275 t empty + 120 t landing propellant.
 - 13 landing engines × 2.45 MN, 40–100 %, Isp 330 s, shared gimbal ≤ 15°.
 - Aerodynamics, engines first: axial `C_A = 1.0` (terminal speed ≈ 320 m/s
   near the ground); crossflow `C_N = 0.6`; **plus a linear lift term**
@@ -94,12 +94,12 @@ sequence.
 2. **Landing-burn start-up**: the 13 engines light (ignition altitude from
    the same stopping rule as the ship); the attitude is brought upright.
 3. **Landing burn**: SCvx on 13 engines to an intermediate gate (50 m/s
-   down), then SCvx on the centre 3 to the approach gate 20 m out from the
+   down), then SCvx on the centre 3 to the approach gate 8 m out from the
    catch axis.
 4. **Final approach**: the shared terminal controller slides over the axis
    and sinks onto the arms at 1 m/s.
 
-Start (default): 14 km up, 1.2 km out, 420 m/s down. Supersonic part of
+Start (default): 14 km up, 0.9 km out, 420 m/s down. Supersonic part of
 the fall has no Mach model (stated in LIMITATIONS.md).
 
 ## Customization
