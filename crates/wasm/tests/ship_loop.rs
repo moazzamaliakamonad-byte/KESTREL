@@ -155,6 +155,31 @@ fn booster_gusts_in_descent_is_caught() {
     assert_eq!(r.outcome, Some(Outcome::Caught));
 }
 
+/// A steep entry from 80 km at 2.5 km/s: the belly flop must hold through
+/// the dense air and the engines must wait for it to slow the ship. Slow
+/// (a 200 s flight): run with `--ignored`.
+#[test]
+#[ignore]
+fn earth_fast_entry_is_caught() {
+    let mut f = ShipFlight::new(ShipFlightConfig {
+        position: [3000.0, 0.0, 80_000.0],
+        velocity: [-100.0, 0.0, -2500.0],
+        seed: 7,
+        lag: 0.3,
+        noise: Noise::LOW,
+        ..ShipFlightConfig::new(Kind::Earth)
+    })
+    .unwrap();
+    let mut pending: Option<Pending> = None;
+    let mut last_request = f64::NEG_INFINITY;
+    while f.phase() != Phase::Done && f.sim().t < 400.0 {
+        f.step(FRAME);
+        deliver(&mut f, &mut pending);
+        request(&mut f, &mut pending, &mut last_request);
+    }
+    assert_eq!(f.sim().outcome, Some(Outcome::Caught));
+}
+
 #[test]
 #[ignore]
 fn trace_booster() {

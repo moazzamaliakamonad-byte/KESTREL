@@ -465,7 +465,29 @@ pub fn ignition_altitude(scn: &Scenario, x: &State, max_thrust: f64) -> f64 {
     let z0 = x[dynamics::R + 2];
     let vz = dynamics::velocity(x)[2].min(0.0);
     if scn.ship.kind == VehicleKind::Ship {
-        return (scn.gate[2] + IGNITION_MARGIN * vz * vz / (2.0 * decel)).max(scn.ignition_floor);
+        let need = |v2: f64| scn.gate[2] + IGNITION_MARGIN * v2 / (2.0 * decel);
+        let now = need(vz * vz);
+        // A steep, fast entry is faster than it could stop from: the air
+        // will slow it first. So also judge by the speed the fall predicts
+        // (belly-first drag), and take the later of the two. Where the
+        // air is thin and the fall speeds up (Mars), the simple rule wins.
+        let drag = quat::norm(aero::body_force(&scn.ship, 1.0, belly_attitude(0.0), [0.0, 0.0, -1.0]).0);
+        let step = ((z0 - scn.gate[2]) / 200.0).max(5.0);
+        let (mut z, mut v2) = (z0, vz * vz);
+        // The lowest height where "can still stop" turns into "cannot".
+        let mut ignite = now;
+        let mut could = false;
+        while z > scn.gate[2] {
+            let a = g - scn.density(z) * drag * v2 / m;
+            v2 = (v2 + 2.0 * a * step).max(0.0);
+            z -= step;
+            let can = z > need(v2);
+            if could && !can {
+                ignite = need(v2);
+            }
+            could = can;
+        }
+        return ignite.min(now).max(scn.ignition_floor);
     }
     // Axial drag per unit of ρ·speed² (engines first, falling and braking).
     let drag = quat::norm(aero::body_force(&scn.ship, 1.0, [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0]).0);
