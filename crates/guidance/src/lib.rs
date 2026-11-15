@@ -9,6 +9,7 @@ pub mod problem;
 pub mod replan;
 pub mod scaling;
 pub mod scvx;
+pub mod ship_control;
 mod socp;
 mod solve;
 pub mod track;
