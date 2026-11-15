@@ -38,6 +38,8 @@ pub struct Sub<'a> {
     /// From this node on, tilt ≤ θ, as `‖(q_x, q_y)‖ ≤ sin(θ/2)`.
     pub upright_from: usize,
     pub upright_sin_half: f64,
+    /// sin(half the largest tilt) allowed from node 2 on (soft), if any.
+    pub tilt_sin_half: Option<f64>,
     /// Sideways speed `‖v_xy‖ ≤ c0 + c1 · (z − gate_z)` from node 2 on.
     pub side_speed: (f64, f64),
     pub sigma_bounds: (f64, f64),
@@ -203,6 +205,13 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
             b.push(vec![(l.x(m, R + 2), c1), (l.soft(m), 1.0)], c0 - c1 * p.gate_r[2]);
             b.push(vec![(l.x(m, V), 1.0)], 0.0);
             b.push(vec![(l.x(m, V + 1), 1.0)], 0.0);
+            socs.push(b);
+        }
+        if let Some(s) = p.tilt_sin_half.filter(|_| m >= 2 && m < p.upright_from) {
+            let mut b = Block::default();
+            b.push(vec![(l.soft(m), 0.1)], s);
+            b.push(vec![(l.x(m, Q + 1), 1.0)], 0.0);
+            b.push(vec![(l.x(m, Q + 2), 1.0)], 0.0);
             socs.push(b);
         }
         if m >= p.upright_from {

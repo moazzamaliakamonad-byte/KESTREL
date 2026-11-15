@@ -11,7 +11,7 @@ mod subproblem;
 
 use model::dynamics::{self, State, M, Q};
 use model::quat::{self, Quat, Vec3};
-use model::Scenario;
+use model::{Scenario, VehicleKind};
 
 use crate::GuidanceError;
 use discretize::{Units, NX};
@@ -48,11 +48,30 @@ pub struct ShipProblem {
     /// Fly within [`UPRIGHT_TILT`] of upright from this node on (overrides
     /// the default: from the switch node, else the last fifth).
     pub upright_from: Option<usize>,
+    /// Largest planned tilt from vertical, rad (None: free, as the ship's
+    /// flip needs). The booster stays near upright through its burn.
+    pub max_tilt: Option<f64>,
     pub nodes: usize,
 }
 
+/// The booster's largest planned tilt in the landing burn, rad (15°,
+/// *illustrative*). Without it the optimizer turns the booster broadside
+/// at 400 m/s to brake on air drag: cheap on paper, violent in reality.
+pub const BOOSTER_TILT: f64 = 0.261_799_387_799_149_4;
+
 impl ShipProblem {
-    pub fn new(scn: Scenario, x0: State, thrust_limits: (f64, f64)) -> ShipProblem {
+    pub fn new(mut scn: Scenario, x0: State, thrust_limits: (f64, f64)) -> ShipProblem {
+        let max_tilt = match scn.ship.kind {
+            VehicleKind::Ship => None,
+            VehicleKind::Booster => {
+                // Plan without crossflow drag. It rewards leaning either
+                // way equally (two mirror-image optima), and successive
+                // convexification hopped between them instead of
+                // converging. The controller absorbs the difference.
+                scn.ship.c_n = 0.0;
+                Some(BOOSTER_TILT)
+            }
+        };
         ShipProblem {
             scn,
             x0,
@@ -60,6 +79,7 @@ impl ShipProblem {
             late_limits: None,
             switch_node: NODES,
             upright_from: None,
+            max_tilt,
             nodes: NODES,
         }
     }
@@ -273,6 +293,7 @@ pub fn plan_ship(p: &ShipProblem, warm: Option<(&ShipPlan, f64)>, max_iter: usiz
                 if p.late_limits.is_some() { p.switch_node.min(tail) } else { tail }
             }),
             upright_sin_half: (UPRIGHT_TILT / 2.0).sin(),
+            tilt_sin_half: p.max_tilt.map(|t| (t / 2.0).sin()),
             side_speed: (SIDE_SPEED_0 / lv, SIDE_SPEED_SLOPE * units.t),
             sigma_bounds: (1.0 / units.t, 200.0 / units.t),
             w_virtual: W_VIRTUAL,

@@ -131,3 +131,39 @@ fn trace_one_engine_from_midflight() {
         Err(e) => eprintln!("err {e:?}"),
     }
 }
+
+fn booster_burn_problem(x: f64, vx: f64, lean: f64) -> ShipProblem {
+    let mut scn = Scenario::booster();
+    let m = 381e3;
+    let v = [vx, 0.0, -412.0];
+    let q = quat::mul(crate::ship_control::descent_attitude(v), quat::from_axis_angle([0.0, 1.0, 0.0], lean));
+    let x0 = dynamics::state(m, [x, 0.0, 2578.0], v, q, [0.0; 3]);
+    scn.gate = [20.0, 0.0, 540.0];
+    scn.gate_velocity = [0.0, 0.0, -50.0];
+    let (lo, hi) = scn.ship.thrust_limits(13);
+    ShipProblem::new(scn, x0, (lo, 0.9 * hi))
+}
+
+#[test]
+fn booster_thirteen_engine_burn_plans_from_either_side() {
+    // The 13-engine leg from the ignition point to the intermediate gate,
+    // out from the tower and (after an overshoot) on its other side.
+    for p in [booster_burn_problem(180.0, -25.0, 0.03), booster_burn_problem(60.0, 25.0, -0.03)] {
+        let plan = plan_ship(&p, None, COLD_ITERATIONS).expect("plan");
+        assert!(plan.converged && plan.gate_error < 1.0, "gate {}", plan.gate_error);
+        assert!((6.0..14.0).contains(&plan.final_time), "tf {}", plan.final_time);
+        check_limits(&p, &plan);
+        // Never broadside: within the tilt limit (plus the soft slack).
+        for x in &plan.x[2..] {
+            let tilt = quat::tilt(dynamics::attitude(x));
+            assert!(tilt < BOOSTER_TILT + 0.05, "tilt {}", tilt.to_degrees());
+        }
+    }
+}
+
+#[test]
+fn booster_divert_beyond_reach_is_refused() {
+    // 336 m sideways in a nine-second burn at ≤ 15° tilt cannot be done.
+    let p = booster_burn_problem(356.0, -35.0, 0.03);
+    assert!(plan_ship(&p, None, COLD_ITERATIONS).is_err());
+}

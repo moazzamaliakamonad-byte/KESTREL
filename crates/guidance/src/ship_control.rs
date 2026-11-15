@@ -1,6 +1,10 @@
-//! Flight control for the ship, between guidance solves.
+//! Flight control for the ship and the booster, between guidance solves.
 //!
-//! - **Belly flop**: engines off. Hold belly-down with the nose toward the
+//! - **Descent** (booster): engines off, engines first. Lean the top away
+//!   from where the booster should go (lift), by at most 8°, to null the
+//!   predicted miss at the ignition altitude. Grid fins make the torque;
+//!   cold-gas thrusters what the fins cannot.
+//! - **Belly flop** (ship): engines off. Hold belly-down with the nose toward the
 //!   tower (−x), so the flip carries the ship in rather than out; pitch the
 //!   nose up or down (≤ 12°) to slide toward the flip point.
 //!   Flaps make pitch and roll torque; cold-gas thrusters do yaw.
@@ -18,7 +22,7 @@
 use model::aero;
 use model::dynamics::{self, State, M};
 use model::quat::{self, Quat, Vec3};
-use model::Scenario;
+use model::{Scenario, VehicleKind};
 
 /// What the controller asks of the actuators (mirrors `sim::ship::Command`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,6 +72,12 @@ pub const APPROACH_HEIGHT: f64 = 20.0;
 pub const FAST_SINK: f64 = 5.0;
 /// Terminal sink rate, m/s.
 pub const SINK: f64 = 1.0;
+
+/// Largest lean of the booster's axis from the airflow in the descent,
+/// rad (8°): the single yaw fin can still hold it there.
+pub const MAX_LEAN: f64 = 0.139_626_340_159_546_36;
+/// Descent attitude loop of the booster, rad/s.
+pub const WN_FIN: f64 = 1.0;
 
 /// The nose points along `HEADING · x` in the belly flop.
 pub const HEADING: f64 = -1.0;
@@ -127,8 +137,69 @@ fn rcs_request(scn: &Scenario, torque: Vec3) -> Vec3 {
 
 /// Body aerodynamic torque at the estimate (no wind known).
 fn aero_torque(scn: &Scenario, x: &State) -> Vec3 {
-    let rho = scn.planet.density(x[dynamics::R + 2]);
+    let rho = scn.density(x[dynamics::R + 2]);
     aero::body_force(&scn.ship, rho, dynamics::attitude(x), dynamics::velocity(x)).1
+}
+
+/// Engines-first attitude for a velocity: the axis straight into the wind
+/// of the fall (no lift), no twist about it.
+pub fn descent_attitude(v: Vec3) -> Quat {
+    let n = quat::norm(v);
+    if n < 1e-6 {
+        return [1.0, 0.0, 0.0, 0.0];
+    }
+    turn([0.0, 0.0, 1.0], quat::scale(v, -1.0 / n), std::f64::consts::PI)
+}
+
+/// Booster, engines off: fall engines first toward `aim` (x, y) at the
+/// ignition altitude, steering with body lift and the grid fins.
+pub fn descent(scn: &Scenario, x: &State, aim: [f64; 2], ignition_z: f64) -> Actuation {
+    let r = dynamics::position(x);
+    let v = dynamics::velocity(x);
+    let m = x[M];
+    let rho = scn.density(r[2]);
+    let speed = quat::norm(v).max(1.0);
+    let back = quat::scale(v, -1.0 / speed);
+    // Never less than 4 s: closer in, the steering would flick from side
+    // to side chasing the last metres (the landing burn takes those).
+    let t_go = ((r[2] - ignition_z) / (-v[2]).max(10.0)).max(4.0);
+    let miss = [aim[0] - (r[0] + v[0] * t_go), aim[1] - (r[1] + v[1] * t_go)];
+    let a_want = [2.0 * miss[0] / (t_go * t_go), 2.0 * miss[1] / (t_go * t_go)];
+
+    // Sideways acceleration per radian of lean, from the shared model
+    // (negative: the lift points away from the lean).
+    let eps = 0.05;
+    let probe = normalize(quat::add(back, [eps, 0.0, 0.0]));
+    let f0 = aero::body_force(&scn.ship, rho, descent_attitude(v), v).0;
+    let f1 = aero::body_force(&scn.ship, rho, turn([0.0, 0.0, 1.0], probe, std::f64::consts::PI), v).0;
+    let k = (f1[0] - f0[0]) / (m * eps);
+    let mut lean = if k.abs() > 0.05 { [a_want[0] / k, a_want[1] / k] } else { [0.0, 0.0] };
+    let n = lean[0].hypot(lean[1]);
+    if n > MAX_LEAN {
+        lean = [lean[0] * MAX_LEAN / n, lean[1] * MAX_LEAN / n];
+    }
+    let axis = normalize(quat::add(back, [lean[0], lean[1], 0.0]));
+    let q_des = turn([0.0, 0.0, 1.0], axis, std::f64::consts::PI);
+
+    let tau = attitude_torque(scn, x, q_des, [0.0; 3], WN_FIN);
+    let body = aero_torque(scn, x);
+    let need: Vec3 = std::array::from_fn(|i| tau[i] - body[i]);
+    let gain = aero::fin_gain(&scn.ship, rho, dynamics::attitude(x), v);
+    let (fins, made) = aero::fin_allocate(&scn.ship, gain, need);
+    let rest = std::array::from_fn(|i| need[i] - made[i]);
+    Actuation {
+        thrust_body: [0.0; 3],
+        flaps: fins,
+        rcs: rcs_request(scn, rest),
+    }
+}
+
+/// The unpowered phase of either vehicle toward the scenario's aim point.
+pub fn unpowered(scn: &Scenario, x: &State, ignition_z: f64) -> Actuation {
+    match scn.ship.kind {
+        VehicleKind::Ship => belly_flop(scn, x, scn.aim[0], ignition_z),
+        VehicleKind::Booster => descent(scn, x, scn.aim, ignition_z),
+    }
 }
 
 /// Engines off: belly-flop toward `target_x` at the ignition altitude.
@@ -146,7 +217,7 @@ pub fn belly_flop(scn: &Scenario, x: &State, target_x: f64, ignition_z: f64) -> 
     let mut tau = attitude_torque(scn, x, belly_attitude(pitch), [0.0; 3], WN_FLAP);
     // What the body and the trimmed flaps do anyway.
     let q = dynamics::attitude(x);
-    let rho = scn.planet.density(r[2]);
+    let rho = scn.density(r[2]);
     let trim = aero::flap_force(&scn.ship, rho, q, v, [FLAP_TRIM; 4]).1;
     let body = aero_torque(scn, x);
     tau = std::array::from_fn(|i| tau[i] - trim[i] - body[i]);
@@ -204,7 +275,7 @@ fn fly_force(scn: &Scenario, x: &State, force: Vec3, q_des: Quat, w_des: Vec3, l
     let rest = std::array::from_fn(|i| need[i] - used[i]);
     Actuation {
         thrust_body: [lat[0], lat[1], tz],
-        flaps: [FLAP_TRIM; 4],
+        flaps: [scn.ship.surface_trim(); 4],
         rcs: rcs_request(scn, rest),
     }
 }
@@ -218,7 +289,16 @@ pub fn powered(scn: &Scenario, x: &State, reference: (&State, Vec3), limits: (f6
     let f_plan = quat::rotate(qr, ur);
     let dr = quat::sub(dynamics::position(xr), dynamics::position(x));
     let dv = quat::sub(dynamics::velocity(xr), dynamics::velocity(x));
-    let mut a: Vec3 = std::array::from_fn(|i| KP * dr[i] + KD * dv[i]);
+    // Steering sideways goes through the attitude, and gimballing to turn
+    // first pushes the base the wrong way: a right-half-plane zero at
+    // √(l·(T/m)/(J/m)) rad/s. The sideways loop must stay well below it,
+    // or it weaves (seen on the booster's three-engine leg: zero at 0.9).
+    let k = translation_gain(scn, x, quat::norm(ur));
+    let mut a: Vec3 = [
+        k * k * KP * dr[0] + k * KD * dv[0],
+        k * k * KP * dr[1] + k * KD * dv[1],
+        KP * dr[2] + KD * dv[2],
+    ];
     let side = a[0].hypot(a[1]);
     if side > LATERAL_CAP * g {
         a[0] *= LATERAL_CAP * g / side;
@@ -231,6 +311,22 @@ pub fn powered(scn: &Scenario, x: &State, reference: (&State, Vec3), limits: (f6
     let q_des = quat::normalize(quat::mul(turn(planned_dir, normalize(force), MAX_CORRECTION), qr));
     fly_force(scn, x, force, q_des, dynamics::rates(xr), limits)
 }
+
+/// Scale (≤ 1) for the sideways position loop so that it stays below the
+/// vehicle's non-minimum-phase zero. 1 for the ship (unchanged); below 1
+/// only for the booster on few engines.
+fn translation_gain(scn: &Scenario, x: &State, thrust: f64) -> f64 {
+    if scn.ship.kind == VehicleKind::Ship {
+        return 1.0;
+    }
+    let j = scn.ship.inertia_per_kg[0].max(scn.ship.inertia_per_kg[1]);
+    let zero = (scn.ship.cm_height * thrust / x[M] / j).sqrt();
+    (zero / NMP_REFERENCE).clamp(0.3, 1.0)
+}
+
+/// The sideways loop runs at full gain when the non-minimum-phase zero is
+/// at least this fast, rad/s.
+const NMP_REFERENCE: f64 = 1.6;
 
 /// Attitude-loop bandwidth the gimbal can actually give at thrust `tz`,
 /// rad/s: a heavy ship on one engine (Mars) saturates a fixed-gain loop and
@@ -282,7 +378,7 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
     };
     // The sideways loop runs through the attitude loop: slow it down with
     // it, or it circles the axis (seen on Mars).
-    let k = bandwidth(scn, x, m * g) / WN;
+    let k = (bandwidth(scn, x, m * g) / WN).min(translation_gain(scn, x, m * g));
     let kd = KD_TERMINAL * k;
     // Velocity command toward the axis, at most SLIDE m/s.
     let mut want = [-KP_TERMINAL / KD_TERMINAL * k * r[0], -KP_TERMINAL / KD_TERMINAL * k * r[1]];
@@ -358,8 +454,11 @@ mod tests {
         for _ in 0..(seconds / h) as usize {
             let c = ctl(&x);
             let q = dynamics::attitude(&x);
-            let rho = scn.planet.density(x[R + 2]);
-            let (ff, ft) = aero::flap_force(s, rho, q, dynamics::velocity(&x), c.flaps);
+            let rho = scn.density(x[R + 2]);
+            let (ff, ft) = match s.kind {
+                VehicleKind::Ship => aero::flap_force(s, rho, q, dynamics::velocity(&x), c.flaps),
+                VehicleKind::Booster => aero::fin_force(s, rho, q, dynamics::velocity(&x), c.flaps),
+            };
             let rcs: Vec3 = std::array::from_fn(|i| if c.rcs[i].abs() > 0.2 { c.rcs[i].signum() * arm[i] } else { 0.0 });
             let extra = Extra {
                 force: ff,
@@ -393,6 +492,27 @@ mod tests {
         let x = fly(&scn, x0, 60.0, |x| belly_flop(&scn, x, 0.0, 600.0));
         let r = dynamics::position(&x);
         assert!(r[0].abs() < 150.0, "x {} at z {}", r[0], r[2]);
+    }
+
+    #[test]
+    fn descent_holds_engines_first_and_steers_to_the_aim() {
+        let scn = Scenario::booster();
+        let v0 = [-20.0, 10.0, -380.0];
+        // Start tipped 5° off and turning.
+        let q0 = quat::mul(descent_attitude(v0), quat::from_axis_angle([0.0, 1.0, 0.0], 0.09));
+        let x0 = dynamics::state(scn.start_mass, [600.0, -200.0, 12_000.0], v0, q0, [0.0, 0.03, 0.0]);
+        let ign = 1800.0;
+        let mut x = x0;
+        // Fly until the ignition altitude.
+        while x[R + 2] > ign {
+            x = fly(&scn, x, 0.5, |x| descent(&scn, x, scn.aim, ign));
+        }
+        let off = (x[R] - scn.aim[0]).hypot(x[R + 1] - scn.aim[1]);
+        assert!(off < 120.0, "missed the aim by {off} m: {:?}", dynamics::position(&x));
+        let tilt = quat::tilt(dynamics::attitude(&x)).to_degrees();
+        assert!(tilt < 15.0, "tilt {tilt}");
+        assert!(quat::norm(dynamics::rates(&x)) < 0.1);
+        assert!((250.0..450.0).contains(&-x[V + 2]), "falling at {}", -x[V + 2]);
     }
 
     #[test]
