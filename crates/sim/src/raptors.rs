@@ -1,6 +1,6 @@
 //! The ship's three sea-level engines: ignition, a shared gimbal that slews
-//! at a limited rate, throttle with an optional first-order lag, an engine
-//! manager that shuts engines down when fewer are enough, and failures.
+//! at a limited rate, throttle with an optional first-order lag, shutdown
+//! (commanded by the flight software; no relight) and failures.
 //!
 //! All lit engines share one thrust direction and throttle (a simplification:
 //! real engines gimbal individually and sit off the axis).
@@ -33,11 +33,6 @@ impl EngineState {
 
 /// At most this many engines may fail ("engine out" button).
 pub const MAX_FAILED: usize = 2;
-/// The manager shuts one engine down when the command stays below this
-/// fraction of what one engine fewer could give…
-pub const SHUTDOWN_FRACTION: f64 = 0.75;
-/// …for this long, s.
-pub const SHUTDOWN_HOLD: f64 = 1.0;
 
 #[derive(Debug, Clone)]
 pub struct Cluster {
@@ -48,8 +43,6 @@ pub struct Cluster {
     pub thrust: Vec3,
     /// Unit thrust direction now (body axes).
     pub direction: Vec3,
-    /// Time the command has been low enough to drop an engine, s.
-    low_for: f64,
     engine_max: f64,
     throttle_min: f64,
     gimbal_max: f64,
@@ -64,7 +57,6 @@ impl Cluster {
             lag: 0.0,
             thrust: [0.0; 3],
             direction: [0.0, 0.0, 1.0],
-            low_for: 0.0,
             engine_max: ship.engine_max,
             throttle_min: ship.throttle_min,
             gimbal_max: ship.gimbal_max,
@@ -159,8 +151,6 @@ impl Cluster {
                 };
             }
         }
-        self.manage(quat::norm(cmd), h);
-
         let n = self.running();
         if n == 0 {
             self.thrust = [0.0; 3];
@@ -182,24 +172,17 @@ impl Cluster {
         self.thrust = quat::scale(self.direction, mag.min(max));
     }
 
-    /// Engine manager: drop one engine when fewer are enough for a while.
-    fn manage(&mut self, cmd: f64, h: f64) {
-        let n = self.running();
-        if n <= 1 || self.lit() != n {
-            self.low_for = 0.0;
-            return;
-        }
-        let fewer = f64::from(n - 1) * self.engine_max;
-        if cmd < SHUTDOWN_FRACTION * fewer {
-            self.low_for += h;
-        } else {
-            self.low_for = 0.0;
-        }
-        if self.low_for >= SHUTDOWN_HOLD {
-            if let Some(i) = self.engines.iter().rposition(|e| *e == EngineState::Running) {
-                self.engines[i] = EngineState::Shutdown;
+    /// Shut engines down until at most `n` are lit (they stay off).
+    pub fn shutdown_to(&mut self, n: u8) {
+        while self.lit() > n {
+            match self
+                .engines
+                .iter()
+                .rposition(|e| matches!(e, EngineState::Igniting(_) | EngineState::Running))
+            {
+                Some(i) => self.engines[i] = EngineState::Shutdown,
+                None => break,
             }
-            self.low_for = 0.0;
         }
     }
 }
@@ -286,21 +269,17 @@ mod tests {
     }
 
     #[test]
-    fn manager_drops_engines_when_fewer_are_enough() {
+    fn shutdown_to_one_keeps_one_and_throttles() {
         let mut c = cluster();
         c.ignite_all();
         c.step([0.0, 0.0, 6e6], 1.5);
         assert_eq!(c.running(), 3);
-        // 1.2 MN: below 75 % of two engines and of one engine's 2.45 MN.
-        for _ in 0..105 {
-            c.step([0.0, 0.0, 1.2e6], 0.01);
-        }
-        assert_eq!(c.running(), 2);
-        for _ in 0..105 {
-            c.step([0.0, 0.0, 1.2e6], 0.01);
-        }
+        c.shutdown_to(1);
         assert_eq!(c.running(), 1);
+        c.step([0.0, 0.0, 1.2e6], 0.01);
         assert!((quat::norm(c.thrust) - 1.2e6).abs() < 1.0);
+        c.ignite_all();
+        assert_eq!(c.lit(), 1, "shut-down engines do not relight");
     }
 
     #[test]

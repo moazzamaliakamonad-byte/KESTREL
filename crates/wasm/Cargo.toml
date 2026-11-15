@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 guidance = { path = "../guidance", package = "kestrel-guidance" }
 sim = { path = "../sim", package = "kestrel-sim" }
+model = { path = "../model", package = "kestrel-model" }
 wasm-bindgen = "=0.2.130"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

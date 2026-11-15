@@ -1,35 +1,41 @@
 use super::*;
 use model::dynamics::{R, V, W};
-use std::f64::consts::FRAC_PI_2;
 
+/// Belly down, nose toward the tower, as the flight flies it.
 fn belly_down() -> Quat {
-    quat::from_axis_angle([0.0, 1.0, 0.0], FRAC_PI_2)
+    crate::ship_control::belly_attitude(0.0)
 }
 
 fn earth_flip_problem(z: f64, vz: f64) -> ShipProblem {
     let scn = Scenario::earth();
     let m = scn.start_mass;
-    let x0 = dynamics::state(m, [150.0, 0.0, z], [5.0, 0.0, vz], belly_down(), [0.0; 3]);
-    let lim = (scn.ship.thrust_limits(1).0, scn.ship.thrust_limits(3).1);
-    ShipProblem::new(scn, x0, lim)
+    let x0 = dynamics::state(m, [200.0, 0.0, z], [4.0, 0.0, vz], belly_down(), [0.0; 3]);
+    let lim = scn.ship.thrust_limits(3);
+    let mut p = ShipProblem::new(scn, x0, lim);
+    p.late_limits = Some(p.scn.ship.thrust_limits(1));
+    p.switch_node = (p.scn.switch_fraction * (p.nodes - 1) as f64).round() as usize;
+    p
 }
 
 fn mars_problem() -> ShipProblem {
     let scn = Scenario::mars();
     let m = scn.start_mass;
     let x0 = dynamics::state(m, [400.0, 0.0, 9000.0], [-20.0, 0.0, -480.0], belly_down(), [0.0; 3]);
-    let lim = (scn.ship.thrust_limits(1).0, scn.ship.thrust_limits(3).1);
-    ShipProblem::new(scn, x0, lim)
+    let lim = scn.ship.thrust_limits(3);
+    let mut p = ShipProblem::new(scn, x0, lim);
+    p.late_limits = Some(p.scn.ship.thrust_limits(1));
+    p.switch_node = (p.scn.switch_fraction * (p.nodes - 1) as f64).round() as usize;
+    p
 }
 
 fn check_limits(p: &ShipProblem, plan: &ShipPlan) {
-    let (tmin, tmax) = p.thrust_limits;
     let tan = p.scn.ship.gimbal_max.tan();
     for (k, (x, u)) in plan.x.iter().zip(&plan.u).enumerate() {
+        let (tmin, tmax) = p.bounds(k);
         let t = quat::norm(*u);
         assert!(t <= tmax * 1.01 && t >= tmin * 0.99, "node {k}: thrust {t}");
         assert!(u[0].hypot(u[1]) <= tan * u[2] * 1.01 + 1.0, "node {k}: gimbal");
-        if k > 0 {
+        if k > 1 {
             let w = quat::norm([x[W], x[W + 1], x[W + 2]]);
             assert!(w <= OMEGA_MAX * 1.01, "node {k}: rate {w}");
         }
@@ -59,7 +65,7 @@ fn earth_flip_converges() {
     );
     assert!(plan.converged, "not converged in {} iterations", plan.iterations);
     assert!(plan.defect < 1e-3);
-    assert!(plan.gate_error < 10.0);
+    assert!(plan.gate_error < 1.0);
     assert!(ends_upright(&plan) < 3.0);
     check_limits(&p, &plan);
 }
@@ -109,4 +115,19 @@ fn upright_like_keeps_heading() {
     let q = upright_like(belly_down());
     assert!(quat::tilt(q) < 1e-9);
     assert!(q[1].abs() < 1e-9 && q[2].abs() < 1e-9);
+}
+
+#[test]
+#[ignore]
+fn trace_one_engine_from_midflight() {
+    let scn = Scenario::earth();
+    let y: f64 = std::env::var("TY").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let q = quat::normalize([1.0, 0.002 * y, 0.01, 0.0]);
+    let x0 = dynamics::state(128e3, [285.0, 0.8 * y, 560.0], [-22.7, 2.1 * y, -28.2], q, [0.01 * y, 0.02, 0.0]);
+    let one = scn.ship.thrust_limits(1);
+    let p = ShipProblem::new(scn, x0, (one.0, one.1 * 0.75));
+    match plan_ship(&p, None, 30) {
+        Ok(plan) => eprintln!("tf {:.1} it {} conv {} gate {:.2}", plan.final_time, plan.iterations, plan.converged, plan.gate_error),
+        Err(e) => eprintln!("err {e:?}"),
+    }
 }

@@ -219,6 +219,7 @@ name = "kestrel-wasm"
 version = "0.1.0"
 dependencies = [
  "kestrel-guidance",
+ "kestrel-model",
  "kestrel-sim",
  "serde",
  "serde_json",

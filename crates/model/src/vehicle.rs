@@ -149,6 +149,10 @@ impl Ship {
     }
 }
 
+/// The Earth approach gate's distance from the catch axis, m (away from
+/// the mast, on +x).
+pub const APPROACH_OFFSET: f64 = 20.0;
+
 /// The tower on Earth (all *illustrative* except the ~145 m height).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Catch {
@@ -182,6 +186,11 @@ pub struct Scenario {
     pub catch: Option<Catch>,
     /// Lowest ignition altitude, m (the flip needs room).
     pub ignition_floor: f64,
+    /// Share of the burn flown on every lit engine before dropping to one.
+    pub switch_fraction: f64,
+    /// The final descent starts once the axis is this close to its target, m
+    /// (the arms need ~1 m; legs can stand anywhere near the pad).
+    pub centring: f64,
 }
 
 impl Scenario {
@@ -198,25 +207,35 @@ impl Scenario {
         let caught_cm = catch.arm_z - ship.pin_height + ship.cm_height;
         Scenario {
             planet: Planet::Earth,
-            start_mass: 125e3,
+            // 40 t of landing propellant (*illustrative*: header-tank
+            // capacity is not published).
+            start_mass: 140e3,
             dry_mass: 100e3,
-            gate: [0.0, 0.0, caught_cm + 6.0],
+            // Approach gate: out from the tower and above the arms. The
+            // final translation over the catch axis and the descent onto
+            // the arms are flown by a simple, slow terminal controller.
+            gate: [APPROACH_OFFSET, 0.0, caught_cm + 30.0],
             gate_velocity: [0.0, 0.0, -1.0],
             floor_z: caught_cm,
-            clearance_x: Some(-3.0),
+            clearance_x: Some(-1.0),
             catch: Some(catch),
-            ignition_floor: 600.0,
+            // The flip needs room: ignite at least 1 km up (Everyday
+            // Astronaut: a flip from 300 m to 2.5 km is possible).
+            ignition_floor: 1000.0,
+            switch_fraction: 0.45,
+            centring: 1.0,
             ship,
         }
     }
 
     /// Mars: after entry, a long supersonic burn to a landing on legs.
+    /// 90 t of landing propellant (*illustrative*).
     pub fn mars() -> Scenario {
         let ship = Ship::starship_class();
         let touchdown_cm = ship.cm_height + ship.leg_drop;
         Scenario {
             planet: Planet::Mars,
-            start_mass: 330e3,
+            start_mass: 350e3,
             dry_mass: 260e3,
             gate: [0.0, 0.0, touchdown_cm + 15.0],
             gate_velocity: [0.0, 0.0, -1.0],
@@ -224,6 +243,8 @@ impl Scenario {
             clearance_x: None,
             catch: None,
             ignition_floor: 0.0,
+            switch_fraction: 0.8,
+            centring: 5.0,
             ship,
         }
     }

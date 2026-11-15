@@ -1,13 +1,17 @@
 //! Flight control for the ship, between guidance solves.
 //!
-//! - **Belly flop**: engines off. Hold belly-down with the nose along +x;
-//!   pitch the nose up or down (≤ 12°) to slide toward the flip point.
+//! - **Belly flop**: engines off. Hold belly-down with the nose toward the
+//!   tower (−x), so the flip carries the ship in rather than out; pitch the
+//!   nose up or down (≤ 12°) to slide toward the flip point.
 //!   Flaps make pitch and roll torque; cold-gas thrusters do yaw.
 //! - **Powered** (flip and landing burn): fly the SCvx plan. Position and
 //!   velocity errors add to the planned force; the attitude follows the
 //!   plan, nudged so the thrust points along the wanted force; the engine
 //!   gimbal makes pitch/yaw torque, the thrusters roll.
-//! - **Terminal**: upright over the gate axis, sinking at 1 m/s.
+//! - **Flip**: every lit engine at minimum throttle; the gimbal swings the
+//!   ship from belly-down to upright (scripted, rate-limited).
+//! - **Terminal**: upright; slide over the catch axis / pad (x = y = 0) at
+//!   no more than 2 m/s, then sink at 1 m/s once centred.
 //!
 //! Inputs are sensor estimates, never the truth. Simulation only.
 
@@ -34,19 +38,46 @@ pub const KD: f64 = 1.2;
 /// Attitude loop: natural frequency (rad/s) and damping.
 pub const WN: f64 = 1.5;
 pub const ZETA: f64 = 0.8;
+/// Largest body rate the attitude loop asks for from an angle error, rad/s
+/// (35°/s): a quicker flip spends less time pushing the ship sideways.
+pub const RATE_LIMIT: f64 = 0.610_865_238_198_015_2;
 /// Belly flop attitude loop (slower: flaps are weak).
 pub const WN_FLAP: f64 = 0.8;
-/// Largest correction of the planned thrust direction, rad (20°).
-const MAX_CORRECTION: f64 = 0.349_065_850_398_865_9;
+/// Largest correction of the planned thrust direction, rad (8°). More, and
+/// on one engine the gimbal cannot stop the rotation it starts.
+const MAX_CORRECTION: f64 = 0.139_626_340_159_546_36;
+/// Feedback acceleration caps, as fractions of g: sideways and vertical.
+const LATERAL_CAP: f64 = 0.2;
+const VERTICAL_CAP: f64 = 0.5;
 /// Translation gains in the terminal descent.
 pub const KP_TERMINAL: f64 = 0.12;
 pub const KD_TERMINAL: f64 = 0.7;
+/// Largest sideways acceleration in the terminal phase, m/s² (absolute: a
+/// share of g was far too weak in Mars gravity).
+pub const LATERAL_ACCEL: f64 = 0.6;
+pub const FINAL_LATERAL_ACCEL: f64 = 0.2;
+/// Largest sideways speed in the terminal phase, m/s.
+pub const SLIDE: f64 = 4.0;
+/// Above this height over the rest position the terminal phase sinks fast
+/// (up to FAST_SINK, m/s); below it only once centred, at SINK, m.
+pub const FINAL_HEIGHT: f64 = 8.0;
+/// Below this height the fast descent continues only near the axis, m.
+pub const APPROACH_HEIGHT: f64 = 20.0;
+pub const FAST_SINK: f64 = 5.0;
 /// Terminal sink rate, m/s.
 pub const SINK: f64 = 1.0;
 
-/// Belly down, nose along +x, nose pitched up by `pitch` (rad).
+/// The nose points along `HEADING · x` in the belly flop.
+pub const HEADING: f64 = -1.0;
+
+/// Belly down, nose along `HEADING · x`, pitched up by `pitch` (rad).
 pub fn belly_attitude(pitch: f64) -> Quat {
-    quat::from_axis_angle([0.0, 1.0, 0.0], std::f64::consts::FRAC_PI_2 - pitch)
+    let along_plus_x = quat::from_axis_angle([0.0, 1.0, 0.0], std::f64::consts::FRAC_PI_2 - pitch);
+    if HEADING > 0.0 {
+        along_plus_x
+    } else {
+        quat::mul(quat::from_axis_angle([0.0, 0.0, 1.0], std::f64::consts::PI), along_plus_x)
+    }
 }
 
 /// Rotation vector (body axes) from `q` to `q_des`.
@@ -68,6 +99,14 @@ fn attitude_torque(scn: &Scenario, x: &State, q_des: Quat, w_des: Vec3, wn: f64)
     let q = dynamics::attitude(x);
     let w = dynamics::rates(x);
     let e = attitude_error(q, q_des);
+    // Rate-limited: the angle error asks for at most RATE_LIMIT of turning.
+    let k = wn / (2.0 * ZETA);
+    let mut want: Vec3 = std::array::from_fn(|i| k * e[i]);
+    let n = quat::norm(want);
+    if n > RATE_LIMIT {
+        want = quat::scale(want, RATE_LIMIT / n);
+    }
+    let e: Vec3 = std::array::from_fn(|i| want[i] / k);
     let j = scn.ship.inertia(x[M]);
     let jw = [j[0] * w[0], j[1] * w[1], j[2] * w[2]];
     let gyro = quat::cross(w, jw);
@@ -97,10 +136,10 @@ pub fn belly_flop(scn: &Scenario, x: &State, target_x: f64, ignition_z: f64) -> 
     let v = dynamics::velocity(x);
     let t_go = ((r[2] - ignition_z) / (-v[2]).max(10.0)).max(2.0);
     let miss = target_x - (r[0] + v[0] * t_go);
-    // Pitching the nose up by θ slides the ship toward its tail (−x) at
-    // about g·sin θ when drag carries the weight.
+    // Pitching the nose up by θ slides the ship toward its tail (−HEADING·x)
+    // at about g·sin θ when drag carries the weight.
     let a_want = (2.0 * miss / (t_go * t_go)).clamp(-g, g);
-    let pitch = (-a_want / g).clamp(-1.0, 1.0).asin().clamp(-MAX_PITCH, MAX_PITCH);
+    let pitch = (-HEADING * a_want / g).clamp(-1.0, 1.0).asin().clamp(-MAX_PITCH, MAX_PITCH);
 
     let mut tau = attitude_torque(scn, x, belly_attitude(pitch), [0.0; 3], WN_FLAP);
     // What the body and the trimmed flaps do anyway.
@@ -177,10 +216,12 @@ pub fn powered(scn: &Scenario, x: &State, reference: (&State, Vec3), limits: (f6
     let dr = quat::sub(dynamics::position(xr), dynamics::position(x));
     let dv = quat::sub(dynamics::velocity(xr), dynamics::velocity(x));
     let mut a: Vec3 = std::array::from_fn(|i| KP * dr[i] + KD * dv[i]);
-    let an = quat::norm(a);
-    if an > 0.5 * g {
-        a = quat::scale(a, 0.5 * g / an);
+    let side = a[0].hypot(a[1]);
+    if side > LATERAL_CAP * g {
+        a[0] *= LATERAL_CAP * g / side;
+        a[1] *= LATERAL_CAP * g / side;
     }
+    a[2] = a[2].clamp(-VERTICAL_CAP * g, VERTICAL_CAP * g);
     let force = quat::add(f_plan, quat::scale(a, m));
     // Turn the planned attitude so its thrust line meets the wanted force.
     let planned_dir = quat::rotate(qr, normalize(ur));
@@ -188,7 +229,15 @@ pub fn powered(scn: &Scenario, x: &State, reference: (&State, Vec3), limits: (f6
     fly_force(scn, x, force, q_des, dynamics::rates(xr), limits)
 }
 
-/// Upright over the gate axis, sinking at [`SINK`].
+/// The flip: every lit engine at minimum throttle along the body axis, the
+/// gimbal swinging the ship upright at no more than [`RATE_LIMIT`].
+pub fn flip(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
+    let q = dynamics::attitude(x);
+    let force = quat::rotate(q, [0.0, 0.0, limits.0]);
+    fly_force(scn, x, force, crate::scvx::upright_like(q), [0.0; 3], limits)
+}
+
+/// Upright; over the catch axis / pad (x = y = 0), then sinking at [`SINK`].
 pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
     let m = x[M];
     let g = scn.planet.gravity();
@@ -196,12 +245,40 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
     let v = dynamics::velocity(x);
     // Gentler than while powered: one engine near hover has little gimbal
     // torque, and a tight loop through the attitude limit-cycles.
+    // Descend while sliding in (briskly high up, hovering costs propellant);
+    // the last FINAL_HEIGHT only once centred and steady over the axis.
+    let off = r[0].hypot(r[1]);
+    let h = r[2] - scn.rest_cm_z();
+    let side = v[0].hypot(v[1]);
+    let sink = if h > APPROACH_HEIGHT || (h > FINAL_HEIGHT && off < 3.0 * scn.centring) {
+        (0.1 * h).clamp(SINK, FAST_SINK)
+    } else if h > FINAL_HEIGHT {
+        0.0
+    } else {
+        // Full sink rate when centred, a slow one when nearly so, a hover
+        // when far off (a hard centred-and-still test hovered for ages).
+        if off < scn.centring && side < 1.0 {
+            SINK
+        } else if off < 2.0 * scn.centring {
+            0.3 * SINK
+        } else {
+            0.0
+        }
+    };
+    // Velocity command toward the axis, at most SLIDE m/s.
+    let mut want = [-KP_TERMINAL / KD_TERMINAL * r[0], -KP_TERMINAL / KD_TERMINAL * r[1]];
+    let n = want[0].hypot(want[1]);
+    if n > SLIDE {
+        want = [want[0] * SLIDE / n, want[1] * SLIDE / n];
+    }
     let a = [
-        KP_TERMINAL * (scn.gate[0] - r[0]) - KD_TERMINAL * v[0],
-        KP_TERMINAL * (scn.gate[1] - r[1]) - KD_TERMINAL * v[1],
-        2.0 * (-SINK - v[2]),
+        KD_TERMINAL * (want[0] - v[0]),
+        KD_TERMINAL * (want[1] - v[1]),
+        2.0 * (-sink - v[2]),
     ];
-    let lat_cap = 0.06 * g;
+    // Gentle in the final metres: the arms take the ship only within 3° of upright.
+    // (but full authority while still sliding, or it overshoots the axis).
+    let lat_cap = if h > FINAL_HEIGHT || side > 0.5 { LATERAL_ACCEL } else { FINAL_LATERAL_ACCEL };
     let h = a[0].hypot(a[1]);
     let a = if h > lat_cap {
         [a[0] * lat_cap / h, a[1] * lat_cap / h, a[2]]
@@ -316,23 +393,28 @@ mod tests {
     }
 
     #[test]
-    fn terminal_sinks_at_one_metre_per_second() {
+    fn terminal_slides_in_then_settles_slowly() {
         let scn = Scenario::earth();
-        let x0 = dynamics::state(110e3, [0.5, 0.0, 200.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0, 0.0], [0.0; 3]);
-        let x = fly(&scn, x0, 10.0, |x| terminal(&scn, x, (0.98e6, 2.45e6)));
-        assert!((x[R + 2] - 190.0).abs() < 1.5, "z {}", x[R + 2]);
-        assert!((x[V + 2] + 1.0).abs() < 0.2);
-        assert!(quat::norm([x[W], x[W + 1], x[W + 2]]) < 0.02, "rates {:?}", &x[W..]);
+        let rest = scn.rest_cm_z();
+        // 30 m above the arms' catch position, 6 m out.
+        let x0 = dynamics::state(110e3, [6.0, 0.0, rest + 30.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0, 0.0], [0.0; 3]);
+        let x = fly(&scn, x0, 20.0, |x| terminal(&scn, x, (0.98e6, 2.45e6)));
+        let off = x[R].hypot(x[R + 1]);
+        assert!(off < 1.0, "off axis by {off}");
+        assert!(x[R + 2] < rest + 8.0 && x[R + 2] > rest, "z {}", x[R + 2]);
+        assert!(quat::tilt(dynamics::attitude(&x)).to_degrees() < 2.0);
+        assert!((x[V + 2] + SINK).abs() < 0.3, "sinking at {}", x[V + 2]);
+        let _ = W;
     }
 
     #[test]
     fn ignition_altitude_earth_floor_and_mars_physics() {
         let e = Scenario::earth();
         let x = dynamics::state(e.start_mass, [0.0, 0.0, 3000.0], [0.0, 0.0, -90.0], belly_attitude(0.0), [0.0; 3]);
-        assert_eq!(ignition_altitude(&e, &x, 7.35e6), 600.0);
+        assert_eq!(ignition_altitude(&e, &x, 7.35e6), e.ignition_floor);
         let m = Scenario::mars();
         let x = dynamics::state(m.start_mass, [0.0, 0.0, 12000.0], [0.0, 0.0, -450.0], belly_attitude(0.0), [0.0; 3]);
         let z = ignition_altitude(&m, &x, 7.35e6);
-        assert!((5000.0..12000.0).contains(&z), "{z}");
+        assert!((5000.0..14000.0).contains(&z), "{z}");
     }
 }

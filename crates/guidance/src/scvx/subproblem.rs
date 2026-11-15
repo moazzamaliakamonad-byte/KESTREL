@@ -26,16 +26,28 @@ pub struct Sub<'a> {
     pub gate_r: Vec3,
     pub gate_v: Vec3,
     pub m_dry: f64,
-    pub t_min: f64,
-    pub t_max: f64,
+    /// Thrust magnitude bounds per node.
+    pub t_bounds: &'a [(f64, f64)],
     pub tan_gimbal: f64,
     pub w_max: f64,
     pub floor_z: f64,
     pub clearance_x: Option<f64>,
+    /// Approach cone around the gate axis: horizontal distance
+    /// `≤ r0 + tan_gamma · (z − gate_z)` at every node after the first.
+    pub approach: (f64, f64),
+    /// From this node on, tilt ≤ θ, as `‖(q_x, q_y)‖ ≤ sin(θ/2)`.
+    pub upright_from: usize,
+    pub upright_sin_half: f64,
+    /// Sideways speed `‖v_xy‖ ≤ c0 + c1 · (z − gate_z)` from node 2 on.
+    pub side_speed: (f64, f64),
     pub sigma_bounds: (f64, f64),
     pub w_virtual: f64,
     pub w_trust: f64,
+    pub w_trust_sigma: f64,
 }
+
+/// Price of loosening a comfort constraint by one non-dimensional unit.
+const W_SOFT: f64 = 100.0;
 
 pub struct SubSolution {
     pub xs: Vec<State>,
@@ -65,8 +77,12 @@ impl Layout {
     fn slack(&self, n: usize, i: usize) -> usize {
         self.nu(self.k - 1, 0) + n * NX + i
     }
+    /// Softening slack of the comfort constraints at node `n`.
+    fn soft(&self, n: usize) -> usize {
+        self.slack(self.k - 1, 0) + n
+    }
     fn len(&self) -> usize {
-        self.slack(self.k - 1, 0)
+        self.soft(self.k)
     }
 }
 
@@ -131,7 +147,9 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
     }
     for m in 0..k {
         nonneg.push(vec![(l.x(m, M), 1.0)], -p.m_dry);
-        nonneg.push(vec![(l.x(m, R + 2), 1.0)], -p.floor_z);
+        if m > 0 {
+            nonneg.push(vec![(l.x(m, R + 2), 1.0)], -p.floor_z);
+        }
         if let Some(cx) = p.clearance_x {
             nonneg.push(vec![(l.x(m, R), 1.0)], -cx);
         }
@@ -139,7 +157,10 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
         let ub = p.us[m];
         let nb = (ub[0] * ub[0] + ub[1] * ub[1] + ub[2] * ub[2]).sqrt();
         let dir = if nb > 1e-9 { ub.map(|c| c / nb) } else { [0.0, 0.0, 1.0] };
-        nonneg.push((0..3).map(|j| (l.u(m, j), dir[j])).collect(), -p.t_min);
+        nonneg.push((0..3).map(|j| (l.u(m, j), dir[j])).collect(), -p.t_bounds[m].0);
+    }
+    for m in 0..k {
+        nonneg.push(vec![(l.soft(m), 1.0)], 0.0);
     }
     nonneg.push(vec![(l.sigma(), 1.0)], -p.sigma_bounds.0);
     nonneg.push(vec![(l.sigma(), -1.0)], p.sigma_bounds.1);
@@ -147,7 +168,7 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
     for m in 0..k {
         // ‖u‖ ≤ T_max
         let mut b = Block::default();
-        b.push(vec![], p.t_max);
+        b.push(vec![], p.t_bounds[m].1);
         for j in 0..3 {
             b.push(vec![(l.u(m, j), 1.0)], 0.0);
         }
@@ -158,8 +179,36 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
         b.push(vec![(l.u(m, 0), 1.0)], 0.0);
         b.push(vec![(l.u(m, 1), 1.0)], 0.0);
         socs.push(b);
-        // ‖ω‖ ≤ ω_max (not at the measured first node)
+        // ‖ω‖ ≤ ω_max, not at the measured first node, nor the next (the
+        // ship may be turning faster than the limit when measured).
         if m == 0 {
+            continue;
+        }
+        // Comfort constraints (approach cone, sideways speed, upright) are
+        // soft: each may be loosened by the node's slack, at a high price,
+        // so a ship pushed off its plan still gets a plan back.
+        let (r0, tg) = p.approach;
+        let mut b = Block::default();
+        b.push(vec![(l.x(m, R + 2), tg), (l.soft(m), 1.0)], r0 - tg * p.gate_r[2]);
+        b.push(vec![(l.x(m, R), 1.0)], -p.gate_r[0]);
+        b.push(vec![(l.x(m, R + 1), 1.0)], -p.gate_r[1]);
+        socs.push(b);
+        if m >= 2 {
+            let (c0, c1) = p.side_speed;
+            let mut b = Block::default();
+            b.push(vec![(l.x(m, R + 2), c1), (l.soft(m), 1.0)], c0 - c1 * p.gate_r[2]);
+            b.push(vec![(l.x(m, V), 1.0)], 0.0);
+            b.push(vec![(l.x(m, V + 1), 1.0)], 0.0);
+            socs.push(b);
+        }
+        if m >= p.upright_from {
+            let mut b = Block::default();
+            b.push(vec![(l.soft(m), 0.1)], p.upright_sin_half);
+            b.push(vec![(l.x(m, Q + 1), 1.0)], 0.0);
+            b.push(vec![(l.x(m, Q + 2), 1.0)], 0.0);
+            socs.push(b);
+        }
+        if m == 1 {
             continue;
         }
         let mut b = Block::default();
@@ -178,6 +227,9 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
             q[l.slack(m, i)] = p.w_virtual;
         }
     }
+    for m in 0..k {
+        q[l.soft(m)] = W_SOFT;
+    }
     let mut pdiag = vec![0.0; n];
     let w = p.w_trust;
     for m in 0..k {
@@ -190,8 +242,8 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
             q[l.u(m, j)] += -2.0 * w * p.us[m][j];
         }
     }
-    pdiag[l.sigma()] = 2.0 * w;
-    q[l.sigma()] += -2.0 * w * p.sigma;
+    pdiag[l.sigma()] = 2.0 * p.w_trust_sigma;
+    q[l.sigma()] += -2.0 * p.w_trust_sigma * p.sigma;
 
     // Assemble A, b, cones in block order.
     let (mut ri, mut ci, mut vv, mut bv) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
