@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/guidance", "crates/sim", "crates/wasm"]
+members = ["crates/guidance", "crates/model", "crates/sim", "crates/wasm"]
 
 # Tests run many solves; the solver is generic code compiled inside our crate,
 # so optimise the test profile itself. Plain `cargo build` stays debuggable.
