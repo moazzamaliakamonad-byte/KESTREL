@@ -15,6 +15,8 @@ export interface Callout {
   text: string;
   /** Urgent lines interrupt whatever is being said. */
   urgent?: boolean;
+  /** Spoken but not captioned (the countdown has its own display). */
+  quiet?: boolean;
 }
 
 const lit = (s: ShipSnapshot) => s.engines.filter((e) => e === "running" || e === "igniting").length;
@@ -47,14 +49,12 @@ export function callouts(kind: ScenarioKind, prev: ShipSnapshot | null, next: Sh
   if (!prev) {
     if (booster) out.push({ text: LINES.boosterOpen });
     else if (next.mach > 4) out.push({ text: LINES.shipEntry });
-    else if (kind === "mars") out.push({ text: LINES.shipMars });
     else out.push({ text: LINES.shipOpen });
     return out;
   }
 
   if (next.outcome && !prev.outcome) {
     if (next.outcome === "caught") out.push({ text: booster ? LINES.boosterCaught : LINES.shipCaught, urgent: true });
-    else if (next.outcome === "landed") out.push({ text: LINES.landed, urgent: true });
     else out.push({ text: lost(next.reason), urgent: true });
     return out;
   }
@@ -74,7 +74,7 @@ export function callouts(kind: ScenarioKind, prev: ShipSnapshot | null, next: Sh
         out.push({ text: booster ? enginesRunning(lit(next)) : LINES.shipBurn });
         break;
       case "terminal":
-        out.push({ text: kind === "mars" ? LINES.finalMars : LINES.finalTower });
+        out.push({ text: LINES.finalTower });
         break;
       default:
         break;
@@ -147,13 +147,26 @@ export class Commentator {
       });
   }
 
+  /** Fetch these lines' clips now, so they start the instant they are called (the countdown). */
+  preload(texts: string[]) {
+    if (typeof Audio === "undefined") return;
+    for (const text of texts) {
+      const id = clipId(text);
+      if (this.cache.has(id) || (this.clips && !this.clips.has(id))) continue;
+      const audio = new Audio(`${VOICE_DIR}/${id}.mp3`);
+      audio.preload = "auto";
+      audio.load();
+      this.cache.set(id, audio);
+    }
+  }
+
   private get busy(): boolean {
     return (!!this.playing && !this.playing.ended && !this.playing.paused) || !!this.synth?.speaking;
   }
 
   say(lines: Callout[], rate = 1) {
     for (const line of lines) {
-      this.caption = { text: line.text, at: performance.now() };
+      if (!line.quiet) this.caption = { text: line.text, at: performance.now() };
       if (!this.enabled || typeof window === "undefined") continue;
       if (line.urgent) {
         this.silence();

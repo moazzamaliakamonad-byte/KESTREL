@@ -12,7 +12,6 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export const LINES = {
   // Opening sequence.
-  countdown: "Five. Four. Three. Two. One.",
   liftoff: "Liftoff.",
   cleared: "The stack has cleared the tower.",
   throttling: "Booster engines are throttling down for staging.",
@@ -21,13 +20,11 @@ export const LINES = {
   // Opening lines of a flight.
   boosterOpen: "Booster is falling back engines first. Grid fins are steering it toward the tower.",
   shipEntry: "Ship is in entry, belly to the wind.",
-  shipMars: "Ship is descending toward the Martian surface, belly first.",
   shipOpen: "Ship is in the belly flop. Four flaps are holding it steady.",
   // Phases.
   startup: "Landing burn start-up.",
   flip: "Engines are lighting. Here comes the flip.",
   shipBurn: "Ship is upright. Landing burn.",
-  finalMars: "Final descent. Legs are down.",
   finalTower: "Final approach. Sliding in over the arms.",
   outerRing: "Shutdown of the outer ring. Three centre engines continue.",
   // Calls on the way down.
@@ -47,8 +44,13 @@ export const LINES = {
   // Outcomes.
   boosterCaught: "Catch confirmed. Booster is on the tower.",
   shipCaught: "Catch confirmed. Ship is on the tower.",
-  landed: "Touchdown. The ship is standing on Mars.",
 } as const;
+
+/**
+ * The countdown, one clip per number, so each is spoken on its own second
+ * (one long "five, four, three…" clip drifted against the clock on screen).
+ */
+export const countLine = (n: number) => `${cap(word(n))}.`;
 
 /** The simulator's reasons for losing a vehicle (`CrashReason::as_str`). */
 export const CRASH_REASONS = ["hit the ground", "hit the tower", "missed the arms", "too fast", "tipped over", "out of propellant"] as const;
@@ -67,6 +69,7 @@ export const lost = (reason: string | null) => {
 /** Every line that can be spoken: the clips to render. */
 export function allPhrases(): string[] {
   const out: string[] = Object.values(LINES);
+  for (let n = 1; n <= 10; n++) out.push(countLine(n));
   for (let i = 0; i < 13; i++) out.push(engineOut(i));
   for (let n = 1; n <= 13; n++) out.push(enginesRunning(n));
   for (let n = 1; n <= 12; n++) out.push(downTo(n));

@@ -31,6 +31,8 @@ export const shipLive: {
   caption: { text: string; at: number } | null;
   /** The flight has begun but waits (behind the title card). */
   hold: boolean;
+  /** Mission clock of the opening sequence, s (negative before liftoff), or null. */
+  launchClock: number | null;
 } = {
   snapshot: null,
   trail: [],
@@ -41,6 +43,7 @@ export const shipLive: {
   history: [],
   caption: null,
   hold: false,
+  launchClock: null,
 };
 
 /** Longest history kept; when full, every other sample is dropped. */
