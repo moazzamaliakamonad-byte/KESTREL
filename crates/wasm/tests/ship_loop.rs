@@ -193,7 +193,7 @@ fn earth_fast_entry_is_caught() {
 #[test]
 #[ignore]
 fn booster_browser_sweep() {
-    for (latency, lead, frame) in [(0.5, 0.0, FRAME), (0.5, 0.5, FRAME), (0.3, 0.3, FRAME), (0.3, 0.3, 1.0 / 15.0), (0.5, 0.55, 1.0 / 15.0), (0.25, 0.3, 0.1), (0.1, 0.15, FRAME), (1.0, 1.0, FRAME), (0.8, 0.85, 1.0 / 15.0)] {
+    for (latency, lead, frame) in [(0.5, 0.0, FRAME), (0.5, 0.5, FRAME), (0.3, 0.3, FRAME), (0.3, 0.3, 1.0 / 15.0), (0.5, 0.55, 1.0 / 15.0), (0.25, 0.3, 0.1), (0.1, 0.15, FRAME), (1.0, 1.0, FRAME), (0.5, 0.55, 0.2), (0.5, 0.55, 0.133), (0.25, 0.3, 0.2)] {
         for seed in [7u64, 11, 23] {
             let mut f = ShipFlight::new(ShipFlightConfig { seed, lag: 0.3, noise: Noise::LOW, ..ShipFlightConfig::new(Kind::Booster) }).unwrap();
             f.set_solve_time(lead);

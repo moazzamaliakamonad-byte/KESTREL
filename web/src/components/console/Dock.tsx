@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { engineLayout } from "@/lib/ship/engines";
+import { LINES } from "@/lib/ship/phrases";
 import { commentator, failEngine, throwGust } from "@/lib/ship/runtime";
 import { PRESETS, SPEEDS, START_LIMITS, useShip, verdict, type CameraMode, type Noise } from "@/lib/ship/store";
 import type { EngineState, Planet, Preview, Vehicle } from "@/lib/ship/types";
@@ -178,7 +179,7 @@ function Environment() {
         disabled={mode !== "flying"}
         onClick={() => {
           throwGust();
-          commentator.say([{ text: "Wind gust." }]);
+          commentator.say([{ text: LINES.gust }]);
         }}
       >
         Throw a 4-second gust now

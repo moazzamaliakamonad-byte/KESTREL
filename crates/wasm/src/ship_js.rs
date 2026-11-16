@@ -284,6 +284,23 @@ fn outcome_str(o: Option<Outcome>) -> (Value, Value) {
     }
 }
 
+/// Solve one representative problem (the booster's first landing-burn
+/// plan) and throw the answer away. A worker calls this once when it
+/// starts: the first solve in a fresh WebAssembly instance is several
+/// times slower than the rest, and the booster's burn is too short to
+/// spend that on the plan it is waiting for. Returns true if it solved.
+#[wasm_bindgen]
+pub fn warmup_ship() -> bool {
+    let Ok(mut f) = ShipFlight::new(ShipFlightConfig::new(Kind::Booster)) else {
+        return false;
+    };
+    while !f.wants_replan() && f.phase() != Phase::Done && f.sim().t < 120.0 {
+        f.step(0.1);
+    }
+    let (_, options) = f.problem();
+    ship_flight::plan(&options).is_ok()
+}
+
 /// Where a start leads: fly the whole flight now (noise off, solves with no
 /// latency) and return the path every 0.5 s, the phase changes and the end.
 #[wasm_bindgen]
@@ -652,6 +669,11 @@ mod tests {
         let info = parse(&ship_scenario("booster"));
         assert_eq!(info["vehicle"], "booster");
         assert_eq!(info["ship"]["engines"], 13);
+    }
+
+    #[test]
+    fn warmup_solves_a_plan() {
+        assert!(warmup_ship());
     }
 
     #[test]

@@ -5,6 +5,7 @@ import { shipLive } from "@/lib/ship/live";
 import { PHASE_LABEL, SPEEDS, phasesOf, useShip, verdict, type CameraMode } from "@/lib/ship/store";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { flightAudio } from "@/lib/ship/audio";
+import { commentator } from "@/lib/ship/runtime";
 import { Dock } from "./Dock";
 import { AnalysisIntro, LaunchOverlay, PhaseBanner } from "./Launch";
 import { Briefing, Telemetry } from "./Telemetry";
@@ -71,6 +72,7 @@ function TopBar({ onSettings }: { onSettings: () => void }) {
 /** Start the flight (the opening sequence first) and, being a click, the audio. */
 function go() {
   flightAudio.start();
+  commentator.load();
   useShip.getState().fly();
 }
 

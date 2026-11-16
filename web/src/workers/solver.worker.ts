@@ -1,7 +1,7 @@
 // Runs the Rust guidance (WebAssembly) off the main thread, so a ~250 ms
 // solve never stalls rendering. Protocol: src/lib/solverProtocol.ts.
 
-import init, { example_request, plan_landing, plan_ship, preview_ship, replan } from "@/wasm/kestrel_wasm";
+import init, { example_request, plan_landing, plan_ship, preview_ship, replan, warmup_ship } from "@/wasm/kestrel_wasm";
 import type { PageToWorker, WorkerToPage } from "@/lib/solverProtocol";
 import type { PlanRequest, PlanResponse } from "@/lib/types";
 
@@ -13,7 +13,11 @@ const ctx = self as unknown as {
 
 // No path: the glue's own `new URL(..., import.meta.url)` points at the
 // bundled, hashed .wasm asset.
-const ready = init();
+// Then solve one throw-away plan: the first solve in a fresh instance is
+// several times slower than the rest, and a flight must not pay for that.
+const ready = init().then(() => {
+  warmup_ship();
+});
 
 ready.catch((err: unknown) => {
   ctx.postMessage({ id: -1, fatal: `Could not load the solver: ${String(err)}` });

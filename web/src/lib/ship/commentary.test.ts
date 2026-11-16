@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { callouts, pickVoice, timeToIgnition } from "./commentary";
+import { allPhrases, clipId } from "./phrases";
 import type { EngineState, ShipSnapshot } from "./types";
 
 function snap(patch: Partial<ShipSnapshot>): ShipSnapshot {
@@ -50,7 +51,7 @@ const running = (n: number) => Array.from({ length: 13 }, (_, i): EngineState =>
 describe("commentary", () => {
   it("opens with the vehicle's situation", () => {
     expect(texts(callouts("booster", null, snap({})))).toMatch(/engines first/);
-    expect(texts(callouts("earth", null, snap({ vehicle: "ship", phase: "belly-flop", mach: 7.4 })))).toMatch(/Mach 7/);
+    expect(texts(callouts("earth", null, snap({ vehicle: "ship", phase: "belly-flop", mach: 7.4 })))).toMatch(/in entry/);
   });
 
   it("calls start-up, engine counts and the shutdown to three", () => {
@@ -58,7 +59,7 @@ describe("commentary", () => {
     const b = snap({ phase: "startup" });
     expect(callouts("booster", a, b)[0]).toEqual({ text: "Landing burn start-up.", urgent: true });
     const c = snap({ phase: "landing-burn", engines: running(13) });
-    expect(texts(callouts("booster", b, c))).toBe("thirteen engines running.");
+    expect(texts(callouts("booster", b, c))).toBe("Thirteen engines running.");
     const d = snap({ phase: "landing-burn", engines: running(3) });
     expect(texts(callouts("booster", c, d))).toMatch(/Three centre engines continue/);
   });
@@ -86,6 +87,25 @@ describe("commentary", () => {
     expect(out).toEqual([{ text: "Catch confirmed. Booster is on the tower.", urgent: true }]);
     const lost = callouts("earth", snap({}), snap({ outcome: "crashed", reason: "hit the tower" }));
     expect(lost[0].text).toBe("We have lost the vehicle. It hit the tower.");
+    expect(callouts("earth", snap({}), snap({ outcome: "crashed", reason: "out of propellant" }))[0].text).toMatch(/ran out of propellant/);
+  });
+
+  it("every line it can say is in the list of clips to render, under a unique file name", () => {
+    const all = new Set(allPhrases());
+    const flights: [Parameters<typeof callouts>[0], ShipSnapshot | null, ShipSnapshot][] = [
+      ["booster", null, snap({})],
+      ["mars", null, snap({ vehicle: "ship", phase: "belly-flop" })],
+      ["booster", snap({}), snap({ phase: "startup" })],
+      ["earth", snap({ phase: "belly-flop" }), snap({ phase: "flip" })],
+      ["booster", snap({ phase: "landing-burn", engines: running(3) }), snap({ phase: "landing-burn", engines: running(2) })],
+      ["booster", snap({ position: [0, 0, 5001], mach: 1.2, heat_flux: 0 }), snap({ position: [0, 0, 4999], mach: 0.9, heat_flux: 70_000, arms: true, guide: "brake" })],
+      ["earth", snap({}), snap({ outcome: "crashed", reason: "too fast" })],
+      ["mars", snap({}), snap({ outcome: "landed" })],
+    ];
+    for (const [kind, a, b] of flights) for (const c of callouts(kind, a, b)) expect(all.has(c.text), c.text).toBe(true);
+    const ids = allPhrases().map(clipId);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.every((id) => /^[a-z0-9-]+$/.test(id))).toBe(true);
   });
 
   it("prefers a natural English voice, then any English one", () => {

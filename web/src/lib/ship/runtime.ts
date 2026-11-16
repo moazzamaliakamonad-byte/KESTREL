@@ -51,6 +51,8 @@ export function startShip(): boolean {
   const seed = st.options.seed ?? Math.floor(Math.random() * 2 ** 32);
   flight = ShipFlight.create(JSON.stringify({ ...configOf(st), seed })) ?? null;
   if (!flight) return false;
+  // Until a solve has been timed: a typical one, in sim time.
+  flight.set_solve_time(0.3 * st.view.speed);
   const snap = JSON.parse(flight.snapshot()) as ShipSnapshot;
   publish(snap, null);
   return true;

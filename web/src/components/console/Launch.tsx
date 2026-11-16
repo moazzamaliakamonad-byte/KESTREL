@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CARD_HANDOVER, LAUNCH, cardStart, launchState, type LaunchState } from "@/lib/ship/launch";
 import { shipLive } from "@/lib/ship/live";
 import { commentator } from "@/lib/ship/runtime";
+import { LINES } from "@/lib/ship/phrases";
 import { PHASE_LABEL, phasesOf, useShip } from "@/lib/ship/store";
 import type { ShipPhase } from "@/lib/ship/types";
 import css from "./console.module.css";
@@ -68,12 +69,12 @@ export function LaunchOverlay() {
       if (s.phase === "over") return stop();
       setLs(s);
       if (withStack && !begun) {
-        if (s.phase === "countdown") once("count", "Five. Four. Three. Two. One.");
-        if (s.phase === "climb") once("liftoff", "Liftoff.", true);
-        if (s.phase === "climb" && s.t > 6) once("clear", "The stack has cleared the tower.");
-        if (s.phase === "staging" && s.t > 0.9 && s.apart === 0) once("throttle", "Booster engines are throttling down for staging.");
-        if (s.phase === "staging" && s.apart > 0) once("staging", "Stage separation. The ship is away.", true);
-        if (s.phase === "staging" && s.apart > 3.4) once("home", "The booster turns for home.");
+        if (s.phase === "countdown") once("count", LINES.countdown);
+        if (s.phase === "climb") once("liftoff", LINES.liftoff, true);
+        if (s.phase === "climb" && s.t > 6) once("clear", LINES.cleared);
+        if (s.phase === "staging" && s.t > 0.9 && s.apart === 0) once("throttle", LINES.throttling);
+        if (s.phase === "staging" && s.apart > 0) once("staging", LINES.staging, true);
+        if (s.phase === "staging" && s.apart > 3.4) once("home", LINES.home);
       }
       if (s.phase === "card" && s.t >= CARD_HANDOVER && !begun) {
         begun = true;

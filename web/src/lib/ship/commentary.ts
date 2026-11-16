@@ -1,10 +1,14 @@
 /**
  * Live commentary: what a launch-webcast commentator would say about this
  * flight, decided from two consecutive snapshots (so every line is caused
- * by something that actually happened in the simulation), and spoken with
- * the browser's built-in speech voices. No recordings, no network.
+ * by something that actually happened in the simulation).
+ *
+ * Each line is one of a fixed list (`phrases.ts`) with a clip rendered in
+ * advance by a neural voice, so it plays at once and sounds human. If a
+ * clip is missing the browser's own speech voice says the line instead.
  */
 
+import { LINES, clipId, downTo, engineOut, enginesRunning, lost } from "./phrases";
 import type { ScenarioKind, ShipSnapshot } from "./types";
 
 export interface Callout {
@@ -13,20 +17,17 @@ export interface Callout {
   urgent?: boolean;
 }
 
-const NUMBER = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen"];
-const say = (n: number) => NUMBER[n] ?? String(n);
-
 const lit = (s: ShipSnapshot) => s.engines.filter((e) => e === "running" || e === "igniting").length;
 const failed = (s: ShipSnapshot) => s.engines.filter((e) => e === "failed").length;
 const unpowered = (s: ShipSnapshot) => s.phase === "belly-flop" || s.phase === "descent";
 
 /** Altitudes called on the way down, m. */
 const ALTITUDES: [number, string][] = [
-  [50_000, "Fifty kilometres."],
-  [20_000, "Twenty kilometres."],
-  [10_000, "Ten kilometres."],
-  [5000, "Five kilometres."],
-  [1000, "One kilometre."],
+  [50_000, LINES.km50],
+  [20_000, LINES.km20],
+  [10_000, LINES.km10],
+  [5000, LINES.km5],
+  [1000, LINES.km1],
 ];
 
 /** Heating (W/m²) above which the plasma is worth mentioning, and below which it is over. */
@@ -42,67 +43,63 @@ export function timeToIgnition(s: ShipSnapshot): number {
 /** What to say about the step from `prev` to `next` (`prev` null = the flight has just begun). */
 export function callouts(kind: ScenarioKind, prev: ShipSnapshot | null, next: ShipSnapshot): Callout[] {
   const out: Callout[] = [];
-  const name = kind === "booster" ? "Booster" : "Ship";
+  const booster = kind === "booster";
   if (!prev) {
-    if (kind === "booster") out.push({ text: "Booster is falling back engines first. Grid fins are steering it toward the tower." });
-    else if (next.mach > 4) out.push({ text: `Ship is in entry at Mach ${Math.round(next.mach)}, belly to the wind.` });
-    else if (kind === "mars") out.push({ text: "Ship is descending toward the Martian surface, belly first." });
-    else out.push({ text: "Ship is in the belly flop. Four flaps are holding it steady." });
+    if (booster) out.push({ text: LINES.boosterOpen });
+    else if (next.mach > 4) out.push({ text: LINES.shipEntry });
+    else if (kind === "mars") out.push({ text: LINES.shipMars });
+    else out.push({ text: LINES.shipOpen });
     return out;
   }
 
   if (next.outcome && !prev.outcome) {
-    if (next.outcome === "caught") out.push({ text: `Catch confirmed. ${name} is on the tower.`, urgent: true });
-    else if (next.outcome === "landed") out.push({ text: "Touchdown. The ship is standing on Mars.", urgent: true });
-    else out.push({ text: `We have lost the vehicle. It ${next.reason ?? "crashed"}.`, urgent: true });
+    if (next.outcome === "caught") out.push({ text: booster ? LINES.boosterCaught : LINES.shipCaught, urgent: true });
+    else if (next.outcome === "landed") out.push({ text: LINES.landed, urgent: true });
+    else out.push({ text: lost(next.reason), urgent: true });
     return out;
   }
 
   const newlyFailed = next.engines.findIndex((e, i) => e === "failed" && prev.engines[i] !== "failed");
-  if (failed(next) > failed(prev) && newlyFailed >= 0) {
-    out.push({ text: `Engine ${say(newlyFailed + 1)} is out. Guidance is re-planning.`, urgent: true });
-  }
+  if (failed(next) > failed(prev) && newlyFailed >= 0) out.push({ text: engineOut(newlyFailed), urgent: true });
 
   if (next.phase !== prev.phase) {
     switch (next.phase) {
       case "startup":
-        out.push({ text: "Landing burn start-up.", urgent: true });
+        out.push({ text: LINES.startup, urgent: true });
         break;
       case "flip":
-        out.push({ text: "Engines are lighting. Here comes the flip.", urgent: true });
+        out.push({ text: LINES.flip, urgent: true });
         break;
       case "landing-burn":
-        out.push({ text: kind === "booster" ? `${say(lit(next))} engines running.` : "Ship is upright. Landing burn." });
+        out.push({ text: booster ? enginesRunning(lit(next)) : LINES.shipBurn });
         break;
       case "terminal":
-        out.push({ text: kind === "mars" ? "Final descent. Legs are down." : "Final approach. Sliding in over the arms." });
+        out.push({ text: kind === "mars" ? LINES.finalMars : LINES.finalTower });
         break;
       default:
         break;
     }
   } else if (lit(next) < lit(prev) && failed(next) === failed(prev) && lit(next) > 0) {
     // The flight software shut engines down (not a failure).
-    if (kind === "booster" && lit(prev) > 3 && lit(next) <= 3) out.push({ text: "Shutdown of the outer ring. Three centre engines continue." });
-    else out.push({ text: `Down to ${say(lit(next))} engine${lit(next) === 1 ? "" : "s"}.` });
+    if (booster && lit(prev) > 3 && lit(next) <= 3) out.push({ text: LINES.outerRing });
+    else out.push({ text: downTo(lit(next)) });
   }
 
   if (unpowered(next)) {
     for (const [z, text] of ALTITUDES) {
       if (prev.position[2] > z && next.position[2] <= z) out.push({ text });
     }
-    if (prev.mach >= 1 && next.mach < 1) out.push({ text: `${name} is subsonic.` });
-    if (timeToIgnition(prev) > 10 && timeToIgnition(next) <= 10) out.push({ text: "Ten seconds to the landing burn." });
+    if (prev.mach >= 1 && next.mach < 1) out.push({ text: booster ? LINES.boosterSubsonic : LINES.shipSubsonic });
+    if (timeToIgnition(prev) > 10 && timeToIgnition(next) <= 10) out.push({ text: LINES.tenSeconds });
   }
-  if (prev.heat_flux < HEATING_ON && next.heat_flux >= HEATING_ON) out.push({ text: "Heating is building. Plasma on the heat shield." });
-  if (prev.heat_flux > HEATING_OFF && next.heat_flux <= HEATING_OFF && prev.heat_flux < HEATING_ON) {
-    out.push({ text: "Through peak heating." });
-  }
-  if (!prev.arms && next.arms) out.push({ text: "Tower arms are closing." });
-  if (prev.guide !== "brake" && next.guide === "brake") out.push({ text: "No landing plan from here. Braking.", urgent: true });
+  if (prev.heat_flux < HEATING_ON && next.heat_flux >= HEATING_ON) out.push({ text: LINES.heating });
+  if (prev.heat_flux > HEATING_OFF && next.heat_flux <= HEATING_OFF && prev.heat_flux < HEATING_ON) out.push({ text: LINES.peakHeating });
+  if (!prev.arms && next.arms) out.push({ text: LINES.arms });
+  if (prev.guide !== "brake" && next.guide === "brake") out.push({ text: LINES.braking, urgent: true });
   return out;
 }
 
-/** Voices that sound like a webcast host, best first. */
+/** Voices that sound like a webcast host, best first (the fallback when a clip is missing). */
 const PREFERRED = [/natural.*(aria|jenny|ava|emma|sonia|libby|michelle)/i, /(aria|jenny|ava|emma|sonia|libby|michelle).*natural/i, /samantha/i, /google us english/i, /google uk english female/i, /zira/i, /female/i];
 
 export function pickVoice(voices: { name: string; lang: string }[]): number {
@@ -114,27 +111,54 @@ export function pickVoice(voices: { name: string; lang: string }[]): number {
   return english[0]?.i ?? (voices.length ? 0 : -1);
 }
 
-/** Speaks callouts; keeps the latest line for the on-screen caption. */
+/** Where the rendered clips are served from (relative, so a site base path works). */
+const VOICE_DIR = "voice";
+
+/**
+ * Says callouts: the pre-rendered clip when there is one, the browser's
+ * speech voice otherwise. One line may wait behind the one being said;
+ * older small talk is dropped rather than queued up. Keeps the latest line
+ * for the on-screen caption.
+ */
 export class Commentator {
   caption: { text: string; at: number } | null = null;
   enabled = true;
   private pending: string | null = null;
+  private clips: Set<string> | null = null;
+  private loading = false;
+  private playing: HTMLAudioElement | null = null;
+  private cache = new Map<string, HTMLAudioElement>();
 
   private get synth(): SpeechSynthesis | null {
     return typeof window !== "undefined" && "speechSynthesis" in window ? window.speechSynthesis : null;
   }
 
+  /** Fetch the list of rendered clips (once). Lines said before it arrives use the fallback voice. */
+  load() {
+    if (this.clips || this.loading || typeof fetch === "undefined") return;
+    this.loading = true;
+    fetch(`${VOICE_DIR}/manifest.json`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((ids: unknown) => {
+        this.clips = new Set(Array.isArray(ids) ? (ids as string[]) : []);
+      })
+      .catch(() => {
+        this.clips = new Set();
+      });
+  }
+
+  private get busy(): boolean {
+    return (!!this.playing && !this.playing.ended && !this.playing.paused) || !!this.synth?.speaking;
+  }
+
   say(lines: Callout[], rate = 1) {
     for (const line of lines) {
       this.caption = { text: line.text, at: performance.now() };
-      const synth = this.synth;
-      if (!synth || !this.enabled) continue;
+      if (!this.enabled || typeof window === "undefined") continue;
       if (line.urgent) {
-        synth.cancel();
-        this.pending = null;
+        this.silence();
         this.speak(line.text, rate);
-      } else if (synth.speaking) {
-        // One line waits at most; older small talk is dropped, not queued up.
+      } else if (this.busy) {
         this.pending = line.text;
       } else {
         this.speak(line.text, rate);
@@ -142,7 +166,32 @@ export class Commentator {
     }
   }
 
+  private next(rate: number) {
+    const text = this.pending;
+    this.pending = null;
+    if (text && this.enabled) this.speak(text, rate);
+  }
+
   private speak(text: string, rate: number) {
+    const id = clipId(text);
+    if (this.clips?.has(id)) {
+      let audio = this.cache.get(id);
+      if (!audio) {
+        audio = new Audio(`${VOICE_DIR}/${id}.mp3`);
+        this.cache.set(id, audio);
+      }
+      audio.currentTime = 0;
+      // A little quicker at high sim speed, never chipmunk-fast.
+      audio.playbackRate = Math.min(1.3, Math.max(1, 0.9 + 0.1 * rate));
+      audio.onended = () => this.next(rate);
+      this.playing = audio;
+      audio.play().catch(() => this.fallback(text, rate));
+      return;
+    }
+    this.fallback(text, rate);
+  }
+
+  private fallback(text: string, rate: number) {
     const synth = this.synth;
     if (!synth) return;
     const u = new SpeechSynthesisUtterance(text);
@@ -151,17 +200,19 @@ export class Commentator {
     if (i >= 0) u.voice = voices[i];
     u.rate = Math.min(1.6, Math.max(0.9, 1.02 * rate));
     u.pitch = 1.05;
-    u.onend = () => {
-      const next = this.pending;
-      this.pending = null;
-      if (next && this.enabled) this.speak(next, rate);
-    };
+    u.onend = () => this.next(rate);
     synth.speak(u);
   }
 
-  stop() {
+  private silence() {
     this.pending = null;
-    this.caption = null;
+    this.playing?.pause();
+    this.playing = null;
     this.synth?.cancel();
+  }
+
+  stop() {
+    this.silence();
+    this.caption = null;
   }
 }
