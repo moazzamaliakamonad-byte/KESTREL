@@ -3,12 +3,13 @@
 **A Starship-class flight simulator in a browser tab.** A Super Heavy-class
 booster falls back from the edge of space engines first, steers with three
 grid fins, lights thirteen engines, drops to three and is caught by the
-tower's arms. The ship belly-flops in, flips and is caught too, or lands on
-legs on Mars. The landing burns are planned live by the class of algorithm
+tower's arms. The ship belly-flops in, flips and is caught too. The landing burns are planned live by the class of algorithm
 used for real propulsive landings (successive convexification, a sequence of
 convex optimizations), in Rust compiled to WebAssembly. Change anything,
 fail any engine, throw gusts at it, pause it mid-air and switch to the
-analysis view to see the forces and equations drawn on the vehicle.
+analysis view: the vehicle becomes a blueprint, every part can be clicked,
+and its calculations (the simulator's own formulas with this instant's
+numbers) open beside it. Step the paused flight a tenth of a second at a time.
 
 This is a **simulation**, built from public figures: published numbers are
 cited and marked, unpublished ones are marked *illustrative*. It is not
@@ -47,10 +48,10 @@ return to the same tower.
   convexification, Clarabel), in the browser, in a closed loop with a
   separate simulator, noisy sensing and "break it" controls.
 - **M3 in progress:** 6-DoF vehicles and successive convexification.
-  Built: the ship (belly flop, flip, tower catch on Earth, legs on Mars),
+  Built: the ship (belly flop, flip, tower catch),
   the booster (grid-fin descent, 13 → 3 engine landing burn, tower catch),
-  one page with full customization, cinematic cameras, the analysis view,
-  commentary and sound. Not built: a simulated ascent, hot staging and
+  one page with full customization, cinematic cameras, the blueprint
+  analysis view with per-part calculations, commentary and sound. Not built: a simulated ascent, hot staging and
   boostback (the opening sequence is an illustration), orbital entry, the
   custom solver and its benchmark.
 

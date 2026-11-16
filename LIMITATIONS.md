@@ -22,7 +22,7 @@ approximate. Update it whenever a milestone lands.
 What is simulated, and what is only shown:
 
 - **Simulated:** the return of one vehicle at a time, from a chosen start
-  in the air to the catch, landing or loss. The start is a state the page
+  in the air to the catch or loss. The start is a state the page
   sets (altitude, position, velocity), not the end of a simulated ascent.
 - **Not simulated: the launch, ascent, stage separation and boostback.**
   The opening sequence (countdown, liftoff, the stages parting at 64 km,
@@ -50,14 +50,23 @@ What is simulated, and what is only shown:
   have no start-up transient beyond a fixed delay. A failed engine removes
   its thrust but creates no off-axis torque. Failures are known to guidance
   at once. Shut-down engines do not relight.
-- **The booster ends its final approach on two engines** when too light to
-  hover on three at minimum throttle (a rule of this simulation).
-- **The final approach is slow.** The terminal controller takes about 25 s
-  to slide over the axis and settle; real catches are far quicker. It costs
-  propellant: the booster's nominal flight ends with about 15 t of 120 t.
-- **The tower's arms do not move to meet the vehicle** (they close when it
-  is within reach); "caught" is a test of position, speed, tilt and rate at
-  arm height, not contact dynamics.
+- **The booster may end its final approach on two engines** when too light
+  to hover on three at minimum throttle (a rule of this simulation; with
+  the quicker approach it did not happen in the runs below).
+- **The final approach takes about 12 s** from the approach gate to the
+  catch (measured below; it was about 35 s before 2026-11-16). Real catches
+  are quicker still: the real vehicle arrives on the arms at the end of its
+  burn, with no separate slide-in.
+- **The ship flies most of its landing burn on one engine** (three for the
+  flip, then one about half a second later): three at minimum throttle are
+  too strong for a nearly empty ship at this ignition height. Real ships
+  keep more engines lit for longer. Tried and reverted (D-027).
+- **The catch is a test, not contact dynamics**: within 4 m of the catch
+  axis, at most 2 m/s down and 1 m/s sideways, tilt under 5°, turning
+  slower than 5°/s (all *illustrative*; widened on 2026-11-16, D-026). The
+  arms are drawn closing on the tower's centre line, not on the vehicle.
+- **Sensor noise "high" with the booster hits the tower** (single runs,
+  seeds 7 and 9, before and after the 2026-11-16 changes).
 - **Wind** is the same at every height; a gust is a 4 s trapezoid. The
   planner knows neither.
 - **Start envelope.** Booster: caught from 6–20 km at 300–600 m/s in the
@@ -71,9 +80,15 @@ What is simulated, and what is only shown:
   with distance, a delay of distance / 343 m/s. Levels are not physical.
 - **Commentary** lines are triggered by simulated events; the voice is a
   text-to-speech model's (D-023), pre-rendered.
-- **Shake, smoke, plume shapes, clouds, sky colours and the "blueprint"
-  look** are visual only.
-- **Mars:** ship only; 160 t of cargo is assumed so one engine can hover.
+- **Shake, smoke, plume shapes, clouds, sky colours and the blueprint
+  drawing** are visual only. The vehicles' shapes are by eye from public
+  photographs.
+- **Analysis view numbers** are the snapshot's, or the model's formulas
+  evaluated on it by the page (`parts.ts`): a flap's or fin's force is
+  recomputed, not read from the integrator; "each engine" is the total
+  divided by the engines lit. Stepping a paused flight lets plans arrive
+  with no delay in sim time, so a stepped flight is not the same flight as
+  one left running.
 - The page has no end-to-end test yet (the old Playwright tests drove the
   M2 page and no longer apply); it was checked by hand and with scripted
   headless runs.
@@ -272,22 +287,33 @@ time counts ×2 or ×4 in sim time, so guidance effectively reacts later.
 
 ### Ship and booster closed loop (M3)
 
-**Native scenarios** (`cargo test -p kestrel-wasm --test ship_loop --
+**Native scenarios** (`cargo test -p kestrel-wasm --release --test ship_loop --
 --nocapture`, seed 7, low noise, 0.3 s throttle lag, solve latency modelled
-as 0.5 s of sim time; test profile is optimized). Read on 2026-11-16:
+as 0.5 s of sim time). Read on 2026-11-16, after the final-approach retune
+(D-026):
 
 | Scenario | Outcome | Flight time | Propellant used | Plans / failed |
 | --- | --- | --- | --- | --- |
-| Booster, default start (14 km, 420 m/s) | caught | 85.3 s | 104.5 of 120 t | 15 / 0 |
-| Booster, a centre engine out at ignition | caught | 86.1 s | 105.4 t | 15 / 0 |
-| Booster, gusts at 8 s and 20 s | caught | 85.3 s | 104.5 t | 15 / 0 |
-| Booster, every solve taking 1.0 s | caught | 85.0 s | 104.4 t | — |
-| Ship, Earth default (5 km) | caught | 98.8 s | 25.7 of 40 t | 11 / 0 |
-| Ship, Earth, engine out at ignition | caught | 101.6 s | 26.7 t | 12 / 0 |
-| Ship, Earth, gusts in the belly flop | caught | 105.7 s | 27.7 t | 10 / 3 |
-| Ship, Mars default | landed | 106.5 s | 86.8 of 100 t | 30 / 0 |
+| Booster, default start (14 km, 420 m/s) | caught | 64.5 s | 85.8 of 120 t | 15 / 0 |
+| Booster, a centre engine out at ignition | caught | 64.6 s | 85.6 t | 14 / 0 |
+| Booster, gusts at 8 s and 20 s | caught | 63.4 s | 84.6 t | 15 / 0 |
+| Booster, every solve taking 1.0 s | caught | 63.5 s | 84.6 t | — |
+| Ship, default (5 km) | caught | 85.5 s | 20.9 of 40 t | 12 / 0 |
+| Ship, engine out at ignition | caught | 88.9 s | 21.8 t | 11 / 3 |
+| Ship, gusts in the belly flop | caught | 84.9 s | 20.7 t | 13 / 0 |
 
-Single runs of other starts (`start_probe`, `--ignored`): ship from 25 km
+Before the retune the same runs took 85.3 s (booster) and 98.8 s (ship).
+
+**Final approach** (time in the terminal phase, from the approach gate to
+the catch; `trace_booster` / `trace_earth`, noise off and low, seeds 7–10,
+8 runs each, all caught): booster 11.6–13.6 s (median 12.6 s), ship
+11.5–14.1 s (median 13.9 s). Before: about 35 s in the single traces read
+(booster 35.8 s, ship 36.1 s). Also run once: ship with high noise and 1 s
+of throttle lag, caught (101.0 s).
+
+Single runs of other starts (`start_probe`, `--ignored`; **read before the
+retune and not repeated since**, except the 80 km entry, which was re-run
+and caught): ship from 25 km
 caught (207 s, 12.7 t left), from 45 km caught (245 s, 6.9 t left), from
 80 km at 2.5 km/s caught (204 s, 12.3 t left; top speed 2 553 m/s).
 Booster from 20 km at 550 m/s caught (8.3 t left), from 6 km caught
@@ -296,7 +322,10 @@ Booster from 20 km at 550 m/s caught (8.3 t left), from 6 km caught
 25, 30, 45, 60 and 70 km: out of propellant.
 
 **Sensitivity to solve time and frame rate** (`booster_browser_sweep`,
-`--ignored`): booster default start, three seeds per row.
+`--ignored`): booster default start, three seeds per row. Re-run after
+the retune on 2026-11-16: 33 of 33 caught over the eleven conditions in
+the test (the table below is the earlier reading; its 0.8 s row is no
+longer in the test).
 
 | Solve latency | Reported solve time | Sim step per frame | Caught |
 | --- | --- | --- | --- |
@@ -313,27 +342,28 @@ One start, one noise level, three seeds: not a statistical claim.
 dev build, this laptop, other work running; scripted flights with the
 opening sequence skipped; 2026-11-16):
 
-- Booster default start: caught at ×1 (81.3 s) and ×2 (86.0 s); solve times
-  shown by the page 64–70 ms after the worker's warm-up solve. Before the
-  warm-up existed the first solve took 1 407 ms and the flight hit the tower.
-- Ship, Earth default at ×2: caught (100.5 s; last solve 89 ms).
-- **Ship, Mars default: fails in the browser.** At ×1 and at ×2, on the
-  idle machine, the ship reached the final descent and ran out of
-  propellant a few metres above the ground. The page showed solve times of
-  1.8–3.4 s for Mars plans (the Earth flights: 64–89 ms): at that delay
-  plans arrive stale, guidance brakes and hovers, and the propellant goes.
-  Natively, with the delay modelled as 0.5 s, the same flight lands
-  (table above). Open: make the Mars plans converge faster or tolerate the
-  delay. Until then the Mars flight on the page is not reliable.
-- Ship, Earth default at ×4 while the machine was busy rendering audio
-  (solves of 1–1.7 s, i.e. 4–7 s of sim time): out of propellant. High
-  speeds multiply the solve delay in sim time.
-- Commentary: 77 clips, 1.8 MB in total; the page fetched and decoded them
-  (checked for two lines; nobody has listened to all 77).
+- After the retune (2026-11-16, one run each, ×1, opening sequence
+  skipped, while a voice-model install was running on the machine): booster
+  default start caught at 72.7 s with 25.1 t left (25 plans; contact at
+  1.66 m/s down, 0.14 m/s sideways, 0.44 m off the axis); ship default
+  start caught at 87.9 s (13 plans). The booster's page flight is 8 s
+  longer than the native one; not investigated.
+- One ship flight at ×4 that had been paused, stepped and resumed: hit the
+  tower ("no plan, braking"). High speeds multiply the solve delay in sim
+  time; ×4 was already unreliable before (out of propellant, earlier note).
+- Earlier readings (before the retune): booster caught at ×1 (81.3 s) and
+  ×2 (86.0 s), solve times 64–70 ms after the worker's warm-up solve
+  (without the warm-up the first solve took 1 407 ms and the flight hit the
+  tower); ship caught at ×2 (100.5 s).
+- Commentary: 84 clips after the countdown was split into one clip per
+  number; nobody has listened to all of them. The alignment of the spoken
+  count with the number on screen is by construction (one clock, clips
+  preloaded) and was not measured with a recording.
 
 Not measured: a benchmark of 6-DoF solve times; Firefox or Safari; phones
 (the layout was checked at phone width only as a screenshot); frame rates;
-any Monte Carlo of the M3 flights; noise "high" with the booster.
+any Monte Carlo of the M3 flights; ×2 and faster after the retune; how
+the blueprint view performs on a slow GPU.
 
 ### Comparison with Malyuta et al. (arXiv:2106.09125, eq. 108, Fig. 21)
 

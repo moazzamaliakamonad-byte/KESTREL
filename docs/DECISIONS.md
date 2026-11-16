@@ -284,3 +284,93 @@ Template:
 - Consequences: no audio assets; levels and timbre are by ear, not
   measured (LIMITATIONS.md).
 
+## D-025 — Mars removed
+- Date: 2026-11-16
+- Status: accepted (supersedes the Mars part of the M3 ship spec)
+- Context: the owner asked for Mars to be removed completely. It also did
+  not work on the page (plans took 2–3 s to solve in the browser and the
+  flight ran out of propellant).
+- Decision: the Mars scenario, the legs, the `landed` outcome and the
+  planet choice are deleted from model, simulator, guidance, the wasm API
+  and the page. `Planet` keeps one variant (Earth). The M0–M2 3-DoF code
+  keeps its `Vehicle::example_mars` test vehicle (the paper's numbers); it
+  is not served.
+- Consequences: the terminal controller no longer has to work in Mars
+  gravity, which allowed D-026.
+
+## D-026 — A quick final approach: slide in while descending, arms take metres
+- Date: 2026-11-16
+- Status: accepted
+- Context: the owner: close to the tower "it takes so much time to be
+  caught while in real life it is very fast". Measured: about 35 s between
+  the approach gate and the catch for both vehicles. The terminal law
+  hovered 20 m up until the axis was within 3 m, then crept to within 1 m
+  at a few tenths of a metre per second.
+- Decision: (1) the plan's gate is nearer the catch: 14 m out, 12 m
+  (booster) or 14 m (ship) above the caught position, with 2 m/s toward
+  the axis; (2) the terminal law descends to 5 m while it slides, sideways
+  speed from a square-root braking curve far out and a low linear gain
+  close in; (3) the arms accept the vehicle within 4 m of the catch axis
+  (was 1.5 m), tilt 5° and rate 5°/s (were 3° and 2°/s), contact speed
+  limits unchanged (2 m/s down, 1 m/s sideways).
+- Why (3) is fair: real catch arms close onto the vehicle and it lands
+  anywhere along their rails; a 1.5 m circle was this simulation's own
+  earlier choice, not a published figure. All of it is *illustrative*.
+- Alternatives tried: a square-root braking law all the way in (weaved
+  across the axis and hit the tower: the sideways loop runs through the
+  attitude loop and cannot be stiff); gates 3–10 m out (hit the tower
+  under sensor noise or slow solves); no inward speed at the gate (2 s
+  slower).
+- Consequences: measured in LIMITATIONS.md (about 12 s). The vehicle may
+  hang up to 4 m off the tower's centre line; the arms are drawn closing on
+  the centre line, so a far-off catch looks slightly off.
+
+## D-027 — The ship still drops to one engine right after the flip
+- Date: 2026-11-16
+- Status: accepted for now (open on the roadmap)
+- Context: the owner: the ship "turns down to 1 or 2 engines too quickly".
+  Cause: at 870 m and 90 m/s three engines at minimum throttle push a
+  nearly empty ship at about 2 g, more than the burn needs, so the first
+  plan that fits is the one-engine plan.
+- Tried: preferring plans on three, then two engines; igniting lower (500–
+  700 m) with the aim point moved in. Result: 0–2 catches in 4 runs per
+  setting (tower strikes, propellant exhaustion). Reverted.
+- Decision: leave the ship's burn as it was. The quicker final approach
+  shortens the one-engine time by about 22 s. A proper fix needs the flip,
+  the aim point and the ignition rule retuned together.
+
+## D-028 — Analysis view: the scene becomes the drawing
+- Date: 2026-11-16
+- Status: accepted (replaces the screen-space "blueprint" filter of D-022's page)
+- Context: the owner wanted everything but the vehicle to disappear, the
+  vehicle as a wireframe blueprint on blue, any part clickable with a zoom,
+  and detailed calculations on the left.
+- Decision: swap materials in the scene instead of filtering the picture
+  (see ARCHITECTURE.md). Per-part numbers use the model's own formulas:
+  Rust sends its coefficients with the scenario and `parts.ts` evaluates
+  them on the snapshot, so nothing shown is a separate estimate. A paused
+  flight can be stepped (0.1 s, 1 s).
+- Consequences: per-engine thrust is total / lit (the simulator has one
+  throttle for all); a flap's or fin's force is recomputed on the page
+  from the same formula, not read back from the integrator.
+
+## D-029 — One clock for the countdown
+- Date: 2026-11-16
+- Status: accepted
+- Context: the owner: countdown, counter and voice did not align, and the
+  opening sequence's text came too quickly. The count was one clip
+  ("Five. Four. …") played beside a display dividing 6.5 s by five.
+- Decision: `launchState()` gives the count, the mission clock and the
+  engine power from one elapsed time; each number is its own clip, cued on
+  its second and preloaded at the click; other lines are cues at least 2 s
+  apart. Ten-second count, 51.5 s sequence (was 33.5 s).
+
+## D-030 — Ship model reshaped toward the real vehicle; kestrel mark
+- Date: 2026-11-16
+- Status: accepted (within D-010: procedural, no logos, no third-party assets)
+- Decision: tangent-ogive nose with a rounded tip; forward flaps on the
+  nose and long aft flaps, leading edges swept, steel hinge fairings;
+  tiles on the windward nose; leeward raceway and payload slot; dark
+  engine shielding on the booster. Proportions by eye from public
+  photographs, not from drawings. The header mark and tab icon are a
+  hovering kestrel drawn for this project.

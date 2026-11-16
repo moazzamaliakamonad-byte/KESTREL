@@ -176,20 +176,19 @@ retried at full thrust if that is what it takes.
 Specs: `docs/superpowers/specs/2026-11-15-m3-ship-design.md` (ship) and
 `2026-11-15-m3-booster-and-console-design.md` (booster, page).
 The page no longer uses the 3-DoF pieces above (`Flight`, `replan`,
-`components/scene`, `components/hud` except the error fallback and the
-Mars terrain); they remain, tested, as the earlier milestones' code.
+`components/scene`, `components/hud` except the error fallback); they remain, tested, as the earlier milestones' code.
 
 ```text
 crates/model      what truth and guidance must agree on (no dependencies)
   vehicle.rs   Ship (one struct, two vehicles: VehicleKind::Ship / Booster), GridFins,
-               Planet, Catch, Scenario::{earth, mars, booster}, Tuning (physics options)
+               Planet (Earth), Catch, Scenario::{earth, booster}, Tuning (physics options)
   aero.rs      body force: crossflow drag + linear lift slope; flap_force (ship);
                fin_gain / fin_force / fin_allocate (booster's three grid fins)
   dynamics.rs  x' = f(x, T): state [m, r, v, q, w] (14), thrust at the gimbal point
   quat.rs      quaternion algebra
 crates/sim
   ship.rs      ShipSim: RK4 in 10 ms substeps; flaps or fins (slew, clamp); RCS; steady
-               wind + gusts; contact with mast, arms, ground; Outcome (caught/landed/crashed)
+               wind + gusts; contact with mast, arms, ground; Outcome (caught/crashed)
   raptors.rs   Cluster: N landing engines (ship 3; booster 13, centre three first),
                ignition delay, shared gimbal with slew, lag, shutdown, fail(i)
 crates/guidance
@@ -203,14 +202,19 @@ crates/wasm
   ship_flight.rs  ShipFlight: phases (unpowered -> flip/start-up -> burn legs -> terminal),
                legs (full engine set to a mid gate, final engines to the approach gate),
                when to re-plan, prediction of the booster's first plan, options
-  ship_js.rs   JS class ShipFlight; plan_ship / preview_ship (worker); ship_scenario;
+  ship_js.rs   JS class ShipFlight; plan_ship / preview_ship (worker); ship_scenario
+               (incl. the model's coefficients and the catch limits, for the page's formulas);
                warmup_ship; snapshot (state, forces, heating estimate, engines)
   tests/ship_loop.rs  the page's loop natively: nominal, engine out, gusts, slow solver,
                and an ignored sweep over browser timing conditions
 web/src/lib/ship
-  store.ts     zustand: vehicle x planet -> flight kind, start, options, view, mode
+  parts.ts     the parts a visitor can open in the analysis view and, for each, the
+               model's formulas with the snapshot's numbers (pure, tested)
+  launch.ts    the opening sequence's one clock: count, mission time, cues to speak
+  store.ts     zustand: vehicle -> flight kind, start, options, view (incl. open part), mode
                (editing -> launch -> flying -> done), presets, configOf() for Rust
   runtime.ts   owns the ShipFlight; steps it per frame (not while paused or held);
+               stepShip() advances a paused flight for the analysis view;
                schedules plans; publishes to live.ts; reports solve times to the flight
   live.ts      per-frame snapshot, trail, plan, history samples, caption, hold flag
   commentary.ts callouts(prev, next) -> lines; Commentator plays clips (fallback: speech)
@@ -256,3 +260,16 @@ ship, the booster parked beside the pad, or end).
   readings, LIMITATIONS.md); the new page has no end-to-end test yet.
 - Lossless convexification is not guaranteed when the ground constraint is
   active (closest landings near the ground); such landing times are skipped.
+
+### Analysis view (blueprint)
+
+`components/stage/Blueprint.tsx` holds one switch, `skin.on`. `Post.tsx`
+sweeps a blue shockwave over the film picture and sets the switch when it
+has covered the screen; from then on `World` hides the scenery, `Backdrop`
+draws the blue, `BlueprintSkin` swaps every opaque mesh of the vehicle for
+a translucent shell with station rings, stringers and edge lines, and the
+effects (plumes, heating, smoke) hide. `Part` wraps the named regions of
+the models (`Vehicles.tsx`) so a click opens them (`view.part`);
+`Analysis.tsx` draws the force vectors and a marker per part; `Cameras.tsx`
+flies the free camera to the open part; `console/AnalysisPanel.tsx` shows
+`partSheet()` for it.

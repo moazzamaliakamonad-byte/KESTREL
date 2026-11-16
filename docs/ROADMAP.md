@@ -59,19 +59,27 @@ simulation can be, on one page with a mission-control interface.
 
 - [x] 6-DoF rigid body with aerodynamics (`kestrel-model`, `sim::ship`)
 - [x] Successive convexification (Szmuk & Açıkmeşe 2018) for the landing burn
-- [x] Ship: belly flop, flip, tower catch (Earth) and legs (Mars)
+- [x] Ship: belly flop, flip, tower catch (the Mars landing on legs was built, then removed on 2026-11-16 at the owner's request)
 - [x] Booster: grid-fin descent, 13 → 3 engine landing burn, tower catch
 - [x] Ship: steep fast entry start (80 km, 2.5 km/s) flies to the catch
-- [x] One page: vehicle, planet, start, engines, failures, wind, noise, lag,
+- [x] One page: vehicle, start, engines, failures, wind, noise, lag,
       speed, cameras, physics options
 - [x] Console redesign: telemetry rail, engine map, timeline, phone layout
 - [x] Opening sequence (countdown, liftoff, stage separation, title card):
       an **illustration**, not simulated
 - [x] After a booster catch, fly the ship's return to the same tower
 - [x] Pause anywhere; analysis view (forces, plan, equations, graphs)
+- [x] Analysis view as a blueprint: the vehicle alone as a line drawing on
+      blue, every part clickable, the camera flies to it, its calculations
+      open in the left panel; step a paused flight 0.1 s or 1 s at a time
+- [x] Final approach to the catch about three times quicker (about 12 s,
+      was about 35 s)
+- [x] Countdown from ten: number on screen, number spoken and mission clock
+      from one timeline; slower opening sequence
+- [x] Flight report after each flight; keyboard help sheet
+- [ ] Ship keeps more engines lit for longer in the landing burn (it drops
+      to one right after the flip; an attempt to ignite lower broke catches)
 - [x] Commentary (rendered clips) and camera-aware procedural sound
-- [ ] Mars landing in the browser: plans take 2–3 s to solve there and the
-      flight runs out of propellant (lands natively; see LIMITATIONS.md)
 - [ ] Simulated ascent, hot staging and boostback (the full mission)
 - [ ] Orbital entry (round planet, heating that matters)
 - [ ] Custom solver: no heap allocation in the loop, bounded iterations
@@ -94,3 +102,7 @@ simulation can be, on one page with a mission-control interface.
 - 2026-11-16 — M3: Super Heavy-class booster (grid fins, 13 → 3 engines,
   tower catch); one-page console with full customization, launch and
   staging sequence (illustration), analysis view, commentary and sound.
+- 2026-11-16 — M3: Mars removed; final approach retuned (catch about 12 s
+  after the approach gate); blueprint analysis view with clickable parts
+  and per-part calculations; ten-second countdown on one clock; ship model
+  reshaped toward the real vehicle; kestrel mark.
