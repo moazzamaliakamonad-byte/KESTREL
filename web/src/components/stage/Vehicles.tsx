@@ -6,6 +6,7 @@ import * as THREE from "three";
 import type { Vec3 } from "@/lib/ship/frames";
 import { engineLayout } from "@/lib/ship/engines";
 import type { EngineState } from "@/lib/ship/types";
+import { Part, skin } from "./Blueprint";
 import { gridTexture, hash, heatMaterial, plumeMaterial, steelTextures, tileTexture } from "./materials";
 
 /**
@@ -29,7 +30,6 @@ export interface VehiclePose {
   /** Mean throttle of the running engines, 0–1. */
   throttle: number;
   rcs: boolean[];
-  legs: boolean;
   /** Entry heating, 0–1. */
   heat: number;
   /** Where the air comes from, body axes (unit). */
@@ -78,8 +78,8 @@ function Plume({ exit, plumeRef, seed }: { exit: number; seed: number; plumeRef:
 
 function updatePlume(g: THREE.Group | null, on: boolean, throttle: number, vacuum: number, time: number, length = 1) {
   if (!g) return;
-  g.visible = on;
-  if (!on) return;
+  g.visible = on && !skin.on;
+  if (!g.visible) return;
   g.scale.set(1, (18 + 34 * throttle) * length, 1);
   for (const m of g.userData.materials as THREE.ShaderMaterial[]) {
     m.uniforms.uTime.value = time;
@@ -97,7 +97,7 @@ function HeatShell({ radius, bottom, top, pose }: { radius: number; bottom: numb
     if (!m) return;
     const p = pose.current;
     const heat = p?.heat ?? 0;
-    m.visible = heat > 0.01;
+    m.visible = heat > 0.01 && !skin.on;
     const u = (m.material as THREE.ShaderMaterial).uniforms;
     u.uHeat.value = heat;
     u.uTime.value = clock.elapsedTime;
@@ -130,7 +130,7 @@ function Rcs({ spots, radius, pose }: { spots: { y: number; dir: Vec3 }[]; radiu
   const puffs = useRef<(THREE.Mesh | null)[]>([]);
   useFrame(() => {
     const firing = pose.current?.rcs ?? [];
-    puffs.current.forEach((m, i) => m && (m.visible = !!firing[i]));
+    puffs.current.forEach((m, i) => m && (m.visible = !!firing[i] && !skin.on));
   });
   return (
     <>
@@ -154,47 +154,85 @@ function Rcs({ spots, radius, pose }: { spots: { y: number; dir: Vec3 }[]; radiu
 
 const SHIP = { length: 52, radius: 4.5, cm: 24, bodyTop: 14, pin: 40 };
 const FLAP_STOW = THREE.MathUtils.degToRad(75);
+/** Where the flaps' hinges are centred, model height, m: the forward pair on the nose, the aft pair at the base. */
+const FORE_FLAP_Y = 20.5;
+const AFT_FLAP_Y = -17.2;
 
+/**
+ * The nose: a tangent ogive (the curve leaves the cylinder without a
+ * corner and comes to a point), its tip rounded off, as on the real ship.
+ */
 function noseProfile(r: number, from: number, to: number): THREE.Vector2[] {
   const pts: THREE.Vector2[] = [];
-  const n = 28;
+  const length = to - from;
+  const rho = (r * r + length * length) / (2 * r);
+  const n = 36;
+  const tip = 0.55;
   for (let i = 0; i <= n; i++) {
-    const f = i / n;
-    pts.push(new THREE.Vector2(Math.max(0.12, r * Math.sqrt(1 - f * f * 0.985)), from + f * (to - from)));
+    const x = (i / n) * length;
+    const radius = Math.sqrt(Math.max(0, rho * rho - x * x)) + r - rho;
+    if (radius < tip) {
+      // Round the point: a short cap instead of a needle.
+      pts.push(new THREE.Vector2(tip, from + x));
+      pts.push(new THREE.Vector2(tip * 0.7, from + x + 0.28));
+      pts.push(new THREE.Vector2(0, from + x + 0.42));
+      return pts;
+    }
+    pts.push(new THREE.Vector2(radius, from + x));
   }
-  pts.push(new THREE.Vector2(0, to + 0.15));
+  pts.push(new THREE.Vector2(0, to));
   return pts;
 }
 
-function Flap({ length, span, sweep, side, flapRef }: { length: number; span: number; sweep: number; side: 1 | -1; flapRef: (g: THREE.Group | null) => void }) {
+/** Radius of the ship's hull at model height `y` (cylinder below `bodyTop`, ogive above). */
+function shipRadius(y: number): number {
+  if (y <= SHIP.bodyTop) return SHIP.radius;
+  const length = SHIP.length - SHIP.cm - SHIP.bodyTop;
+  const rho = (SHIP.radius * SHIP.radius + length * length) / (2 * SHIP.radius);
+  const x = Math.min(length, y - SHIP.bodyTop);
+  return Math.max(0, Math.sqrt(Math.max(0, rho * rho - x * x)) + SHIP.radius - rho);
+}
+
+/**
+ * A flap: a flat plate hinged along the hull, its leading (nose-side)
+ * edge swept back, with a steel fairing over the hinge. Black like the
+ * heat shield it extends. `lead` and `trail` are how far the tip's ends
+ * are cut back from the root's, m.
+ */
+function Flap({ length, span, lead, trail, side, flapRef }: { length: number; span: number; lead: number; trail: number; side: 1 | -1; flapRef: (g: THREE.Group | null) => void }) {
   const shape = useMemo(() => {
     const s = new THREE.Shape();
     s.moveTo(0, -length / 2);
-    s.lineTo(span, -length / 2 + sweep);
-    s.lineTo(span, length / 2 - 0.6);
-    s.lineTo(0, length / 2);
+    s.lineTo(span, -length / 2 + trail);
+    s.lineTo(span, length / 2 - lead);
+    // A rounded forward corner.
+    s.quadraticCurveTo(span * 0.55, length / 2 - lead * 0.35, 0, length / 2);
     s.closePath();
     return s;
-  }, [length, span, sweep]);
+  }, [length, span, lead, trail]);
   return (
     <group ref={flapRef}>
-      <mesh rotation-y={side > 0 ? Math.PI / 2 : -Math.PI / 2} castShadow>
-        <extrudeGeometry args={[shape, { depth: 0.4, bevelEnabled: true, bevelSize: 0.08, bevelThickness: 0.08, bevelSegments: 1 }]} />
-        <meshStandardMaterial color="#141416" metalness={0.25} roughness={0.75} />
+      <mesh rotation-y={side > 0 ? Math.PI / 2 : -Math.PI / 2} position-x={-0.2} castShadow>
+        <extrudeGeometry args={[shape, { depth: 0.4, bevelEnabled: true, bevelSize: 0.1, bevelThickness: 0.1, bevelSegments: 2 }]} />
+        <meshStandardMaterial color="#121214" metalness={0.2} roughness={0.8} />
+      </mesh>
+      {/* Hinge fairing along the root. */}
+      <mesh castShadow>
+        <capsuleGeometry args={[0.62, length - 1.6, 6, 14]} />
+        <meshStandardMaterial color="#b9bdc3" metalness={0.95} roughness={0.5} />
       </mesh>
     </group>
   );
 }
 
-export function ShipModel({ pose, legs = false }: { pose: PoseRef; legs?: boolean }) {
+export function ShipModel({ pose }: { pose: PoseRef }) {
   const steel = useSteel(21);
   const tiles = useMemo(() => tileTexture([10, 22]), []);
+  const noseTiles = useMemo(() => tileTexture([10, 8]), []);
   const flaps = useRef<(THREE.Group | null)[]>([]);
   const gimbal = useRef<THREE.Group>(null);
   const plumes = useRef<(THREE.Group | null)[]>([]);
-  const legRefs = useRef<(THREE.Group | null)[]>([]);
   const shown = useRef([0.5, 0.5, 0.5, 0.5]);
-  const deploy = useRef(0);
   const base = -SHIP.cm;
   const noseTop = SHIP.length - SHIP.cm;
   const R = SHIP.radius;
@@ -213,97 +251,109 @@ export function ShipModel({ pose, legs = false }: { pose: PoseRef; legs?: boolea
       if (tmp.lengthSq() > 1) gimbal.current.quaternion.setFromUnitVectors(Y, tmp.normalize());
     }
     plumes.current.forEach((g, i) => updatePlume(g, p?.engines[i] === "running", p?.throttle ?? 0, p?.vacuum ?? 0, clock.elapsedTime));
-    deploy.current += ((p?.legs ? 1 : 0) - deploy.current) * Math.min(1, dt * 1.5);
-    legRefs.current.forEach((l) => l && (l.rotation.z = THREE.MathUtils.degToRad(2 + 33 * deploy.current)));
   });
 
   const sl = [0, 120, 240].map((d) => THREE.MathUtils.degToRad(d));
   const vac = [60, 180, 300].map((d) => THREE.MathUtils.degToRad(d));
   return (
     <group>
-      <mesh position-y={base + bodyHeight / 2} castShadow receiveShadow material={steel}>
-        <cylinderGeometry args={[R, R, bodyHeight, 72, 1, true]} />
-      </mesh>
-      <mesh castShadow material={steel}>
-        <latheGeometry args={[noseProfile(R, SHIP.bodyTop, noseTop), 72]} />
-      </mesh>
-      {/* Heat shield on the belly half (+X). */}
-      <mesh position-y={base + bodyHeight / 2 + 0.8}>
-        <cylinderGeometry args={[R + 0.05, R + 0.05, bodyHeight - 1.6, 72, 1, true, 0, Math.PI]} />
-        <meshStandardMaterial map={tiles} roughness={0.82} metalness={0.05} side={THREE.DoubleSide} />
-      </mesh>
-      <mesh>
-        <latheGeometry args={[noseProfile(R + 0.05, SHIP.bodyTop, noseTop).slice(0, 22), 72, 0, Math.PI]} />
-        <meshStandardMaterial color="#111113" roughness={0.85} side={THREE.DoubleSide} />
-      </mesh>
-      {[1, -1].map((side, k) => (
-        <group key={`f${k}`} position={[-2.2, 22, -side * (R - 1.2)]}>
-          <Flap length={8} span={4.2} sweep={2.6} side={side as 1 | -1} flapRef={(g) => void (flaps.current[k] = g)} />
-        </group>
-      ))}
-      {[1, -1].map((side, k) => (
-        <group key={`a${k}`} position={[0, -19, -side * R]}>
-          <Flap length={10.5} span={5.2} sweep={1.2} side={side as 1 | -1} flapRef={(g) => void (flaps.current[2 + k] = g)} />
-        </group>
-      ))}
-      {/* Catch pins (body ±y). */}
-      {[1, -1].map((s) => (
-        <mesh key={s} position={[0, SHIP.pin - SHIP.cm, s * (R + 0.6)]} rotation-x={Math.PI / 2}>
-          <cylinderGeometry args={[0.45, 0.45, 1.3, 16]} />
-          <meshStandardMaterial color="#6b6b70" metalness={0.8} roughness={0.4} />
+      <Part id="tanks">
+        <mesh position-y={base + bodyHeight / 2} castShadow receiveShadow material={steel}>
+          <cylinderGeometry args={[R, R, bodyHeight, 72, 1, true]} />
         </mesh>
-      ))}
-      <mesh position-y={base + 0.2} rotation-x={Math.PI / 2}>
-        <circleGeometry args={[R - 0.1, 48]} />
-        <meshStandardMaterial color="#26262a" metalness={0.6} roughness={0.7} side={THREE.DoubleSide} />
-      </mesh>
-      {vac.map((a, i) => (
-        <group key={`v${i}`} position={[3.15 * Math.sin(a), base + 0.2, 3.15 * Math.cos(a)]}>
-          <Bell throat={0.5} exit={1.2} height={3.2} />
-        </group>
-      ))}
-      <group position-y={base + 0.2}>
-        <group ref={gimbal}>
-          {sl.map((a, i) => (
-            <group key={`s${i}`} position={[1.55 * Math.sin(a), 0, 1.55 * Math.cos(a)]}>
-              <Bell throat={0.35} exit={0.65} height={1.9} />
-              <group position-y={-1.9}>
-                <Plume exit={0.65} seed={i} plumeRef={(g) => void (plumes.current[i] = g)} />
-              </group>
-            </group>
-          ))}
-        </group>
+      </Part>
+      <Part id="avionics">
+        <mesh castShadow material={steel}>
+          <latheGeometry args={[noseProfile(R, SHIP.bodyTop, noseTop), 72]} />
+        </mesh>
+      </Part>
+      <Part id="shield">
+        {/* Heat shield on the belly half (+X). */}
+        <mesh position-y={base + bodyHeight / 2 + 0.8}>
+          <cylinderGeometry args={[R + 0.05, R + 0.05, bodyHeight - 1.6, 72, 1, true, 0, Math.PI]} />
+          <meshStandardMaterial map={tiles} roughness={0.82} metalness={0.05} side={THREE.DoubleSide} />
+        </mesh>
+        <mesh>
+          <latheGeometry args={[noseProfile(R + 0.05, SHIP.bodyTop, noseTop + 0.05).slice(0, 30), 72, 0, Math.PI]} />
+          <meshStandardMaterial map={noseTiles} roughness={0.82} metalness={0.05} side={THREE.DoubleSide} />
+        </mesh>
+      </Part>
+      {/* Leeward side (−X): the raceway down the tanks and the payload slot in the nose section. */}
+      <group rotation-y={THREE.MathUtils.degToRad(196)}>
+        <mesh position={[R + 0.12, base + bodyHeight / 2 - 2, 0]}>
+          <boxGeometry args={[0.26, bodyHeight - 9, 0.8]} />
+          <meshStandardMaterial color="#a9adb3" metalness={0.95} roughness={0.5} />
+        </mesh>
       </group>
-      <Rcs
-        radius={R}
-        pose={pose}
-        spots={[
-          { y: 19, dir: [-1, 0, 0] },
-          { y: 19, dir: [1, 0, 0] },
-          { y: 19, dir: [0, 0, 1] },
-          { y: 19, dir: [0, 0, -1] },
-          { y: -17, dir: [0, 0, 1] },
-          { y: -17, dir: [0, 0, -1] },
-        ]}
-      />
-      {legs && (
-        <group position-y={base + 3}>
-          {[0, 60, 120, 180, 240, 300].map((d, i) => (
-            <group key={d} rotation-y={THREE.MathUtils.degToRad(d)}>
-              <group position-x={R - 0.3} ref={(g) => void (legRefs.current[i] = g)}>
-                <mesh position-y={-3.2} castShadow>
-                  <boxGeometry args={[0.45, 6.4, 0.7]} />
-                  <meshStandardMaterial color="#3a3a3e" metalness={0.6} roughness={0.5} />
-                </mesh>
-                <mesh position-y={-6.4}>
-                  <cylinderGeometry args={[0.9, 1.0, 0.3, 16]} />
-                  <meshStandardMaterial color="#4a4a4e" metalness={0.5} roughness={0.6} />
-                </mesh>
-              </group>
-            </group>
-          ))}
+      <mesh position-y={SHIP.bodyTop - 3.2}>
+        <cylinderGeometry args={[R + 0.04, R + 0.04, 0.85, 40, 1, true, Math.PI * 1.5 - 0.42, 0.84]} />
+        <meshStandardMaterial color="#2a2c30" metalness={0.7} roughness={0.6} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Aft skirt: a darker band where the engine bay is. */}
+      <mesh position-y={base + 1.3}>
+        <cylinderGeometry args={[R + 0.03, R + 0.03, 2.6, 72, 1, true, Math.PI, Math.PI]} />
+        <meshStandardMaterial color="#8d9197" metalness={0.95} roughness={0.55} side={THREE.DoubleSide} />
+      </mesh>
+      {[1, -1].map((side, k) => (
+        <group key={`f${k}`} position={[-1.3, FORE_FLAP_Y, -side * (shipRadius(FORE_FLAP_Y) - 0.15)]}>
+          <Part id={`flap${k}`}>
+            <Flap length={7.4} span={4.4} lead={3.6} trail={0.5} side={side as 1 | -1} flapRef={(g) => void (flaps.current[k] = g)} />
+          </Part>
         </group>
-      )}
+      ))}
+      {[1, -1].map((side, k) => (
+        <group key={`a${k}`} position={[-0.6, AFT_FLAP_Y, -side * (R - 0.1)]}>
+          <Part id={`flap${2 + k}`}>
+            <Flap length={13} span={5.4} lead={4.2} trail={0.3} side={side as 1 | -1} flapRef={(g) => void (flaps.current[2 + k] = g)} />
+          </Part>
+        </group>
+      ))}
+      <Part id="pins">
+        {/* Catch pins (body ±y). */}
+        {[1, -1].map((s) => (
+          <mesh key={s} position={[0, SHIP.pin - SHIP.cm, s * (R + 0.6)]} rotation-x={Math.PI / 2}>
+            <cylinderGeometry args={[0.45, 0.45, 1.3, 16]} />
+            <meshStandardMaterial color="#6b6b70" metalness={0.8} roughness={0.4} />
+          </mesh>
+        ))}
+      </Part>
+      <Part id="engines">
+        <mesh position-y={base + 0.2} rotation-x={Math.PI / 2}>
+          <circleGeometry args={[R - 0.1, 48]} />
+          <meshStandardMaterial color="#26262a" metalness={0.6} roughness={0.7} side={THREE.DoubleSide} />
+        </mesh>
+        {vac.map((a, i) => (
+          <group key={`v${i}`} position={[3.15 * Math.sin(a), base + 0.2, 3.15 * Math.cos(a)]}>
+            <Bell throat={0.5} exit={1.2} height={3.2} />
+          </group>
+        ))}
+        <group position-y={base + 0.2}>
+          <group ref={gimbal}>
+            {sl.map((a, i) => (
+              <group key={`s${i}`} position={[1.55 * Math.sin(a), 0, 1.55 * Math.cos(a)]}>
+                <Bell throat={0.35} exit={0.65} height={1.9} />
+                <group position-y={-1.9}>
+                  <Plume exit={0.65} seed={i} plumeRef={(g) => void (plumes.current[i] = g)} />
+                </group>
+              </group>
+            ))}
+          </group>
+        </group>
+      </Part>
+      <Part id="rcs">
+        <Rcs
+          radius={R}
+          pose={pose}
+          spots={[
+            { y: 19, dir: [-1, 0, 0] },
+            { y: 19, dir: [1, 0, 0] },
+            { y: 19, dir: [0, 0, 1] },
+            { y: 19, dir: [0, 0, -1] },
+            { y: -17, dir: [0, 0, 1] },
+            { y: -17, dir: [0, 0, -1] },
+          ]}
+        />
+      </Part>
       <HeatShell radius={R + 0.9} bottom={base - 1} top={noseTop + 1} pose={pose} />
     </group>
   );
@@ -405,85 +455,103 @@ export function BoosterModel({ pose }: { pose: PoseRef }) {
 
   return (
     <group>
-      <mesh position-y={(base + top) / 2} castShadow receiveShadow material={steel}>
-        <cylinderGeometry args={[R, R, BOOSTER.length, 72, 1, true]} />
-      </mesh>
-      {/* Frost on the oxygen tank. */}
-      <mesh position-y={base + 21}>
-        <cylinderGeometry args={[R + 0.03, R + 0.03, 40, 72, 1, true]} />
-        <meshStandardMaterial map={frost} transparent opacity={0.5} roughness={1} metalness={0} depthWrite={false} />
-      </mesh>
-      {/* Hot-stage ring: an open truss band at the top, and the forward dome. */}
-      <mesh position-y={top + 0.9}>
-        <cylinderGeometry args={[R, R, 1.8, 72, 1, true]} />
-        <meshStandardMaterial map={grid} alphaTest={0.4} color="#55585d" metalness={0.8} roughness={0.5} side={THREE.DoubleSide} />
-      </mesh>
-      <mesh position-y={top} scale={[1, 0.22, 1]}>
-        <sphereGeometry args={[R - 0.05, 48, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshStandardMaterial color="#8d9196" metalness={0.9} roughness={0.5} />
-      </mesh>
-      {/* Chines: four long strakes over the engine section. */}
-      {[45, 135, 225, 315].map((d) => (
-        <group key={d} rotation-y={THREE.MathUtils.degToRad(d)}>
-          <mesh position={[R + 0.35, base + 10, 0]} castShadow material={steel}>
-            <boxGeometry args={[0.9, 19, 1.6]} />
+      <Part id="tanks">
+        <mesh position-y={(base + top) / 2} castShadow receiveShadow material={steel}>
+          <cylinderGeometry args={[R, R, BOOSTER.length, 72, 1, true]} />
+        </mesh>
+        {/* Frost on the oxygen tank. */}
+        <mesh position-y={base + 21}>
+          <cylinderGeometry args={[R + 0.03, R + 0.03, 40, 72, 1, true]} />
+          <meshStandardMaterial map={frost} transparent opacity={0.5} roughness={1} metalness={0} depthWrite={false} />
+        </mesh>
+      </Part>
+      <Part id="avionics">
+        {/* Hot-stage ring: an open truss band at the top, and the forward dome. */}
+        <mesh position-y={top + 0.9}>
+          <cylinderGeometry args={[R, R, 1.8, 72, 1, true]} />
+          <meshStandardMaterial map={grid} alphaTest={0.4} color="#55585d" metalness={0.8} roughness={0.5} side={THREE.DoubleSide} />
+        </mesh>
+        <mesh position-y={top} scale={[1, 0.22, 1]}>
+          <sphereGeometry args={[R - 0.05, 48, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          <meshStandardMaterial color="#8d9196" metalness={0.9} roughness={0.5} />
+        </mesh>
+      </Part>
+      <Part id="shield">
+        {/* Chines: four long strakes over the engine section. */}
+        {[45, 135, 225, 315].map((d) => (
+          <group key={d} rotation-y={THREE.MathUtils.degToRad(d)}>
+            <mesh position={[R + 0.35, base + 10, 0]} castShadow material={steel}>
+              <boxGeometry args={[0.9, 19, 1.6]} />
+            </mesh>
+          </group>
+        ))}
+        {/* Raceway. */}
+        <group rotation-y={THREE.MathUtils.degToRad(200)}>
+          <mesh position={[R + 0.15, 6, 0]}>
+            <boxGeometry args={[0.3, 58, 0.9]} />
+            <meshStandardMaterial color="#9da1a6" metalness={0.9} roughness={0.5} />
           </mesh>
         </group>
-      ))}
-      {/* Raceway. */}
-      <group rotation-y={THREE.MathUtils.degToRad(200)}>
-        <mesh position={[R + 0.15, 6, 0]}>
-          <boxGeometry args={[0.3, 58, 0.9]} />
-          <meshStandardMaterial color="#9da1a6" metalness={0.9} roughness={0.5} />
-        </mesh>
-      </group>
+      </Part>
       {/* Grid fins at body +y (local −Z), −y (local +Z), +x. */}
       {[Math.PI / 2, -Math.PI / 2, 0].map((a, i) => (
-        <GridFin key={i} azimuth={a} grid={grid} finRef={(g) => void (fins.current[i] = g)} />
+        <Part key={i} id={`fin${i}`}>
+          <GridFin azimuth={a} grid={grid} finRef={(g) => void (fins.current[i] = g)} />
+        </Part>
       ))}
-      {/* Catch hardpoints under the ±y fins. */}
-      {[1, -1].map((s) => (
-        <mesh key={s} position={[0, BOOSTER.pin - BOOSTER.cm, s * (R + 0.7)]} rotation-x={Math.PI / 2}>
-          <cylinderGeometry args={[0.5, 0.5, 1.5, 16]} />
-          <meshStandardMaterial color="#5d6066" metalness={0.85} roughness={0.4} />
+      <Part id="pins">
+        {/* Catch hardpoints under the ±y fins. */}
+        {[1, -1].map((s) => (
+          <mesh key={s} position={[0, BOOSTER.pin - BOOSTER.cm, s * (R + 0.7)]} rotation-x={Math.PI / 2}>
+            <cylinderGeometry args={[0.5, 0.5, 1.5, 16]} />
+            <meshStandardMaterial color="#5d6066" metalness={0.85} roughness={0.4} />
+          </mesh>
+        ))}
+      </Part>
+      <Part id="engines">
+        {/* Engine section: dark shielding around the outer ring. */}
+        <mesh position-y={base + 1.4}>
+          <cylinderGeometry args={[R + 0.06, R + 0.06, 2.8, 72, 1, true]} />
+          <meshStandardMaterial color="#3b3d42" metalness={0.8} roughness={0.6} side={THREE.DoubleSide} />
         </mesh>
-      ))}
-      {/* Engine section. */}
-      <mesh position-y={base + 0.15} rotation-x={Math.PI / 2}>
-        <circleGeometry args={[R - 0.05, 64]} />
-        <meshStandardMaterial color="#1d1d20" metalness={0.5} roughness={0.8} side={THREE.DoubleSide} />
-      </mesh>
-      <mesh position-y={base - 0.4} rotation-x={Math.PI / 2}>
-        <circleGeometry args={[R - 0.4, 48]} />
-        <meshBasicMaterial ref={glow} color="#ffb070" transparent opacity={0} depthWrite={false} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} />
-      </mesh>
-      <group position-y={base - 1.6}>
-        <Plume exit={2.9} seed={7.7} plumeRef={(g) => void (jet.current = g)} />
-      </group>
-      {engines.map((e, i) => (
-        <group key={i} position={[e.x, base + 0.1, e.z]}>
-          <group ref={e.landing ? (g) => void (gimbals.current[i] = g) : undefined}>
-            <Bell throat={0.3} exit={0.62} height={1.7} />
-            {e.landing && (
-              <group position-y={-1.7}>
-                <Plume exit={0.62} seed={i} plumeRef={(g) => void (plumes.current[i] = g)} />
-              </group>
-            )}
-          </group>
+        <mesh position-y={base + 0.15} rotation-x={Math.PI / 2}>
+          <circleGeometry args={[R - 0.05, 64]} />
+          <meshStandardMaterial color="#1d1d20" metalness={0.5} roughness={0.8} side={THREE.DoubleSide} />
+        </mesh>
+        <mesh position-y={base - 0.4} rotation-x={Math.PI / 2}>
+          <circleGeometry args={[R - 0.4, 48]} />
+          <meshBasicMaterial ref={glow} color="#ffb070" transparent opacity={0} depthWrite={false} side={THREE.DoubleSide} blending={THREE.AdditiveBlending} />
+        </mesh>
+        <group position-y={base - 1.6}>
+          <Plume exit={2.9} seed={7.7} plumeRef={(g) => void (jet.current = g)} />
         </group>
-      ))}
-      <Rcs
-        radius={R}
-        pose={pose}
-        spots={[
-          { y: 40, dir: [-1, 0, 0] },
-          { y: 40, dir: [1, 0, 0] },
-          { y: 40, dir: [0, 0, 1] },
-          { y: 40, dir: [0, 0, -1] },
-          { y: -20, dir: [0, 0, 1] },
-          { y: -20, dir: [0, 0, -1] },
-        ]}
-      />
+        {engines.map((e, i) => (
+          <group key={i} position={[e.x, base + 0.1, e.z]}>
+            <group ref={e.landing ? (g) => void (gimbals.current[i] = g) : undefined}>
+              <Bell throat={0.3} exit={0.62} height={1.7} />
+              {e.landing && (
+                <group position-y={-1.7}>
+                  <Plume exit={0.62} seed={i} plumeRef={(g) => void (plumes.current[i] = g)} />
+                </group>
+              )}
+            </group>
+          </group>
+        ))}
+      </Part>
+      <Part id="rcs">
+        <Rcs
+          radius={R}
+          pose={pose}
+          spots={[
+            { y: 40, dir: [-1, 0, 0] },
+            { y: 40, dir: [1, 0, 0] },
+            { y: 40, dir: [0, 0, 1] },
+            { y: 40, dir: [0, 0, -1] },
+            { y: -20, dir: [0, 0, 1] },
+            { y: -20, dir: [0, 0, -1] },
+          ]}
+        />
+      </Part>
       <HeatShell radius={R + 1.0} bottom={base - 2} top={top + 2} pose={pose} />
     </group>
   );

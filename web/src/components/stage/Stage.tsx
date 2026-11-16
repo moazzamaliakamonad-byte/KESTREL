@@ -6,6 +6,7 @@ import { useState } from "react";
 import { shipFrame } from "@/lib/ship/runtime";
 import { useShip } from "@/lib/ship/store";
 import { Analysis } from "./Analysis";
+import { SkinGuard } from "./Blueprint";
 import { Cameras } from "./Cameras";
 import { Paths, Smoke } from "./Fx";
 import { Post, type Quality } from "./Post";
@@ -23,7 +24,6 @@ function Loop() {
 
 /** The 3D view: world, tower, the full stack before a flight, the vehicle, effects, cameras. */
 export function Stage() {
-  const planet = useShip((s) => s.planet);
   const [dpr, setDpr] = useState(2);
   const [quality, setQuality] = useState<Quality>("high");
   return (
@@ -33,10 +33,10 @@ export function Stage() {
       dpr={[1, dpr]}
       gl={{ antialias: false, powerPreference: "high-performance", logarithmicDepthBuffer: true }}
       camera={{ fov: 42, near: 1, far: 3_000_000, position: [190, 46, -270] }}
-      key={planet}
     >
       <PerformanceMonitor onDecline={() => (dpr > 1 ? setDpr(1) : setQuality("low"))} />
       <Loop />
+      <SkinGuard />
       <World />
       <Stack />
       <ParkedBooster />

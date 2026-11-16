@@ -2,18 +2,22 @@
 
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { rotate, toScene, type Vec3 } from "@/lib/ship/frames";
+import { quatToScene, rotate, toScene, type Vec3 } from "@/lib/ship/frames";
 import { shipLive } from "@/lib/ship/live";
-import { useShip } from "@/lib/ship/store";
+import { partsOf } from "@/lib/ship/parts";
+import { analysisOn, useShip } from "@/lib/ship/store";
+import { skin } from "./Blueprint";
 
 /**
- * The analysis view's drawing on the vehicle: the vectors in its equations
- * of motion (velocity, thrust, aerodynamic force, weight), its axis against
- * the vertical, the engine gimbal cone, the plan's nodes, the gate it is
- * flying to and the ignition altitude. Every arrow is the simulator's
- * number at this instant, to scale with the others of its kind.
+ * The analysis view's drawing around the blueprint: the vectors in the
+ * equations of motion (velocity, thrust, aerodynamic force, weight), the
+ * body axis against the vertical, the engine gimbal cone, the plan's
+ * nodes, the gate it is flying to and the ignition altitude; and a marker
+ * on every part that can be opened. Every arrow is the simulator's number
+ * at this instant, to scale with the others of its kind. With a part open
+ * the vectors step back so the part can be read.
  */
 
 const Y = new THREE.Vector3(0, 1, 0);
@@ -33,16 +37,19 @@ function makeArrow(color: string): Arrow {
   group.renderOrder = 30;
   shaft.renderOrder = 30;
   head.renderOrder = 30;
+  // Arrows are read, not clicked: clicks go through to the part behind.
+  shaft.raycast = () => {};
+  head.raycast = () => {};
   return { group, shaft, head };
 }
 
 const dir = new THREE.Vector3();
 
 /** Point an arrow from `origin` along scene vector `vec`, `length` metres long, `w` thick. */
-function setArrow(a: Arrow, origin: THREE.Vector3, vec: Vec3, length: number, w: number) {
+function setArrow(a: Arrow, origin: THREE.Vector3, vec: Vec3, length: number, w: number, show: boolean) {
   dir.set(vec[0], vec[1], vec[2]);
   const n = dir.length();
-  a.group.visible = n > 1e-6 && length > 6 * w;
+  a.group.visible = show && n > 1e-6 && length > 6 * w;
   if (!a.group.visible) return;
   a.group.position.copy(origin);
   a.group.quaternion.setFromUnitVectors(Y, dir.divideScalar(n));
@@ -53,9 +60,17 @@ function setArrow(a: Arrow, origin: THREE.Vector3, vec: Vec3, length: number, w:
 }
 
 const fmt = (x: number, d = 0) => x.toFixed(d);
+const VECTORS = ["velocity", "thrust", "aero", "weight"] as const;
+const noRay = () => {};
 
 export function Analysis() {
-  const on = useShip((s) => s.view.analysis && (s.mode === "flying" || s.mode === "done"));
+  const on = useShip(analysisOn);
+  const vehicle = useShip((s) => s.vehicle);
+  const selected = useShip((s) => s.view.part);
+  const setView = useShip((s) => s.setView);
+  // The drawing appears when the blue sweep has covered the picture.
+  const [ready, setReady] = useState(false);
+  const parts = useMemo(() => partsOf(vehicle), [vehicle]);
   const arrows = useMemo(
     () => ({
       velocity: makeArrow("#7ff0ff"),
@@ -80,15 +95,20 @@ export function Analysis() {
     tilt: { g: null, el: null },
     gate: { g: null, el: null },
   });
+  const markers = useRef<(THREE.Group | null)[]>([]);
   const frame = useRef(0);
   const m4 = useMemo(() => new THREE.Matrix4(), []);
+  const q = useMemo(() => new THREE.Quaternion(), []);
 
   useFrame(({ camera }) => {
+    if (ready !== (on && skin.on)) setReady(on && skin.on);
     if (!on || !root.current) return;
+    root.current.visible = skin.on;
     const st = useShip.getState();
     const s = shipLive.snapshot;
     const info = st.info[st.scenario];
-    if (!s || !info) return;
+    if (!s || !info || !skin.on) return;
+    const whole = !st.view.part;
     const cm = new THREE.Vector3(...toScene(s.position));
     const dist = camera.position.distanceTo(cm);
     const fov = (camera as THREE.PerspectiveCamera).fov;
@@ -99,11 +119,11 @@ export function Analysis() {
     const base = cm.clone().add(new THREE.Vector3(...toScene(rotate(s.quat, [0, 0, -info.ship.cm_height]))));
 
     const speed = Math.hypot(...s.velocity);
-    setArrow(arrows.velocity, cm, toScene(s.velocity), Math.min(unit * 0.7, unit * 0.22 + speed * unit * 0.0009), w);
-    const thrust = toScene(s.thrust_inertial);
-    setArrow(arrows.thrust, base, thrust, s.thrust_mag * forceScale, w * 1.3);
-    setArrow(arrows.aero, cm, toScene(s.aero_force), Math.hypot(...s.aero_force) * forceScale, w * 1.3);
-    setArrow(arrows.weight, cm, [0, -1, 0], s.weight * forceScale, w);
+    setArrow(arrows.velocity, cm, toScene(s.velocity), Math.min(unit * 0.7, unit * 0.22 + speed * unit * 0.0009), w, whole);
+    // The thrust arrow stays when the engines are open: it is their subject.
+    setArrow(arrows.thrust, base, toScene(s.thrust_inertial), s.thrust_mag * forceScale, w * 1.3, whole || st.view.part === "engines");
+    setArrow(arrows.aero, cm, toScene(s.aero_force), Math.hypot(...s.aero_force) * forceScale, w * 1.3, whole || st.view.part === "shield");
+    setArrow(arrows.weight, cm, [0, -1, 0], s.weight * forceScale, w, whole || st.view.part === "tanks");
 
     // The body axis and the vertical through the centre of mass.
     const up = new THREE.Vector3(...toScene(rotate(s.quat, [0, 0, 1])));
@@ -119,25 +139,26 @@ export function Analysis() {
     // The cone the thrust direction may move in (gimbal limit), at the base.
     if (cone.current) {
       const h = info.ship.length * 0.55;
-      const r = h * Math.tan((info.ship.gimbal_max_deg * Math.PI) / 180);
+      const r = h * Math.tan((info.tuning.gimbal_max_deg * Math.PI) / 180);
       cone.current.position.copy(base);
       cone.current.quaternion.setFromUnitVectors(Y, up.clone().negate());
       cone.current.scale.set(r, h, r);
-      cone.current.visible = s.thrust_mag > 0;
+      cone.current.visible = s.thrust_mag > 0 && (whole || st.view.part === "engines");
     }
     if (gate.current) {
+      gate.current.visible = whole;
       gate.current.position.set(...toScene(info.gate));
       gate.current.scale.setScalar(Math.max(1, camera.position.distanceTo(gate.current.position) * 0.012));
     }
     if (ignition.current) {
-      ignition.current.visible = s.phase === "belly-flop" || s.phase === "descent";
+      ignition.current.visible = whole && (s.phase === "belly-flop" || s.phase === "descent");
       ignition.current.position.set(cm.x, s.ignition_z, cm.z);
       ignition.current.scale.setScalar(unit * 0.35);
     }
     // The plan's nodes.
     const plan = shipLive.plan;
     if (nodes.current) {
-      const n = plan ? Math.min(plan.position.length, 32) : 0;
+      const n = plan && whole ? Math.min(plan.position.length, 32) : 0;
       for (let i = 0; i < n; i++) {
         const p = toScene(plan!.position[i]);
         m4.makeScale(w * 1.6, w * 1.6, w * 1.6).setPosition(p[0], p[1], p[2]);
@@ -147,19 +168,23 @@ export function Analysis() {
       nodes.current.instanceMatrix.needsUpdate = true;
     }
 
+    // Part markers ride on the vehicle.
+    q.set(...quatToScene(s.quat));
+    parts.forEach((p, i) => markers.current[i]?.position.set(p.at[0], p.at[1], p.at[2]).applyQuaternion(q).add(cm));
+
     // Labels: positions every frame, text a few times a second.
     const L = labels.current;
     const tip = (a: Arrow) => a.group.position.clone().add(new THREE.Vector3(0, a.head.position.y + 7 * w, 0).applyQuaternion(a.group.quaternion));
-    L.velocity.g?.position.copy(tip(arrows.velocity));
-    L.thrust.g?.position.copy(tip(arrows.thrust));
-    L.aero.g?.position.copy(tip(arrows.aero));
-    L.weight.g?.position.copy(tip(arrows.weight));
+    for (const key of VECTORS) {
+      const g = L[key].g;
+      if (!g) continue;
+      g.position.copy(tip(arrows[key]));
+      if (L[key].el) L[key].el!.style.display = arrows[key].group.visible ? "" : "none";
+    }
     L.tilt.g?.position.copy(cm).addScaledVector(up, info.ship.length * 0.8);
     L.gate.g?.position.set(...toScene(info.gate));
-    for (const key of ["velocity", "thrust", "aero", "weight"] as const) {
-      const g = L[key].g;
-      if (g) g.visible = arrows[key].group.visible;
-    }
+    if (L.tilt.el) L.tilt.el.style.display = whole ? "" : "none";
+    if (L.gate.el) L.gate.el.style.display = whole ? "" : "none";
     frame.current += 1;
     if (frame.current % 6 === 0) {
       const set = (key: string, html: string) => {
@@ -178,45 +203,47 @@ export function Analysis() {
   if (!on) return null;
   const label = (key: string) => (
     <group ref={(g) => void (labels.current[key].g = g)}>
-      <Html center zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
-        <div className="an-label" data-kind={key} ref={(el) => void (labels.current[key].el = el)} />
-      </Html>
+      {ready && (
+        <Html center zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+          <div className="an-label" data-kind={key} ref={(el) => void (labels.current[key].el = el)} />
+        </Html>
+      )}
     </group>
   );
   const line = { color: "#8fe9ff", transparent: true, opacity: 0.8, depthTest: false, fog: false } as const;
   return (
-    <group ref={root}>
+    <group ref={root} visible={false}>
       <primitive object={arrows.velocity.group} />
       <primitive object={arrows.thrust.group} />
       <primitive object={arrows.aero.group} />
       <primitive object={arrows.weight.group} />
-      <mesh ref={axis} renderOrder={29}>
+      <mesh ref={axis} renderOrder={29} raycast={noRay}>
         <cylinderGeometry args={[1, 1, 1, 6]} />
-        <meshBasicMaterial {...line} />
+        <meshBasicMaterial {...line} opacity={0.5} />
       </mesh>
-      <mesh ref={plumb} renderOrder={29}>
+      <mesh ref={plumb} renderOrder={29} raycast={noRay}>
         <cylinderGeometry args={[1, 1, 1, 6]} />
-        <meshBasicMaterial {...line} opacity={0.35} />
+        <meshBasicMaterial {...line} opacity={0.25} />
       </mesh>
-      <mesh ref={cone} renderOrder={28}>
+      <mesh ref={cone} renderOrder={28} raycast={noRay}>
         <coneGeometry args={[1, 1, 12, 1, true]} onUpdate={(g) => g.translate(0, -0.5, 0)} />
         <meshBasicMaterial color="#ffb35c" wireframe transparent opacity={0.3} depthTest={false} fog={false} toneMapped={false} />
       </mesh>
       <group ref={gate}>
-        <mesh rotation-x={Math.PI / 2} renderOrder={28}>
+        <mesh rotation-x={Math.PI / 2} renderOrder={28} raycast={noRay}>
           <torusGeometry args={[6, 0.25, 8, 48]} />
           <meshBasicMaterial {...line} />
         </mesh>
-        <mesh rotation-x={Math.PI / 2} renderOrder={28}>
+        <mesh rotation-x={Math.PI / 2} renderOrder={28} raycast={noRay}>
           <torusGeometry args={[1.2, 0.25, 8, 24]} />
           <meshBasicMaterial {...line} />
         </mesh>
       </group>
-      <mesh ref={ignition} rotation-x={Math.PI / 2} renderOrder={28}>
+      <mesh ref={ignition} rotation-x={Math.PI / 2} renderOrder={28} raycast={noRay}>
         <ringGeometry args={[0.96, 1, 96]} />
         <meshBasicMaterial color="#ffb35c" transparent opacity={0.8} depthTest={false} side={THREE.DoubleSide} fog={false} />
       </mesh>
-      <instancedMesh ref={nodes} args={[undefined, undefined, 32]} frustumCulled={false} renderOrder={29}>
+      <instancedMesh ref={nodes} args={[undefined, undefined, 32]} frustumCulled={false} renderOrder={29} raycast={noRay}>
         <sphereGeometry args={[1, 10, 8]} />
         <meshBasicMaterial color="#ffffff" depthTest={false} fog={false} />
       </instancedMesh>
@@ -226,6 +253,26 @@ export function Analysis() {
       {label("weight")}
       {label("tilt")}
       {label("gate")}
+      {parts.map((p, i) => (
+        <group key={p.id} ref={(g) => void (markers.current[i] = g)}>
+          {ready && (
+            <Html center zIndexRange={[19, 0]}>
+              <button
+                className="an-part"
+                data-open={selected === p.id || undefined}
+                data-dim={(selected !== null && selected !== p.id) || undefined}
+                data-left={i % 2 === 1 || undefined}
+                style={{ animationDelay: `${120 + i * 55}ms` }}
+                onClick={() => setView({ part: selected === p.id ? null : p.id })}
+                title={`Open ${p.name}`}
+              >
+                <i />
+                <span>{p.short}</span>
+              </button>
+            </Html>
+          )}
+        </group>
+      ))}
     </group>
   );
 }

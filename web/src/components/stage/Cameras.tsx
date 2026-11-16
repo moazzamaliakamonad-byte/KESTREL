@@ -7,7 +7,8 @@ import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { quatToScene, toScene, type Vec3 } from "@/lib/ship/frames";
 import { shipLive } from "@/lib/ship/live";
-import { useShip, type CameraMode } from "@/lib/ship/store";
+import { partOf } from "@/lib/ship/parts";
+import { analysisOn, useShip, type CameraMode } from "@/lib/ship/store";
 import type { ShipSnapshot } from "@/lib/ship/types";
 import { launchLive } from "./Vehicle";
 
@@ -15,15 +16,15 @@ import { launchLive } from "./Vehicle";
 export type Shot = "pad" | "launch" | "chase" | "track" | "onboard" | "tower" | "orbit" | "circle";
 
 /** The director's cut: which shot suits this moment of the flight. */
-export function directorShot(s: ShipSnapshot | null, planet: "earth" | "mars"): Shot {
+export function directorShot(s: ShipSnapshot | null): Shot {
   if (!s) return "chase";
   if (s.outcome) return "circle";
   const z = s.position[2];
   switch (s.phase) {
     case "terminal":
-      return planet === "earth" ? "tower" : "chase";
+      return "tower";
     case "landing-burn":
-      return z > 900 || planet === "mars" ? "chase" : "track";
+      return z > 900 ? "chase" : "track";
     case "startup":
     case "flip":
       return "chase";
@@ -36,8 +37,8 @@ export function directorShot(s: ShipSnapshot | null, planet: "earth" | "mars"): 
   }
 }
 
-export function shotOf(mode: CameraMode, s: ShipSnapshot | null, planet: "earth" | "mars"): Shot {
-  return mode === "director" ? directorShot(s, planet) : mode;
+export function shotOf(mode: CameraMode, s: ShipSnapshot | null): Shot {
+  return mode === "director" ? directorShot(s) : mode;
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -59,6 +60,9 @@ export function Cameras() {
   /** The camera's position before shake was added (so shake never accumulates). */
   const steady = useRef(new THREE.Vector3());
   const shaken = useRef(false);
+  /** The analysis view's focus (a part id, "" for the whole vehicle) and the seconds its fly-in has left. */
+  const focus = useRef<string | null>(null);
+  const flying = useRef(0);
 
   useFrame(({ camera, clock }, dt) => {
     const cam = camera as THREE.PerspectiveCamera;
@@ -72,7 +76,8 @@ export function Cameras() {
     const ship = v.set(...toScene(p)).clone();
     const info = st.info[st.scenario];
     const length = info?.ship.length ?? 60;
-    const shot: Shot = editing ? "pad" : launching ? "launch" : st.view.paused ? "orbit" : shotOf(st.view.camera, snap, st.planet);
+    const analysis = analysisOn(st);
+    const shot: Shot = editing ? "pad" : launching ? "launch" : st.view.paused || analysis ? "orbit" : shotOf(st.view.camera, snap);
     const cut = shot !== last.current;
     const from = last.current;
     last.current = shot;
@@ -113,22 +118,44 @@ export function Cameras() {
       cam.lookAt(lookAt.current);
     } else if (shot === "pad") {
       if (cut && controls.current) {
-        controls.current.target.set(0, st.planet === "earth" ? 78 : 30, 0);
+        controls.current.target.set(0, 78, 0);
         // From the land side, so the sea is behind the tower.
-        cam.position.set(190, st.planet === "earth" ? 46 : 40, -270);
+        cam.position.set(190, 46, -270);
       }
       controls.current?.update();
     } else if (shot === "orbit") {
       if (controls.current) {
+        // In the analysis view the camera looks at the open part (or the
+        // whole vehicle) and flies to it when the choice changes; after
+        // that the visitor orbits freely.
+        const part = analysis ? partOf(st.vehicle, st.view.part) : null;
+        const key = analysis ? (part?.id ?? "") : null;
+        const aim = ship.clone();
+        if (part && snap) aim.add(new THREE.Vector3(...part.at).applyQuaternion(q.set(...quatToScene(snap.quat))));
+        if (key !== focus.current) {
+          focus.current = key;
+          if (key !== null) flying.current = 1;
+        }
+        controls.current.minDistance = part ? 6 : 25;
         if (cut) {
-          controls.current.target.copy(ship);
+          controls.current.target.copy(aim);
           // Coming from a far or onboard shot, step back to a sensible distance.
           const d = cam.position.distanceTo(ship);
           if (d > 900 || d < 30 || from === "onboard") cam.position.copy(ship).add(new THREE.Vector3(0.62, 0.2, 0.76).multiplyScalar(3.4 * length));
+        } else if (flying.current > 0) {
+          flying.current = Math.max(0, flying.current - dt / 1.1);
+          const e = 1 - Math.exp(-dt * 5);
+          const target = controls.current.target;
+          const offset = cam.position.clone().sub(target);
+          const want = part ? part.view : 3.0 * length;
+          offset.setLength(offset.length() + (want - offset.length()) * e);
+          target.lerp(aim, e);
+          cam.position.copy(target).add(offset);
         } else {
           // Follow the vehicle without changing the view of it.
-          cam.position.add(ship.clone().sub(lastTarget.current));
-          controls.current.target.copy(ship);
+          const moved = aim.clone().sub(controls.current.target);
+          cam.position.add(moved);
+          controls.current.target.copy(aim);
         }
         controls.current.update();
       }
@@ -145,7 +172,7 @@ export function Cameras() {
       fov = 40;
     } else if (shot === "track") {
       // A long lens on the ground, as launch tracking cameras are.
-      const at = st.planet === "earth" ? new THREE.Vector3(330, 4, 520) : new THREE.Vector3(260, 14, 380);
+      const at = new THREE.Vector3(330, 4, 520);
       cam.position.lerp(at, cut ? 1 : k);
       lookAt.current.lerp(ship, cut ? 1 : Math.min(1, 3 * k));
       const dist = cam.position.distanceTo(ship);

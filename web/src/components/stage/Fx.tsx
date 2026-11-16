@@ -8,6 +8,7 @@ import { rotate, toScene, type Vec3 } from "@/lib/ship/frames";
 import { shipLive } from "@/lib/ship/live";
 import { useShip } from "@/lib/ship/store";
 import { hash, puffTexture } from "./materials";
+import { skin } from "./Blueprint";
 import { launchLive } from "./Vehicle";
 
 const COUNT = 260;
@@ -80,7 +81,7 @@ export function Smoke() {
         }
         // Where the jet meets the ground or the pad, a cloud rolls outward.
         const height = base[1];
-        if (height < 260 && st.planet === "earth") {
+        if (height < 260) {
           emit.current.ground += dt * 34 * power * (1 - height / 260);
           while (emit.current.ground >= 1) {
             emit.current.ground -= 1;
@@ -161,7 +162,8 @@ export function Smoke() {
       inst.setColorAt(n, color);
       n += 1;
     }
-    inst.count = n;
+    // (No smoke on the blueprint.)
+    inst.count = skin.on ? 0 : n;
     inst.instanceMatrix.needsUpdate = true;
     if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
   });

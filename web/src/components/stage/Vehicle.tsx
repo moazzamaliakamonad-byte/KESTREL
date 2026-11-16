@@ -10,6 +10,7 @@ import { launchState, type LaunchState } from "@/lib/ship/launch";
 import { shipLive } from "@/lib/ship/live";
 import { useShip } from "@/lib/ship/store";
 import type { EngineState } from "@/lib/ship/types";
+import { BlueprintSkin, skin } from "./Blueprint";
 import { BOOSTER, BoosterModel, ShipModel, type VehiclePose } from "./Vehicles";
 import { MOUNT_TOP } from "./World";
 
@@ -37,7 +38,6 @@ export const launchLive: { state: LaunchState; focus: THREE.Vector3; active: boo
  */
 export function Vehicle() {
   const vehicle = useShip((s) => s.vehicle);
-  const planet = useShip((s) => s.planet);
   const root = useRef<THREE.Group>(null);
   const halo = useRef<THREE.Group>(null);
   const pose = useRef<VehiclePose | null>(null);
@@ -67,10 +67,9 @@ export function Vehicle() {
         engines: s.engines,
         throttle: running > 0 ? Math.min(1, s.thrust_mag / running / perEngine) : 0,
         rcs: s.rcs,
-        legs: s.legs,
         heat: heatGlow(s.heat_flux),
         flowBody: flow,
-        vacuum: THREE.MathUtils.clamp(1 - s.density / (planet === "earth" ? 1.225 : 0.02), 0, 1) * (planet === "mars" ? 0.85 : 1),
+        vacuum: THREE.MathUtils.clamp(1 - s.density / 1.225, 0, 1),
       };
     } else {
       pose.current = null;
@@ -81,7 +80,7 @@ export function Vehicle() {
       const dist = camera.position.distanceTo(g.position);
       const fov = (camera as THREE.PerspectiveCamera).fov ?? 45;
       const half = Math.tan((fov * Math.PI) / 360);
-      halo.current.visible = g.visible && 70 / (dist * half) < 0.02;
+      halo.current.visible = g.visible && !skin.on && 70 / (dist * half) < 0.02;
       halo.current.position.copy(g.position);
       halo.current.scale.setScalar(dist * half * 0.05);
     }
@@ -97,7 +96,9 @@ export function Vehicle() {
           </mesh>
         </Billboard>
       </group>
-      <group ref={root}>{vehicle === "booster" ? <BoosterModel pose={pose} /> : <ShipModel pose={pose} legs={planet === "mars"} />}</group>
+      <group ref={root}>{vehicle === "booster" ? <BoosterModel pose={pose} /> : <ShipModel pose={pose} />}</group>
+      {/* Keyed by vehicle: the meshes it swapped belong to that model. */}
+      <BlueprintSkin key={vehicle} root={root} />
     </>
   );
 }
@@ -110,7 +111,6 @@ function firing(n: number, throttle: number, vacuum: number): VehiclePose {
     engines: Array.from({ length: 13 }, (_, i): EngineState => (i < n ? "running" : "off")),
     throttle,
     rcs: [],
-    legs: false,
     heat: 0,
     flowBody: [0, 0, -1],
     vacuum,
@@ -131,7 +131,7 @@ const STAGING_PITCH = -1.05;
  * begins the stack is gone: the vehicle that comes back is one of the two.
  */
 export function Stack() {
-  const show = useShip((s) => s.planet === "earth" && !s.parked && (s.mode === "editing" || (s.mode === "launch" && s.intro === "stack")));
+  const show = useShip((s) => !s.parked && (s.mode === "editing" || (s.mode === "launch" && s.intro === "stack")));
   const root = useRef<THREE.Group>(null);
   const booster = useRef<THREE.Group>(null);
   const ship = useRef<THREE.Group>(null);
@@ -199,10 +199,15 @@ const NO_POSE = { current: null };
 
 /** The caught booster, set down on a transport stand beside the pad while the ship returns. */
 export function ParkedBooster() {
-  const parked = useShip((s) => s.parked && s.planet === "earth");
+  const parked = useShip((s) => s.parked);
+  const g = useRef<THREE.Group>(null);
+  // (The blueprint shows the flying vehicle alone.)
+  useFrame(() => {
+    if (g.current) g.current.visible = !skin.on;
+  });
   if (!parked) return null;
   return (
-    <group position={[-95, 0, 105]}>
+    <group ref={g} position={[-95, 0, 105]}>
       <mesh position-y={3} castShadow receiveShadow>
         <cylinderGeometry args={[7, 8.5, 6, 8]} />
         <meshStandardMaterial color="#4a4d52" metalness={0.5} roughness={0.7} />
