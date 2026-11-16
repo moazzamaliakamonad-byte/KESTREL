@@ -132,12 +132,10 @@
   text-transform: uppercase;
 }
 .mark {
-  width: 22px;
-  height: 22px;
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.6;
-  stroke-linejoin: round;
+  width: 30px;
+  height: 30px;
+  fill: var(--accent);
+  stroke: none;
   filter: drop-shadow(0 0 6px var(--accent));
 }
 
@@ -1164,13 +1162,15 @@
   color: var(--muted);
 }
 
+/* Beside the picture, not over it: the caught vehicle stays in view. */
 .verdict {
   position: absolute;
-  left: 50%;
-  top: 30%;
-  transform: translate(-50%, -50%);
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(430px, 92vw);
   pointer-events: auto;
-  text-align: center;
+  text-align: left;
   padding: 22px 34px;
   border-radius: 14px;
   background: rgba(4, 9, 15, 0.78);
@@ -1210,10 +1210,10 @@
   color: var(--text);
   max-width: 420px;
 }
-.verdict div {
+.verdict .verdictActions {
   display: flex;
   gap: 8px;
-  justify-content: center;
+  justify-content: flex-start;
   margin-top: 16px;
   flex-wrap: wrap;
 }
@@ -1246,7 +1246,7 @@
   left: 50%;
   transform: translateX(-50%);
   text-align: center;
-  animation: countIn 1.3s var(--ease) both;
+  animation: fadeIn 0.8s both;
 }
 .count span {
   display: block;
@@ -1256,6 +1256,9 @@
   color: var(--muted);
 }
 .count b {
+  display: block;
+  /* One pulse per second, restarted with each number. */
+  animation: countTick 1s var(--ease) both;
   font-family: var(--font-geist-mono), ui-monospace, monospace;
   font-size: clamp(90px, 16vw, 180px);
   font-weight: 300;
@@ -1677,7 +1680,280 @@
 @keyframes verdictIn {
   from {
     opacity: 0;
-    transform: translate(-50%, -46%);
+    transform: translate(-16px, -50%);
+  }
+}
+
+/* ── Countdown ───────────────────────────────────────────── */
+.count:not([data-on]) b {
+  opacity: 0.25;
+  animation: none;
+}
+.count em {
+  display: block;
+  margin-top: 10px;
+  font-style: normal;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+@keyframes countTick {
+  0% {
+    opacity: 0.2;
+    transform: scale(1.35);
+    filter: blur(6px);
+  }
+  18% {
+    opacity: 1;
+    transform: scale(1);
+    filter: none;
+  }
+  100% {
+    opacity: 0.85;
+  }
+}
+/* A lower third that stays until its moment is over. */
+.lower[data-long] {
+  animation: lowerIn 0.8s var(--ease) both;
+}
+@keyframes lowerIn {
+  from {
+    opacity: 0;
+    transform: translateX(-36px);
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* ── Analysis: one part's sheet ──────────────────────────── */
+.sheetHead span {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.panel .sheetHead h2 {
+  margin: 4px 0 6px;
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: #fff;
+}
+.sheetHead p {
+  font-size: 12.5px;
+  color: #b9d6ea;
+}
+.partNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.partNav button {
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 11px;
+  color: var(--muted);
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+.partNav button:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.partNav button[aria-pressed="true"] {
+  color: #06121f;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.calcs {
+  display: flex;
+  flex-direction: column;
+}
+.calc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1px 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+.calc > span {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.calc > b {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: right;
+  color: #fff;
+}
+.calc > code {
+  grid-column: 1 / -1;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--accent);
+  opacity: 0.85;
+}
+.calcBar {
+  grid-column: 1 / -1;
+  position: relative;
+  height: 3px;
+  margin: 5px 0 14px;
+  border-radius: 2px;
+  background: rgba(150, 225, 255, 0.14);
+}
+.calcBar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+.calcBar em {
+  position: absolute;
+  right: 0;
+  top: 5px;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--muted);
+}
+.calc[data-tight] .calcBar i {
+  background: var(--warm);
+}
+.calc[data-tight] > b {
+  color: var(--warm);
+}
+.stepRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0 2px;
+  border-top: 1px solid var(--line);
+}
+.stepRow span {
+  flex: 1;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.stepRow button {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(150, 225, 255, 0.06);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+}
+.stepRow button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.stepRow button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.stepper[data-off] button {
+  visibility: hidden;
+}
+
+/* ── Flight report ───────────────────────────────────────── */
+.report {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px 22px;
+  margin: 14px 0 4px;
+  text-align: left;
+}
+.report div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+}
+.report dt {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.report dd {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 12px;
+  text-align: right;
+}
+
+/* ── Keyboard sheet ──────────────────────────────────────── */
+.hud > .help {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+  background: rgba(2, 6, 12, 0.55);
+  backdrop-filter: blur(6px);
+  animation: fadeIn 0.25s both;
+}
+.help section {
+  width: min(520px, 92vw);
+  padding: 20px 24px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(5, 11, 19, 0.92);
+}
+.help header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.help h2 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.help header button {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+}
+.help dl div {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+.help dt kbd {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text);
+}
+.help dd {
+  font-size: 13px;
+}
+.help p {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
   }
 }
 
