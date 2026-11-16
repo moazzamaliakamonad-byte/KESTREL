@@ -14,6 +14,8 @@
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   position: fixed;
   inset: 0;
+  /* Above the labels the 3D scene pins to the vehicle. */
+  z-index: 30;
   pointer-events: none;
   display: grid;
   grid-template:
