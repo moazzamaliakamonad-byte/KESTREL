@@ -281,7 +281,7 @@ as 0.5 s of sim time; test profile is optimized). Read on 2026-11-16:
 | Booster, default start (14 km, 420 m/s) | caught | 85.3 s | 104.5 of 120 t | 15 / 0 |
 | Booster, a centre engine out at ignition | caught | 86.1 s | 105.4 t | 15 / 0 |
 | Booster, gusts at 8 s and 20 s | caught | 85.3 s | 104.5 t | 15 / 0 |
-| Booster, every solve taking 1.0 s | caught | 81.6 s | 102.6 t | — |
+| Booster, every solve taking 1.0 s | caught | 85.0 s | 104.4 t | — |
 | Ship, Earth default (5 km) | caught | 98.8 s | 25.7 of 40 t | 11 / 0 |
 | Ship, Earth, engine out at ignition | caught | 101.6 s | 26.7 t | 12 / 0 |
 | Ship, Earth, gusts in the belly flop | caught | 105.7 s | 27.7 t | 10 / 3 |
@@ -317,12 +317,19 @@ opening sequence skipped; 2026-11-16):
   shown by the page 64–70 ms after the worker's warm-up solve. Before the
   warm-up existed the first solve took 1 407 ms and the flight hit the tower.
 - Ship, Earth default at ×2: caught (100.5 s; last solve 89 ms).
-- Ship, Mars default at ×2: **out of propellant** hovering 4 m above the
-  ground, in a run where solves took 0.5–3 s (the voice clips were being
-  rendered on the same machine). Not re-run on an idle machine yet; treat
-  Mars at ×2 and above as unreliable.
-- At ×4, with the same load, the Earth ship also ran out of propellant
-  (solves of 1–1.7 s are 4–7 s of sim time).
+- **Ship, Mars default: fails in the browser.** At ×1 and at ×2, on the
+  idle machine, the ship reached the final descent and ran out of
+  propellant a few metres above the ground. The page showed solve times of
+  1.8–3.4 s for Mars plans (the Earth flights: 64–89 ms): at that delay
+  plans arrive stale, guidance brakes and hovers, and the propellant goes.
+  Natively, with the delay modelled as 0.5 s, the same flight lands
+  (table above). Open: make the Mars plans converge faster or tolerate the
+  delay. Until then the Mars flight on the page is not reliable.
+- Ship, Earth default at ×4 while the machine was busy rendering audio
+  (solves of 1–1.7 s, i.e. 4–7 s of sim time): out of propellant. High
+  speeds multiply the solve delay in sim time.
+- Commentary: 77 clips, 1.8 MB in total; the page fetched and decoded them
+  (checked for two lines; nobody has listened to all 77).
 
 Not measured: a benchmark of 6-DoF solve times; Firefox or Safari; phones
 (the layout was checked at phone width only as a screenshot); frame rates;

@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { ship_scenario } from "@/wasm/kestrel_wasm";
 import { createSolverClient } from "@/lib/solverClient";
-import { currentShip, loadShipWasm, setShipClient, startShip, stopShip } from "@/lib/ship/runtime";
+import { commentator, currentShip, loadShipWasm, setShipClient, startShip, stopShip } from "@/lib/ship/runtime";
 import { configOf, useShip } from "@/lib/ship/store";
 import type { Preview, ScenarioInfo, ScenarioKind } from "@/lib/ship/types";
 
@@ -34,6 +34,8 @@ export function useEngine() {
       w.addEventListener("error", (e) => fail(`Guidance worker crashed: ${e.message || "unknown error"}`));
     }
     setShipClient(createSolverClient(worker, () => {}, fail));
+    // Fetch the list of commentary clips now, so the first line already has its clip.
+    commentator.load();
     const previewClient = createSolverClient(previewer, () => {}, fail);
 
     let previewTimer: ReturnType<typeof setTimeout> | undefined;

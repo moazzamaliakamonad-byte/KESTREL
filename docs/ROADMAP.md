@@ -70,6 +70,8 @@ simulation can be, on one page with a mission-control interface.
 - [x] After a booster catch, fly the ship's return to the same tower
 - [x] Pause anywhere; analysis view (forces, plan, equations, graphs)
 - [x] Commentary (rendered clips) and camera-aware procedural sound
+- [ ] Mars landing in the browser: plans take 2–3 s to solve there and the
+      flight runs out of propellant (lands natively; see LIMITATIONS.md)
 - [ ] Simulated ascent, hot staging and boostback (the full mission)
 - [ ] Orbital entry (round planet, heating that matters)
 - [ ] Custom solver: no heap allocation in the loop, bounded iterations
