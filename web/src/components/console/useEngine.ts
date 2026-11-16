@@ -56,7 +56,7 @@ export function useEngine() {
 
     const loading = loadShipWasm()
       .then(() => {
-        for (const k of ["earth", "mars", "booster"] as ScenarioKind[]) {
+        for (const k of ["earth", "booster"] as ScenarioKind[]) {
           const info = JSON.parse(ship_scenario(k)) as ScenarioInfo & { ok: boolean };
           if (info.ok) useShip.getState().setInfo(k, info);
         }

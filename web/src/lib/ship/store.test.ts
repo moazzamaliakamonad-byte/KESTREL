@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { clampStart, configOf, DEFAULT_OPTIONS, DEFAULT_VIEW, kindOf, phasesOf, PRESETS, START_LIMITS, useShip, verdict } from "./store";
+import { analysisOn, clampStart, configOf, DEFAULT_OPTIONS, DEFAULT_VIEW, kindOf, phasesOf, PRESETS, START_LIMITS, useShip, verdict } from "./store";
 
 const reset = () =>
   useShip.setState({
     parked: false,
     flight: null,
     vehicle: "booster",
-    planet: "earth",
     scenario: "booster",
     mode: "editing",
     start: PRESETS.booster[0].start,
@@ -18,23 +17,28 @@ const reset = () =>
 describe("ship store", () => {
   beforeEach(reset);
 
-  it("maps vehicle and planet to a flight kind", () => {
-    expect(kindOf("ship", "earth")).toBe("earth");
-    expect(kindOf("ship", "mars")).toBe("mars");
-    expect(kindOf("booster", "earth")).toBe("booster");
-    expect(kindOf("booster", "mars")).toBe("booster");
+  it("maps a vehicle to its flight kind, and switching vehicle switches the flight", () => {
+    expect(kindOf("ship")).toBe("earth");
+    expect(kindOf("booster")).toBe("booster");
+    useShip.getState().setVehicle("ship");
+    expect(useShip.getState()).toMatchObject({ vehicle: "ship", scenario: "earth" });
+    useShip.getState().setVehicle("booster");
+    expect(useShip.getState()).toMatchObject({ vehicle: "booster", scenario: "booster" });
   });
 
-  it("Mars is ship-only: picking Mars switches to the ship, picking the booster returns to Earth", () => {
-    const s = useShip.getState();
-    s.setPlanet("mars");
-    expect(useShip.getState()).toMatchObject({ vehicle: "ship", planet: "mars", scenario: "mars" });
-    useShip.getState().setVehicle("booster");
-    expect(useShip.getState()).toMatchObject({ vehicle: "booster", planet: "earth", scenario: "booster" });
+  it("a part is open only inside the analysis view, which belongs to a flight", () => {
+    useShip.getState().setView({ analysis: true, part: "engines" });
+    expect(useShip.getState().view).toMatchObject({ analysis: false, part: null });
+    useShip.setState({ mode: "flying" });
+    useShip.getState().setView({ analysis: true, part: "engines" });
+    expect(analysisOn(useShip.getState())).toBe(true);
+    expect(useShip.getState().view.part).toBe("engines");
+    useShip.getState().setView({ analysis: false });
+    expect(useShip.getState().view.part).toBeNull();
   });
 
   it("every preset is inside its kind's start box", () => {
-    for (const kind of ["earth", "mars", "booster"] as const) {
+    for (const kind of ["earth", "booster"] as const) {
       for (const p of PRESETS[kind]) expect(clampStart(kind, p.start)).toEqual(p.start);
     }
   });
@@ -92,15 +96,11 @@ describe("ship store", () => {
     expect(useShip.getState().view).toMatchObject({ paused: false, analysis: false });
   });
 
-  it("flying starts with the opening sequence: the stack on Earth, a card for Mars", () => {
+  it("flying starts with the opening sequence: the full stack on the pad", () => {
     useShip.getState().fly();
     expect(useShip.getState()).toMatchObject({ mode: "launch", intro: "stack" });
     useShip.getState().beginFlight();
     expect(useShip.getState().mode).toBe("flying");
-    useShip.getState().reset();
-    useShip.getState().setPlanet("mars");
-    useShip.getState().fly();
-    expect(useShip.getState()).toMatchObject({ mode: "launch", intro: "card" });
   });
 
   it("after a booster catch the ship's return can follow, with the booster parked", () => {
@@ -120,7 +120,6 @@ describe("ship store", () => {
     expect(phasesOf("booster")[0]).toBe("descent");
     expect(phasesOf("earth")[1]).toBe("flip");
     expect(verdict("booster", "caught", null)).toBe("Booster caught by the tower");
-    expect(verdict("mars", "landed", null)).toBe("Landed on Mars");
     expect(verdict("earth", "crashed", "hit the tower")).toBe("Lost: hit the tower");
   });
 });

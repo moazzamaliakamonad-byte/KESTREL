@@ -203,7 +203,7 @@ export function Telemetry() {
           ),
         )}
         <em data-on={s.rcs.some(Boolean) || undefined}>RCS</em>
-        <em data-on={s.arms || s.legs || undefined}>{info.catch ? "Arms" : "Legs"}</em>
+        <em data-on={s.arms || undefined}>Arms</em>
       </div>
       <div className={css.guidance}>
         <span>Guidance</span>
@@ -241,7 +241,7 @@ export function Briefing() {
           ["Thrust per engine", `${fmt(info.ship.engine_max / 1e6, 2)} MN`, "pub"],
           ["Specific impulse", `${info.ship.isp} s (sea level)`, "pub"],
           ["Flaps", "4 · two forward, two aft", "pub"],
-          ["Empty mass", `${fmt(info.dry_mass / 1000)} t${info.planet === "mars" ? " with cargo" : ""}`, info.planet === "mars" ? "ill" : "pub"],
+          ["Empty mass", `${fmt(info.dry_mass / 1000)} t`, "pub"],
           ["Landing propellant", `${fmt(info.propellant / 1000)} t`, "ill"],
           ["Gimbal limit", `±${fmt(info.ship.gimbal_max_deg)}°`, "ill"],
           ["Aerodynamics, inertia", "simplified model", "ill"],

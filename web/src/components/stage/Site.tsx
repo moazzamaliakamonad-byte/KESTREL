@@ -96,15 +96,16 @@ function Mast({ x, z, h = 62 }: { x: number; z: number; h?: number }) {
   );
 }
 
-/** Low coastal scrub scattered over the sand, as instanced blobs. */
+/** Low coastal scrub scattered over the sand: many small, flat clumps (large ones read as green boulders). */
 function Scrub() {
   const ref = useRef<THREE.InstancedMesh>(null);
-  const count = 520;
+  const count = 1500;
   useLayoutEffect(() => {
     const m = ref.current;
     if (!m) return;
     const mat = new THREE.Matrix4();
     const q = new THREE.Quaternion();
+    const tint = new THREE.Color();
     let n = 0;
     for (let i = 0; n < count && i < count * 4; i++) {
       const a = hash(i * 1.3) * Math.PI * 2;
@@ -112,17 +113,19 @@ function Scrub() {
       const [x, z] = [Math.cos(a) * d - 60, Math.sin(a) * d - 200];
       // Keep the road, the tank farm and the shore clear.
       if (z > 520 || (Math.abs(z + 40) < 14 && x < -90) || (x < -110 && x > -330 && z < -40 && z > -170)) continue;
-      const s = 2.5 + 7 * hash(i * 4.7);
-      mat.compose(new THREE.Vector3(x, s * 0.18, z), q, new THREE.Vector3(s, s * 0.42, s * (0.7 + 0.6 * hash(i))));
+      const s = 0.9 + 2.6 * hash(i * 4.7) ** 2;
+      mat.compose(new THREE.Vector3(x, s * 0.1, z), q, new THREE.Vector3(s, s * 0.3, s * (0.7 + 0.6 * hash(i))));
+      m.setColorAt(n, tint.setHSL(0.2 + 0.06 * hash(i * 8.3), 0.3 + 0.12 * hash(i * 6.1), 0.11 + 0.06 * hash(i * 3.7)));
       m.setMatrixAt(n++, mat);
     }
     m.count = n;
     m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
   }, []);
   return (
     <instancedMesh ref={ref} args={[undefined, undefined, count]} receiveShadow>
-      <sphereGeometry args={[1, 7, 5]} />
-      <meshStandardMaterial color="#4f5a3a" roughness={1} />
+      <sphereGeometry args={[1, 8, 6]} />
+      <meshStandardMaterial color="#ffffff" roughness={1} />
     </instancedMesh>
   );
 }

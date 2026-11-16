@@ -47,23 +47,22 @@ export function Sound() {
     }
     at.set(...toScene(s.position));
     const distance = camera.position.distanceTo(at);
-    const shot = st.view.paused ? "orbit" : shotOf(st.view.camera, s, st.planet);
-    const sea = st.planet === "earth" ? 1.225 : 0.02;
+    const shot = st.view.paused ? "orbit" : shotOf(st.view.camera, s);
+    const sea = 1.225;
     flightAudio.update({
       power: s.thrust_mag / (info.ship.engine_max * info.ship.engines),
       engines: s.engines.filter((e) => e === "running").length,
       distance,
       onboard: shot === "onboard",
       q: s.q_dyn,
-      // Mars' thin air carries sound poorly: quieter, but not silent.
-      air: st.planet === "earth" ? s.density / sea : 0.12 * (s.density / sea),
+      air: s.density / sea,
       paused: st.view.paused || st.mode === "done",
     });
 
     const p = prev.current;
     if (s.t > p.t) {
       // Going subsonic: the boom reaches a camera outside the vehicle later.
-      if (p.mach >= 1 && s.mach < 1 && shot !== "onboard" && st.planet === "earth") flightAudio.sonicBoom(distance);
+      if (p.mach >= 1 && s.mach < 1 && shot !== "onboard") flightAudio.sonicBoom(distance);
       if (s.outcome && !p.outcome) {
         const after = shot === "onboard" ? 0 : distance / SPEED_OF_SOUND;
         if (s.outcome === "crashed") flightAudio.explosion(after);

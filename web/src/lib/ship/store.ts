@@ -4,7 +4,6 @@ import type {
   EngineState,
   FlightConfig,
   Outcome,
-  Planet,
   Preview,
   ScenarioInfo,
   ScenarioKind,
@@ -63,8 +62,12 @@ export interface ViewOptions {
   camera: CameraMode;
   speed: number;
   paused: boolean;
-  /** The blue "analysis" view: forces, plan and maths drawn on the vehicle. */
+  /** The blue "analysis" view: the vehicle as a blueprint, its forces, and each part's calculations. */
   analysis: boolean;
+  /** The part open in the analysis view (`lib/ship/parts.ts`), or null for the whole vehicle. */
+  part: string | null;
+  /** The keyboard help sheet. */
+  help: boolean;
   voice: boolean;
   /** Engine, wind and impact sound. */
   sound: boolean;
@@ -95,6 +98,8 @@ export const DEFAULT_VIEW: ViewOptions = {
   speed: 1,
   paused: false,
   analysis: false,
+  part: null,
+  help: false,
   voice: true,
   sound: true,
   plan: true,
@@ -117,7 +122,6 @@ interface Limits {
 /** Allowed start box per flight kind (m, m/s). */
 export const START_LIMITS: Record<ScenarioKind, Limits> = {
   earth: { z: [2500, 80_000], x: [-1500, 3500], y: [0, 0], vz: [-2600, -40], vx: [-150, 100], vy: [0, 0] },
-  mars: { z: [10_000, 18_000], x: [-3000, 3000], y: [0, 0], vz: [-500, -350], vx: [-80, 80], vy: [0, 0] },
   booster: { z: [5000, 20_000], x: [-800, 1400], y: [-500, 500], vz: [-600, -250], vx: [-60, 60], vy: [-30, 30] },
 };
 
@@ -134,7 +138,6 @@ export const PRESETS: Record<ScenarioKind, Preset[]> = {
     { name: "High drop", note: "25 km", start: { position: [2500, 0, 25_000], velocity: [-60, 0, -250] } },
     { name: "Entry", note: "80 km, Mach 7", start: { position: [3000, 0, 80_000], velocity: [-100, 0, -2500] } },
   ],
-  mars: [{ name: "Mars descent", note: "14 km, supersonic", start: { position: [1500, 0, 14_000], velocity: [-40, 0, -450] } }],
   booster: [
     { name: "Return", note: "14 km, Mach 1.4", start: { position: [900, 0, 14_000], velocity: [-30, 0, -420] } },
     { name: "Fast return", note: "20 km, Mach 1.8", start: { position: [900, 0, 20_000], velocity: [-25, 0, -550] } },
@@ -153,10 +156,9 @@ export function clampStart(kind: ScenarioKind, s: Start): Start {
   };
 }
 
-/** The flight kind for a vehicle on a planet. The booster only flies on Earth. */
-export function kindOf(vehicle: Vehicle, planet: Planet): ScenarioKind {
-  if (vehicle === "booster") return "booster";
-  return planet === "mars" ? "mars" : "earth";
+/** The flight kind for a vehicle. */
+export function kindOf(vehicle: Vehicle): ScenarioKind {
+  return vehicle === "booster" ? "booster" : "earth";
 }
 
 const deg = Math.PI / 180;
@@ -186,8 +188,7 @@ export function configOf(s: Pick<ShipState, "scenario" | "start" | "options">): 
 
 export interface ShipState {
   vehicle: Vehicle;
-  planet: Planet;
-  /** `kindOf(vehicle, planet)`. */
+  /** `kindOf(vehicle)`. */
   scenario: ScenarioKind;
   info: Partial<Record<ScenarioKind, ScenarioInfo>>;
   start: Start;
@@ -206,7 +207,6 @@ export interface ShipState {
   error: string | null;
   setInfo(kind: ScenarioKind, info: ScenarioInfo): void;
   setVehicle(v: Vehicle): void;
-  setPlanet(p: Planet): void;
   setStart(start: Start): void;
   setPreset(i: number): void;
   setOptions(patch: Partial<Options>): void;
@@ -240,7 +240,6 @@ function fresh(kind: ScenarioKind): Pick<ShipState, "scenario" | "start" | "pres
 
 export const useShip = create<ShipState>((set, get) => ({
   vehicle: "booster",
-  planet: "earth",
   info: {},
   view: { ...DEFAULT_VIEW },
   previewing: false,
@@ -255,15 +254,7 @@ export const useShip = create<ShipState>((set, get) => ({
   setVehicle(vehicle) {
     const s = get();
     if (vehicle === s.vehicle || s.mode === "flying") return;
-    // The booster does not go to Mars.
-    const planet = vehicle === "booster" ? "earth" : s.planet;
-    set({ vehicle, planet, ...fresh(kindOf(vehicle, planet)), options: { ...s.options, ...carried(s.options) } });
-  },
-  setPlanet(planet) {
-    const s = get();
-    if (planet === s.planet || s.mode === "flying") return;
-    const vehicle = planet === "mars" ? "ship" : s.vehicle;
-    set({ vehicle, planet, ...fresh(kindOf(vehicle, planet)), options: { ...s.options, ...carried(s.options) } });
+    set({ vehicle, ...fresh(kindOf(vehicle)), options: { ...s.options, ...carried(s.options) } });
   },
   setStart(start) {
     if (get().mode !== "editing") return;
@@ -294,6 +285,8 @@ export const useShip = create<ShipState>((set, get) => ({
       view.paused = false;
       view.analysis = false;
     }
+    // A part is open only inside the analysis view.
+    if (!view.analysis) view.part = null;
     set({ view });
   },
   setPreview(preview, previewing = false) {
@@ -302,7 +295,7 @@ export const useShip = create<ShipState>((set, get) => ({
   fly() {
     const s = get();
     if (s.mode !== "editing") return;
-    set({ mode: "launch", intro: s.planet === "earth" ? "stack" : "card", launchAt: now(), parked: false, flight: null, view: { ...s.view, paused: false } });
+    set({ mode: "launch", intro: "stack", launchAt: now(), parked: false, flight: null, view: { ...s.view, paused: false } });
   },
   beginFlight() {
     if (get().mode === "launch") set({ mode: "flying", flight: null });
@@ -312,18 +305,17 @@ export const useShip = create<ShipState>((set, get) => ({
     if (s.mode !== "done" || s.scenario !== "booster" || s.flight?.outcome !== "caught") return;
     set({
       vehicle: "ship",
-      planet: "earth",
       ...fresh("earth"),
       options: { ...s.options, ...carried(s.options) },
       mode: "launch",
       intro: "card",
       launchAt: now(),
       parked: true,
-      view: { ...s.view, paused: false, analysis: false },
+      view: { ...s.view, paused: false, analysis: false, part: null },
     });
   },
   reset() {
-    set({ mode: "editing", flight: null, parked: false, view: { ...get().view, paused: false, analysis: false } });
+    set({ mode: "editing", flight: null, parked: false, view: { ...get().view, paused: false, analysis: false, part: null } });
   },
   finish() {
     if (get().mode === "flying") set({ mode: "done" });
@@ -335,6 +327,9 @@ export const useShip = create<ShipState>((set, get) => ({
     set({ error });
   },
 }));
+
+/** The analysis view is showing (it belongs to a flight, in progress or over). */
+export const analysisOn = (s: Pick<ShipState, "view" | "mode">) => s.view.analysis && (s.mode === "flying" || s.mode === "done");
 
 const now = () => (typeof performance !== "undefined" ? performance.now() : 0);
 
@@ -381,7 +376,6 @@ export const VEHICLE_NAME: Record<Vehicle, string> = { ship: "Ship", booster: "B
 /** The verdict line after the flight. */
 export function verdict(kind: ScenarioKind, outcome: Outcome | null, reason: string | null): string {
   if (outcome === "caught") return kind === "booster" ? "Booster caught by the tower" : "Ship caught by the tower";
-  if (outcome === "landed") return kind === "mars" ? "Landed on Mars" : "Landed";
   if (outcome === "crashed") return `Lost: ${reason ?? "crashed"}`;
   return "";
 }

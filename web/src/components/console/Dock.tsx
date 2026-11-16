@@ -5,7 +5,7 @@ import { engineLayout } from "@/lib/ship/engines";
 import { LINES } from "@/lib/ship/phrases";
 import { commentator, failEngine, throwGust } from "@/lib/ship/runtime";
 import { PRESETS, SPEEDS, START_LIMITS, useShip, verdict, type CameraMode, type Noise } from "@/lib/ship/store";
-import type { EngineState, Planet, Preview, Vehicle } from "@/lib/ship/types";
+import type { EngineState, Preview, Vehicle } from "@/lib/ship/types";
 import { Field, Panel, Seg, Slider, Toggle, fmt } from "./controls";
 import css from "./console.module.css";
 
@@ -71,7 +71,7 @@ function PathMap({ preview }: { preview: Preview | null }) {
 }
 
 function Mission() {
-  const { vehicle, planet, scenario, start, setStart, setVehicle, setPlanet, preset, setPreset, preview, previewing, mode } = useShip();
+  const { vehicle, scenario, start, setStart, setVehicle, preset, setPreset, preview, previewing, mode } = useShip();
   const l = START_LIMITS[scenario];
   const locked = mode !== "editing";
   const [p, v] = [start.position, start.velocity];
@@ -80,19 +80,6 @@ function Mission() {
     <>
       <Field label="Vehicle">
         <Seg<Vehicle> label="Vehicle" value={vehicle} onChange={setVehicle} disabled={locked} options={[["booster", "Booster"], ["ship", "Ship"]]} />
-      </Field>
-      <Field label="Destination">
-        <Seg<Planet>
-          label="Planet"
-          value={planet}
-          onChange={setPlanet}
-          disabled={locked}
-          options={[
-            ["earth", "Earth · tower catch"],
-            ["mars", "Mars · legs"],
-          ]}
-        />
-        {vehicle === "booster" && <p className={css.hint}>The booster stays on Earth. Choosing Mars switches to the ship.</p>}
       </Field>
       <Field label="Start">
         <div className={css.chips}>
@@ -166,7 +153,7 @@ function VehicleTab() {
 }
 
 function Environment() {
-  const { options, setOptions, mode, planet } = useShip();
+  const { options, setOptions, mode } = useShip();
   const locked = mode !== "editing";
   return (
     <>
@@ -184,7 +171,7 @@ function Environment() {
       >
         Throw a 4-second gust now
       </button>
-      <Slider label={planet === "mars" ? "Air density (× Mars standard)" : "Air density (× standard)"} value={options.density} range={[0.5, 1.5]} step={0.05} disabled={locked} format={(x) => `${fmt(x, 2)} ×`} onChange={(x) => setOptions({ density: x })} />
+      <Slider label="Air density (× standard)" value={options.density} range={[0.5, 1.5]} step={0.05} disabled={locked} format={(x) => `${fmt(x, 2)} ×`} onChange={(x) => setOptions({ density: x })} />
       <Field label="Sensor noise">
         <Seg<Noise> label="Sensor noise" value={options.noise} onChange={(x) => setOptions({ noise: x })} options={[["off", "Off"], ["low", "Low"], ["high", "High"]]} />
       </Field>

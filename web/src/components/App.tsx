@@ -8,7 +8,7 @@ import { Console } from "./console/Console";
 import { useEngine } from "./console/useEngine";
 import { Stage } from "./stage/Stage";
 
-/** The page: a Starship-class ship or booster flown back to the tower (or onto Mars), with a console around it. */
+/** The page: a Starship-class ship or booster flown back to the tower, with a console around it. */
 export default function App() {
   useEngine();
   useEffect(() => {

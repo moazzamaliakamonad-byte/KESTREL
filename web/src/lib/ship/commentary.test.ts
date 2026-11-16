@@ -31,7 +31,6 @@ function snap(patch: Partial<ShipSnapshot>): ShipSnapshot {
     weight: 0,
     density: 0,
     heat_flux: 0,
-    legs: false,
     arms: false,
     wind: [0, 0, 0],
     guide: "none",
@@ -94,13 +93,13 @@ describe("commentary", () => {
     const all = new Set(allPhrases());
     const flights: [Parameters<typeof callouts>[0], ShipSnapshot | null, ShipSnapshot][] = [
       ["booster", null, snap({})],
-      ["mars", null, snap({ vehicle: "ship", phase: "belly-flop" })],
+      ["earth", null, snap({ vehicle: "ship", phase: "belly-flop" })],
       ["booster", snap({}), snap({ phase: "startup" })],
       ["earth", snap({ phase: "belly-flop" }), snap({ phase: "flip" })],
       ["booster", snap({ phase: "landing-burn", engines: running(3) }), snap({ phase: "landing-burn", engines: running(2) })],
       ["booster", snap({ position: [0, 0, 5001], mach: 1.2, heat_flux: 0 }), snap({ position: [0, 0, 4999], mach: 0.9, heat_flux: 70_000, arms: true, guide: "brake" })],
       ["earth", snap({}), snap({ outcome: "crashed", reason: "too fast" })],
-      ["mars", snap({}), snap({ outcome: "landed" })],
+      ["earth", snap({ vehicle: "ship" }), snap({ vehicle: "ship", outcome: "caught" })],
     ];
     for (const [kind, a, b] of flights) for (const c of callouts(kind, a, b)) expect(all.has(c.text), c.text).toBe(true);
     const ids = allPhrases().map(clipId);

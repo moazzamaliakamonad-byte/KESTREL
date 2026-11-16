@@ -4,35 +4,29 @@ import { Environment } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { Terrain } from "@/components/scene/Terrain";
 import { shipLive } from "@/lib/ship/live";
 import { useShip } from "@/lib/ship/store";
-import type { Planet, ScenarioInfo } from "@/lib/ship/types";
+import type { ScenarioInfo } from "@/lib/ship/types";
+import { Backdrop, skin } from "./Blueprint";
 import { hash } from "./materials";
 import { LaunchSite, MOUNT_TOP } from "./Site";
 
 export { MOUNT_TOP };
 
-/** Direction to the sun (scene axes), per planet. */
-export const SUN: Record<Planet, THREE.Vector3> = {
-  earth: new THREE.Vector3(0.52, 0.42, 0.74).normalize(),
-  mars: new THREE.Vector3(-0.8, 0.22, -0.55).normalize(),
-};
+/** Direction to the sun (scene axes): mid-morning, over the sea. */
+export const SUN = new THREE.Vector3(0.52, 0.42, 0.74).normalize();
 
-const SKY = {
-  earth: { zenith: "#1f5fae", horizon: "#b9d6ee", ground: "#8fb3c9", sun: "#fff3d6", fog: "#b4d0e6" },
-  mars: { zenith: "#4a2c1e", horizon: "#d2a57e", ground: "#9a6a4c", sun: "#cfe0ff", fog: "#b98e6c" },
-};
+const SKY = { zenith: "#1b5aa8", horizon: "#bcd8ee", ground: "#8fb3c9", sun: "#fff3d6", fog: "#b9d3e6" };
 
 /**
- * The sky as seen from the camera's altitude: blue (or butterscotch) low
+ * The sky as seen from the camera's altitude: blue low
  * down, thinning to a bright band on a curved horizon and black with stars
  * as the camera climbs. A scattering look-alike, not a scattering model.
  */
-function Sky({ planet }: { planet: Planet }) {
+function Sky() {
   const mesh = useRef<THREE.Mesh>(null);
   const material = useMemo(() => {
-    const c = SKY[planet];
+    const c = SKY;
     return new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
@@ -43,10 +37,10 @@ function Sky({ planet }: { planet: Planet }) {
         uHorizon: { value: new THREE.Color(c.horizon) },
         uGround: { value: new THREE.Color(c.ground) },
         uSunColor: { value: new THREE.Color(c.sun) },
-        uSun: { value: SUN[planet] },
+        uSun: { value: SUN },
         uAlt: { value: 0 },
-        uScale: { value: planet === "earth" ? 8500 : 11100 },
-        uRadius: { value: planet === "earth" ? 6.371e6 : 3.39e6 },
+        uScale: { value: 8500 },
+        uRadius: { value: 6.371e6 },
       },
       vertexShader: /* glsl */ `
         varying vec3 vDir;
@@ -80,7 +74,7 @@ function Sky({ planet }: { planet: Planet }) {
           gl_FragColor = vec4(col, 1.0);
         }`,
     });
-  }, [planet]);
+  }, []);
   useFrame(({ camera }) => {
     const m = mesh.current;
     if (!m) return;
@@ -95,9 +89,9 @@ function Sky({ planet }: { planet: Planet }) {
 }
 
 /** What the steel reflects: a small copy of the sky with a bright sun. */
-function Reflections({ planet }: { planet: Planet }) {
-  const c = SKY[planet];
-  const sun = SUN[planet].clone().multiplyScalar(40);
+function Reflections() {
+  const c = SKY;
+  const sun = SUN.clone().multiplyScalar(40);
   return (
     <Environment resolution={128} frames={1} background={false}>
       <mesh scale={100}>
@@ -117,7 +111,12 @@ function Reflections({ planet }: { planet: Planet }) {
   );
 }
 
-/** Soft cloud decks the vehicle falls through (Earth only). */
+/**
+ * A few clouds: scattered fair-weather puffs low down and a thin high
+ * veil. Kept sparse on purpose (a full deck hid the vehicle and the
+ * coast from above), and each layer fades out as the camera passes
+ * through its height so it is never a flat sheet across the picture.
+ */
 function Clouds() {
   const material = useMemo(
     () =>
@@ -126,7 +125,7 @@ function Clouds() {
         depthWrite: false,
         side: THREE.DoubleSide,
         fog: false,
-        uniforms: { uTime: { value: 0 }, uCover: { value: 0.5 }, uSun: { value: SUN.earth } },
+        uniforms: { uTime: { value: 0 }, uCover: { value: 0.7 }, uOpacity: { value: 0.55 }, uScale: { value: 3400 } },
         vertexShader: /* glsl */ `
           #include <common>
           #include <logdepthbuf_pars_vertex>
@@ -140,7 +139,7 @@ function Clouds() {
         fragmentShader: /* glsl */ `
           #include <logdepthbuf_pars_fragment>
           varying vec3 vWorld;
-          uniform float uTime; uniform float uCover;
+          uniform float uTime; uniform float uCover; uniform float uOpacity; uniform float uScale;
           float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float noise(vec2 p) {
             vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -149,19 +148,25 @@ function Clouds() {
           float fbm(vec2 p) { float a = 0.5; float v = 0.0; for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }
           void main() {
             #include <logdepthbuf_fragment>
-            vec2 p = vWorld.xz / 2600.0 + vec2(uTime * 0.004, 0.0);
-            float n = fbm(p) + 0.35 * fbm(p * 3.1);
-            float a = smoothstep(uCover, uCover + 0.32, n);
-            float edge = smoothstep(60000.0, 20000.0, length(vWorld.xz - cameraPosition.xz));
-            float shade = 0.72 + 0.28 * smoothstep(uCover, uCover + 0.5, n);
-            gl_FragColor = vec4(vec3(shade) * vec3(1.0, 0.985, 0.96), a * edge * 0.9);
+            vec2 p = vWorld.xz / uScale + vec2(uTime * 0.003, 0.0);
+            float n = fbm(p) + 0.3 * fbm(p * 3.1);
+            float a = smoothstep(uCover, uCover + 0.38, n);
+            float edge = smoothstep(60000.0, 18000.0, length(vWorld.xz - cameraPosition.xz));
+            // Thin out as the camera passes through the layer, and keep the
+            // sky straight above the launch site clear.
+            float through = smoothstep(120.0, 1400.0, abs(cameraPosition.y - vWorld.y));
+            float site = smoothstep(900.0, 4200.0, length(vWorld.xz));
+            float shade = 0.8 + 0.2 * smoothstep(uCover, uCover + 0.5, n);
+            gl_FragColor = vec4(vec3(shade) * vec3(1.0, 0.99, 0.97), a * edge * through * site * uOpacity);
           }`,
       }),
     [],
   );
   const upper = useMemo(() => {
     const m = material.clone();
-    m.uniforms.uCover = { value: 0.62 };
+    m.uniforms.uCover = { value: 0.66 };
+    m.uniforms.uOpacity = { value: 0.3 };
+    m.uniforms.uScale = { value: 9000 };
     return m;
   }, [material]);
   const low = useRef<THREE.Mesh>(null);
@@ -309,22 +314,6 @@ function EarthGround() {
   );
 }
 
-function MarsGround() {
-  return (
-    <group>
-      <mesh rotation-x={-Math.PI / 2} position-y={-45} receiveShadow>
-        <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-        <meshStandardMaterial color="#8a4a2e" roughness={1} />
-      </mesh>
-      <Terrain />
-      <mesh rotation-x={-Math.PI / 2} position-y={0.3}>
-        <ringGeometry args={[14, 15, 64]} />
-        <meshBasicMaterial color="#9fe6ff" transparent opacity={0.55} />
-      </mesh>
-    </group>
-  );
-}
-
 type Catch = NonNullable<ScenarioInfo["catch"]>;
 const STEEL = "#34373c";
 const SECTION = 9;
@@ -451,29 +440,33 @@ function Tower({ c, radius }: { c: Catch; radius: number }) {
 }
 
 /** Haze that thins as the camera climbs. */
-function Haze({ planet }: { planet: Planet }) {
+function Haze() {
   useFrame(({ camera, scene }) => {
-    if (!(scene.fog instanceof THREE.FogExp2)) scene.fog = new THREE.FogExp2(SKY[planet].fog, 0.00003);
-    const base = planet === "earth" ? 0.000028 : 0.00006;
-    scene.fog.density = base * Math.exp(-Math.max(0, camera.position.y) / (planet === "earth" ? 9000 : 12000)) + 0.0000012;
+    if (!(scene.fog instanceof THREE.FogExp2)) scene.fog = new THREE.FogExp2(SKY.fog, 0.00003);
+    // (No haze over the blueprint.)
+    scene.fog.density = skin.on ? 0 : 0.000024 * Math.exp(-Math.max(0, camera.position.y) / 9000) + 0.0000012;
   });
   return null;
 }
 
 export function World() {
-  const planet = useShip((s) => s.planet);
   const info = useShip((s) => s.info[s.scenario]);
-  const sun = SUN[planet];
+  const sun = SUN;
+  const scenery = useRef<THREE.Group>(null);
+  // The blueprint view shows the vehicle alone: the world steps aside.
+  useFrame(() => {
+    if (scenery.current) scenery.current.visible = !skin.on;
+  });
   return (
     <group>
-      <Sky planet={planet} />
-      <Reflections planet={planet} />
-      <Haze planet={planet} />
-      <hemisphereLight args={planet === "earth" ? ["#d6e8ff", "#8c7a5e", 0.55] : ["#d8a982", "#3a2018", 0.7]} />
+      <Reflections />
+      <Haze />
+      <Backdrop />
+      <hemisphereLight args={["#d6e8ff", "#8c7a5e", 0.55]} />
       <directionalLight
         position={sun.clone().multiplyScalar(6000).toArray()}
-        intensity={planet === "earth" ? 2.5 : 2.6}
-        color={planet === "earth" ? "#fff1dc" : "#ffd9b8"}
+        intensity={2.5}
+        color="#fff1dc"
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-220}
@@ -484,15 +477,12 @@ export function World() {
         shadow-camera-far={12000}
         shadow-bias={-0.0004}
       />
-      {planet === "earth" ? (
-        <>
-          <EarthGround />
-          <Clouds />
-          {info?.catch && <Tower c={info.catch} radius={info.ship.radius} />}
-        </>
-      ) : (
-        <MarsGround />
-      )}
+      <group ref={scenery}>
+        <Sky />
+        <EarthGround />
+        <Clouds />
+        {info?.catch && <Tower c={info.catch} radius={info.ship.radius} />}
+      </group>
     </group>
   );
 }

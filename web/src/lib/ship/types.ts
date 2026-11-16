@@ -1,12 +1,11 @@
 import type { PQuat, Vec3 } from "./frames";
 
-/** A flight kind as Rust names it: the ship on Earth, the ship on Mars, the booster (Earth). */
-export type ScenarioKind = "earth" | "mars" | "booster";
+/** A flight kind as Rust names it: the ship's return ("earth") or the booster's. Both end on the tower. */
+export type ScenarioKind = "earth" | "booster";
 export type Vehicle = "ship" | "booster";
-export type Planet = "earth" | "mars";
 export type ShipPhase = "belly-flop" | "flip" | "descent" | "startup" | "landing-burn" | "terminal" | "done";
 export type EngineState = "off" | "igniting" | "running" | "shutdown" | "failed";
-export type Outcome = "caught" | "landed" | "crashed";
+export type Outcome = "caught" | "crashed";
 
 /** `ShipFlight.snapshot()` (crates/wasm/src/ship_js.rs). SI units. */
 export interface ShipSnapshot {
@@ -42,7 +41,6 @@ export interface ShipSnapshot {
   density: number;
   /** Stagnation-point heating estimate, W/m² (not part of the dynamics). */
   heat_flux: number;
-  legs: boolean;
   arms: boolean;
   wind: Vec3;
   guide: "plan" | "none" | "brake";
@@ -66,7 +64,6 @@ export interface Tuning {
 /** `ship_scenario(kind)`. */
 export interface ScenarioInfo {
   scenario: ScenarioKind;
-  planet: Planet;
   vehicle: Vehicle;
   gravity: number;
   start: { position: Vec3; velocity: Vec3 };
@@ -79,8 +76,6 @@ export interface ScenarioInfo {
     radius: number;
     cm_height: number;
     pin_height: number;
-    leg_drop: number;
-    leg_radius: number;
     engine_max: number;
     engines: number;
     final_engines: number;
@@ -93,6 +88,27 @@ export interface ScenarioInfo {
     flap_y: number;
     gimbal_max_deg: number;
   };
+  /** The model's coefficients (for the analysis view's per-part formulas). */
+  model: {
+    c_a: number;
+    c_n: number;
+    c_n_alpha: number;
+    cp_offset: number;
+    c_flap: number;
+    fore_area: number;
+    aft_area: number;
+    fin_area: number | null;
+    fin_c_delta: number | null;
+    fin_radius: number | null;
+    rcs_thrust: number;
+    rcs_fore: number;
+    rcs_aft: number;
+    inertia_per_kg: Vec3;
+    gimbal_rate_deg: number;
+    ignition_time: number;
+  };
+  /** What the arms accept at contact. */
+  limits: { catch_down: number; catch_side: number; catch_tilt_deg: number; catch_rate_deg: number; arms_close_above: number };
   start_mass: number;
   dry_mass: number;
   gate: Vec3;
