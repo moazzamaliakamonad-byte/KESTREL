@@ -27,9 +27,9 @@ const { allPhrases, clipId } = await import(pathToFileURL(join(here, "..", "src"
 
 // Resolve the tools from the folder the script is run in.
 const require = createRequire(join(process.cwd(), "noop.js"));
-const { KokoroTTS } = await import(pathToFileURL(require.resolve("kokoro-js")).href);
-const lame = await import(pathToFileURL(require.resolve("@breezystack/lamejs")).href);
-const Mp3Encoder = lame.Mp3Encoder ?? lame.default?.Mp3Encoder;
+// (The package's ES-module build; its CommonJS build fails under Node 24.)
+const { KokoroTTS } = await import(pathToFileURL(join(dirname(require.resolve("kokoro-js")), "kokoro.js")).href);
+const { Mp3Encoder } = await import(pathToFileURL(join(dirname(require.resolve("@breezystack/lamejs")), "lamejs.js")).href);
 
 const voice = process.env.VOICE ?? "af_heart";
 const speed = Number(process.env.SPEED ?? "1.0");

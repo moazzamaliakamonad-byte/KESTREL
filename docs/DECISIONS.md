@@ -171,3 +171,116 @@ Template:
   `clamp(z / 200 m, 0.1, 1)`. Seeded (SplitMix64 + Box–Muller), reproducible.
 - Consequences: "high" noise is survivable; the sensed position is drawn as
   a magenta ring so visitors can see it wander.
+
+## D-017 — One vehicle model, two parameter sets; the booster is a third flight kind
+- Date: 2026-11-15
+- Status: accepted
+- Context: the booster needs the same rigid-body equations, planner,
+  powered and terminal controllers, contact logic and closed loop as the ship.
+- Decision: `model::Ship` gains `VehicleKind`, the number of landing engines
+  (3 / 13), the engines flown to the end (1 / 3), a linear lift slope and
+  grid-fin data. New for the booster only: fin aerodynamics, the unpowered
+  descent law, its scenario and start attitude. Flight kinds are `earth`,
+  `mars` (ship) and `booster`; the page shows vehicle × planet.
+- Alternatives: a separate booster simulator and planner (duplicates about
+  2 000 lines that must stay in agreement).
+- Consequences: every shared change is tested on all three kinds; a few
+  rules are per-kind where the ship's tuned flights must not move (noted in
+  the code where they are).
+
+## D-018 — Three grid fins, not four
+- Date: 2026-11-15
+- Status: accepted
+- Context: the owner's brief said four grid fins. The current (Block 3)
+  vehicle has three in a 90/90/180° arrangement (Wikipedia, read
+  2026-11-15); Blocks 1 and 2 had four.
+- Decision: model the current vehicle: three fins at body +y, −y, +x.
+  Pitch from the ±y pair, yaw from the single fin, roll from all three;
+  cold-gas thrusters take what the fins cannot give.
+
+## D-019 — The booster's burn is planned without crossflow drag and within 15° of vertical
+- Date: 2026-11-15
+- Status: accepted
+- Context: with the full aerodynamic model the fuel-optimal 13-engine burn
+  turned the booster broadside at 400 m/s to brake on air drag (cheap on
+  paper). Forbidding that with a tilt limit left two mirror-image optima
+  (leaning either way earns the same drag) and successive convexification
+  hopped between them without converging.
+- Decision: a soft 15° tilt limit on the booster's plans, and the planner's
+  copy of the model has no crossflow drag (the linear lift term stays). The
+  tracking controller absorbs the difference.
+- Consequences: plans converge in 3–5 iterations. A sideways divert of more
+  than about 150 m during the 13-engine burn is refused as infeasible.
+
+## D-020 — Ignition altitude from integrating the fall, not from the present speed
+- Date: 2026-11-15
+- Status: accepted
+- Context: "stop from the present speed at 70 % thrust" lit the booster's
+  engines 12 km up from a 45 km start (it was falling three times faster
+  than it would be once the air had slowed it), and lit the ship's at once
+  on a fast entry.
+- Decision: booster: integrate the fall with drag downward and the stopping
+  burn (thrust plus drag) upward from the gate, in 1-D; light where they
+  meet. Ship: take the later of the old rule and the same rule applied to
+  the speed the fall predicts (on Mars the fall speeds up, so the old rule
+  wins and its tuned flights are unchanged).
+- Consequences: the ship flies a steep entry from 80 km at 2.5 km/s to the
+  catch; booster starts above about 20 km still fail (LIMITATIONS.md).
+
+## D-021 — Solve latency: warm-up, steady burn, predict the first plan only
+- Date: 2026-11-16
+- Status: accepted
+- Context: in the browser the first solve took 1.4 s (cold WebAssembly);
+  the booster's 13-engine leg lasts 9 s at 4 g. Braking flat out while
+  waiting left the booster stopped a kilometre up with a plan that no
+  longer fitted.
+- Decision: each worker solves one throw-away plan when it starts; while
+  waiting for its first plan the booster burns steadily at 60 %; the first
+  plan is solved from the state predicted for the expected solve time
+  (which the page measures and reports) and stamped with that time; an
+  option the final engines plainly cannot fly is not solved.
+- Alternatives: predicting every re-plan along the current plan (tried: each
+  re-plan then fought the last and the booster hit the tower).
+- Consequences: caught with solves up to 0.5 s of sim time at frame steps up
+  to 0.2 s (native sweep, LIMITATIONS.md).
+
+## D-022 — The launch and staging are an illustration; the simulation is the return
+- Date: 2026-11-16
+- Status: accepted
+- Context: the page showed the stack on the pad and then, on Fly, a booster
+  already falling. A simulated ascent, hot staging and boostback is a later
+  roadmap item.
+- Decision: an opening sequence timed by hand (countdown, liftoff, stage
+  separation at 64 km, title card) with a caption that says it is an
+  illustration; cuts fade through black; the simulated flight starts behind
+  the title card. After a booster catch the visitor may fly the ship's
+  return (the booster is then shown parked) or end.
+- Consequences: nothing in the sequence is physics; it must be replaced
+  when the ascent is simulated.
+
+## D-023 — Commentary from a fixed phrase list, rendered once by a neural voice
+- Date: 2026-11-16
+- Status: accepted
+- Context: the browser's built-in speech voices sounded robotic (owner).
+- Decision: every line comes from a finite list (`phrases.ts`); each is
+  rendered once to an MP3 clip by Kokoro-82M (Apache-2.0, run locally with
+  `kokoro-js`; `web/scripts/make-voice.mjs`) and played back instantly; the
+  browser voice is the fallback for a missing clip. The clips are generated
+  output, committed under `web/public/voice/`; the model and tools are not
+  dependencies of the site.
+- Alternatives: an in-browser neural model (tens of MB to download and
+  seconds per line: too slow for live calls); a cloud voice (network, keys).
+- Consequences: a new line needs the script run again; a test checks every
+  line the commentary can produce is in the list.
+
+## D-024 — Sound is synthesized and mixed for the camera
+- Date: 2026-11-16
+- Status: accepted
+- Decision: engine roar, crackle, rumble and airflow are generated with Web
+  Audio (filtered noise and low oscillators); `mix()` turns thrust, distance,
+  dynamic pressure and air density into gains, a low-pass cutoff and a
+  travel delay (distance / 343 m/s); onboard is structure-borne (deep, no
+  delay). Sonic boom, catch and loss are one-off sounds, delayed likewise.
+- Consequences: no audio assets; levels and timbre are by ear, not
+  measured (LIMITATIONS.md).
+

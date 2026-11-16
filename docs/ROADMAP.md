@@ -52,13 +52,30 @@ Goal: the demo that spreads.
 - [x] Panels: fuel, thrust, constraint margins, solve time
 - [x] `learn/` chapter for M2 (local only)
 
-## M3 — 6-DoF and flight-style solver
+## M3 — 6-DoF vehicles and flight-style solver
 
-- [ ] 6-DoF rigid body with aerodynamics
-- [ ] Successive convexification (Szmuk & Açıkmeşe 2018)
+Goal (owner, 2026-11-15): a Starship-class simulation, as realistic as a
+simulation can be, on one page with a mission-control interface.
+
+- [x] 6-DoF rigid body with aerodynamics (`kestrel-model`, `sim::ship`)
+- [x] Successive convexification (Szmuk & Açıkmeşe 2018) for the landing burn
+- [x] Ship: belly flop, flip, tower catch (Earth) and legs (Mars)
+- [x] Booster: grid-fin descent, 13 → 3 engine landing burn, tower catch
+- [x] Ship: steep fast entry start (80 km, 2.5 km/s) flies to the catch
+- [x] One page: vehicle, planet, start, engines, failures, wind, noise, lag,
+      speed, cameras, physics options
+- [x] Console redesign: telemetry rail, engine map, timeline, phone layout
+- [x] Opening sequence (countdown, liftoff, stage separation, title card):
+      an **illustration**, not simulated
+- [x] After a booster catch, fly the ship's return to the same tower
+- [x] Pause anywhere; analysis view (forces, plan, equations, graphs)
+- [x] Commentary (rendered clips) and camera-aware procedural sound
+- [ ] Simulated ascent, hot staging and boostback (the full mission)
+- [ ] Orbital entry (round planet, heating that matters)
 - [ ] Custom solver: no heap allocation in the loop, bounded iterations
 - [ ] Published benchmark of solve times (method stated)
-- [ ] `learn/` chapter for M3
+- [ ] Update the end-to-end tests and the demo recording for the new page
+- [~] `learn/` chapter for M3 (local only)
 
 ## Change log
 
@@ -70,3 +87,8 @@ Goal: the demo that spreads.
 - 2026-11-14 — M2 done: closed loop with a separate simulator, noisy sensing,
   warm-started re-planning, tracking controller, closest-landing fallback,
   "break it" controls and live margins.
+- 2026-11-15 — M3: 6-DoF ship (belly flop, flip, tower catch, Mars legs) with
+  successive convexification; the M2 booster page removed.
+- 2026-11-16 — M3: Super Heavy-class booster (grid fins, 13 → 3 engines,
+  tower catch); one-page console with full customization, launch and
+  staging sequence (illustration), analysis view, commentary and sound.

@@ -171,8 +171,88 @@ Per re-plan (worker, `guidance::replan` via `flight::plan`): margined problem
 else the full search; else (or if outside the glide cone) the closest landing;
 retried at full thrust if that is what it takes.
 
+## The 6-DoF vehicles and the console (built, M3)
+
+Specs: `docs/superpowers/specs/2026-11-15-m3-ship-design.md` (ship) and
+`2026-11-15-m3-booster-and-console-design.md` (booster, page).
+The page no longer uses the 3-DoF pieces above (`Flight`, `replan`,
+`components/scene`, `components/hud` except the error fallback and the
+Mars terrain); they remain, tested, as the earlier milestones' code.
+
+```text
+crates/model      what truth and guidance must agree on (no dependencies)
+  vehicle.rs   Ship (one struct, two vehicles: VehicleKind::Ship / Booster), GridFins,
+               Planet, Catch, Scenario::{earth, mars, booster}, Tuning (physics options)
+  aero.rs      body force: crossflow drag + linear lift slope; flap_force (ship);
+               fin_gain / fin_force / fin_allocate (booster's three grid fins)
+  dynamics.rs  x' = f(x, T): state [m, r, v, q, w] (14), thrust at the gimbal point
+  quat.rs      quaternion algebra
+crates/sim
+  ship.rs      ShipSim: RK4 in 10 ms substeps; flaps or fins (slew, clamp); RCS; steady
+               wind + gusts; contact with mast, arms, ground; Outcome (caught/landed/crashed)
+  raptors.rs   Cluster: N landing engines (ship 3; booster 13, centre three first),
+               ignition delay, shared gimbal with slew, lag, shutdown, fail(i)
+crates/guidance
+  scvx/        successive convexification: discretize.rs (first-order hold, sensitivities
+               by RK4, finite-difference Jacobians), subproblem.rs (Clarabel SOCP with
+               virtual control, trust region, soft comfort constraints), mod.rs (iteration,
+               cold/warm references, acceptance by re-integration)
+  ship_control.rs  belly_flop (ship) / descent (booster) -> unpowered(); flip; steady_burn;
+               powered (plan tracking); terminal; ignition_altitude; fall_time
+crates/wasm
+  ship_flight.rs  ShipFlight: phases (unpowered -> flip/start-up -> burn legs -> terminal),
+               legs (full engine set to a mid gate, final engines to the approach gate),
+               when to re-plan, prediction of the booster's first plan, options
+  ship_js.rs   JS class ShipFlight; plan_ship / preview_ship (worker); ship_scenario;
+               warmup_ship; snapshot (state, forces, heating estimate, engines)
+  tests/ship_loop.rs  the page's loop natively: nominal, engine out, gusts, slow solver,
+               and an ignored sweep over browser timing conditions
+web/src/lib/ship
+  store.ts     zustand: vehicle x planet -> flight kind, start, options, view, mode
+               (editing -> launch -> flying -> done), presets, configOf() for Rust
+  runtime.ts   owns the ShipFlight; steps it per frame (not while paused or held);
+               schedules plans; publishes to live.ts; reports solve times to the flight
+  live.ts      per-frame snapshot, trail, plan, history samples, caption, hold flag
+  commentary.ts callouts(prev, next) -> lines; Commentator plays clips (fallback: speech)
+  phrases.ts   the finite list of lines and their clip ids
+  audio.ts     mix(hearing) -> gains, cutoff, delay; FlightAudio (Web Audio graph)
+  launch.ts    timing of the opening sequence (illustration)
+  engines.ts, frames.ts, types.ts
+web/src/components/stage    R3F scene
+  Stage, World (sky by camera altitude, clouds, painted coast, tower, haze), Site (launch
+  site), Vehicles (ship and booster models, plumes, heat shell), Vehicle (flown vehicle,
+  full stack and its launch/staging animation, parked booster), Fx (smoke, paths),
+  Cameras (director, chase, tracking, onboard, tower, free, launch), Analysis (vectors,
+  cone, plan nodes, labels), Post (bloom, tone mapping, blueprint transition), Sound
+web/src/components/console  DOM overlay
+  Console (top bar, timeline, action bar, caption, verdict, keys), Dock (Mission, Vehicle,
+  Environment, View), Telemetry (rail, attitude ball, engine map, graphs), AnalysisPanel,
+  Launch (opening overlay, phase banner, analysis intro), useEngine (workers, preview)
+web/scripts/make-voice.mjs  renders phrases.ts to public/voice/*.mp3 (dev tool)
+```
+
+Per frame while flying (`Stage` -> `runtime.shipFrame`): step the flight
+(`min(dt, 0.1 s) x speed`; each 10 ms substep reads the sensors, runs the
+phase's controller, steps the truth); if the flight wants a plan and none is
+being solved, `measure_request()` -> flight worker `plan_ship` ->
+`apply_replan(answer, t)`; snapshot -> `live`, callouts, history, store
+patches when something discrete changed.
+
+Two workers: one answers the flight's plan requests, the other flies whole
+flights ahead of time for the prediction shown while editing, so a slow
+prediction never delays a plan. Each solves one throw-away plan when it
+starts (`warmup_ship`): the first solve in a fresh instance is several times
+slower than the rest.
+
+Modes: `editing` (stack on the mount, prediction) -> `launch` (opening
+sequence; the flight starts 1.6 s into the title card and is held until the
+card clears) -> `flying` -> `done` (after a booster catch: continue with the
+ship, the booster parked beside the pad, or end).
+
 ## Open questions
 
 - Firefox solve time (Chromium measured: ~244 ms with a GPU).
+- M3: solve times of the 6-DoF planner are not benchmarked yet (only spot
+  readings, LIMITATIONS.md); the new page has no end-to-end test yet.
 - Lossless convexification is not guaranteed when the ground constraint is
   active (closest landings near the ground); such landing times are skipped.

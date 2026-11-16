@@ -8,10 +8,77 @@ approximate. Update it whenever a milestone lands.
 
 - **Simulation only.** Not flight software. No flight hardware, no
   hardware-in-the-loop testing, no certification, no safety case.
-- **No real vehicle data.** Vehicle parameters are illustrative, loosely in the
-  range of published examples, not taken from any real booster.
+- **No real vehicle data.** The M3 vehicles use published outer figures
+  (height, diameter, engine count and thrust, specific impulse, throttle
+  range, empty mass, number of grid fins) from public sources, cited in
+  `docs/superpowers/specs/`. Everything else (aerodynamic coefficients,
+  centre of mass, inertia, gimbal range, landing propellant, fin size,
+  catch geometry, tower dimensions) is not published and is *illustrative*:
+  chosen to be plausible. The page marks each number one way or the other.
+  The models are generic "Starship-class" shapes, not anyone's design.
 
-## Current state (M2 done)
+## Current state (M3: ship, booster and the one-page console)
+
+What is simulated, and what is only shown:
+
+- **Simulated:** the return of one vehicle at a time, from a chosen start
+  in the air to the catch, landing or loss. The start is a state the page
+  sets (altitude, position, velocity), not the end of a simulated ascent.
+- **Not simulated: the launch, ascent, stage separation and boostback.**
+  The opening sequence (countdown, liftoff, the stages parting at 64 km,
+  the title card) is an illustration timed by hand. The screen says so
+  while it plays.
+- **Not simulated: orbital entry.** The ship's "Entry" start is a steep
+  fall from 80 km at 2.5 km/s (about Mach 7), not an entry from orbit
+  (7.8 km/s, a shallow path over thousands of kilometres on a round
+  planet). In the dense air it decelerates far harder than a real vehicle
+  or crew could take; nothing limits it.
+- **Heating is an estimate for the picture only.** The glow and the
+  "Heating" readout use the Sutton–Graves stagnation-point formula with a
+  4.5 m nose radius. Heat does nothing to the vehicle. In every start the
+  page offers it stays below about 0.15 MW/m² (a real orbital entry is in
+  the MW/m² range).
+- **Flat ground, constant gravity, exponential atmosphere, no Mach
+  effects.** The booster starts supersonic and the ship's entry start
+  hypersonic with the same drag coefficients as at low speed. No plume–air
+  interaction during the burn.
+- **Aerodynamics are a simple model**: crossflow drag of a cylinder, a
+  linear lift slope for the booster (slender-body value), flaps as drag
+  plates, grid fins as a force proportional to deflection. Not wind-tunnel
+  or flight data.
+- **Engines share one gimbal direction and throttle**, act on the axis and
+  have no start-up transient beyond a fixed delay. A failed engine removes
+  its thrust but creates no off-axis torque. Failures are known to guidance
+  at once. Shut-down engines do not relight.
+- **The booster ends its final approach on two engines** when too light to
+  hover on three at minimum throttle (a rule of this simulation).
+- **The final approach is slow.** The terminal controller takes about 25 s
+  to slide over the axis and settle; real catches are far quicker. It costs
+  propellant: the booster's nominal flight ends with about 15 t of 120 t.
+- **The tower's arms do not move to meet the vehicle** (they close when it
+  is within reach); "caught" is a test of position, speed, tilt and rate at
+  arm height, not contact dynamics.
+- **Wind** is the same at every height; a gust is a 4 s trapezoid. The
+  planner knows neither.
+- **Start envelope.** Booster: caught from 6–20 km at 300–600 m/s in the
+  starts tried; from 25 km and above it reaches the tower area but the
+  burn's plan fails and it runs out of propellant. A sideways divert of
+  more than about 150 m during the 13-engine burn is refused. Ship: caught
+  from 5, 25, 45 and 80 km (single runs each). The prediction shown before
+  a flight says whether a chosen start works.
+- **Sound** is synthesized (filtered noise and low oscillators) and mixed
+  by rules chosen by ear: distance attenuation, a low-pass that tightens
+  with distance, a delay of distance / 343 m/s. Levels are not physical.
+- **Commentary** lines are triggered by simulated events; the voice is a
+  text-to-speech model's (D-023), pre-rendered.
+- **Shake, smoke, plume shapes, clouds, sky colours and the "blueprint"
+  look** are visual only.
+- **Mars:** ship only; 160 t of cargo is assumed so one engine can hover.
+- The page has no end-to-end test yet (the old Playwright tests drove the
+  M2 page and no longer apply); it was checked by hand and with scripted
+  headless runs.
+
+## The earlier 3-DoF page (M0–M2; code kept, no longer served)
 
 - **The flight is simulated.** A point-mass simulator (RK4,
   10 ms) flies the vehicle; guidance sees only sensor readings and re-plans
@@ -202,6 +269,64 @@ noise level: not a statistical claim about other conditions.
 Not measured: noise combined with lag and failures over many seeds; any
 start other than the example; speeds ×2 and ×4, where the worker's solve
 time counts ×2 or ×4 in sim time, so guidance effectively reacts later.
+
+### Ship and booster closed loop (M3)
+
+**Native scenarios** (`cargo test -p kestrel-wasm --test ship_loop --
+--nocapture`, seed 7, low noise, 0.3 s throttle lag, solve latency modelled
+as 0.5 s of sim time; test profile is optimized). Read on 2026-11-16:
+
+| Scenario | Outcome | Flight time | Propellant used | Plans / failed |
+| --- | --- | --- | --- | --- |
+| Booster, default start (14 km, 420 m/s) | caught | 85.3 s | 104.5 of 120 t | 15 / 0 |
+| Booster, a centre engine out at ignition | caught | 86.1 s | 105.4 t | 15 / 0 |
+| Booster, gusts at 8 s and 20 s | caught | 85.3 s | 104.5 t | 15 / 0 |
+| Booster, every solve taking 1.0 s | caught | 81.6 s | 102.6 t | — |
+| Ship, Earth default (5 km) | caught | 98.8 s | 25.7 of 40 t | 11 / 0 |
+| Ship, Earth, engine out at ignition | caught | 101.6 s | 26.7 t | 12 / 0 |
+| Ship, Earth, gusts in the belly flop | caught | 105.7 s | 27.7 t | 10 / 3 |
+| Ship, Mars default | landed | 106.5 s | 86.8 of 100 t | 30 / 0 |
+
+Single runs of other starts (`start_probe`, `--ignored`): ship from 25 km
+caught (207 s, 12.7 t left), from 45 km caught (245 s, 6.9 t left), from
+80 km at 2.5 km/s caught (204 s, 12.3 t left; top speed 2 553 m/s).
+Booster from 20 km at 550 m/s caught (8.3 t left), from 6 km caught
+(17.2 t left), from 10 km on the tower side caught (11.7 t left); from
+16 km starting 1.4 km out with 50 m/s of drift: out of propellant; from
+25, 30, 45, 60 and 70 km: out of propellant.
+
+**Sensitivity to solve time and frame rate** (`booster_browser_sweep`,
+`--ignored`): booster default start, three seeds per row.
+
+| Solve latency | Reported solve time | Sim step per frame | Caught |
+| --- | --- | --- | --- |
+| 0.1 s | 0.15 s | 1/60 s | 3 / 3 |
+| 0.25–0.3 s | 0.3 s | 1/60, 1/15, 0.1, 0.2 s | 12 / 12 |
+| 0.5 s | 0 (no prediction) | 1/60 s | 3 / 3 |
+| 0.5 s | 0.5–0.55 s | 1/60, 1/15, 0.133, 0.2 s | 12 / 12 |
+| 1.0 s | 1.0 s | 1/60 s | 3 / 3 (one with 7 t left) |
+| 0.8 s | 0.85 s | 1/15 s | 1 / 3 (two hit the tower) |
+
+One start, one noise level, three seeds: not a statistical claim.
+
+**In the browser** (headless Chromium via Playwright with the real GPU,
+dev build, this laptop, other work running; scripted flights with the
+opening sequence skipped; 2026-11-16):
+
+- Booster default start: caught at ×1 (81.3 s) and ×2 (86.0 s); solve times
+  shown by the page 64–70 ms after the worker's warm-up solve. Before the
+  warm-up existed the first solve took 1 407 ms and the flight hit the tower.
+- Ship, Earth default at ×2: caught (100.5 s; last solve 89 ms).
+- Ship, Mars default at ×2: **out of propellant** hovering 4 m above the
+  ground, in a run where solves took 0.5–3 s (the voice clips were being
+  rendered on the same machine). Not re-run on an idle machine yet; treat
+  Mars at ×2 and above as unreliable.
+- At ×4, with the same load, the Earth ship also ran out of propellant
+  (solves of 1–1.7 s are 4–7 s of sim time).
+
+Not measured: a benchmark of 6-DoF solve times; Firefox or Safari; phones
+(the layout was checked at phone width only as a screenshot); frame rates;
+any Monte Carlo of the M3 flights; noise "high" with the booster.
 
 ### Comparison with Malyuta et al. (arXiv:2106.09125, eq. 108, Fig. 21)
 
