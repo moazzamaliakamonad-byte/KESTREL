@@ -56,28 +56,33 @@ const MAX_CORRECTION: f64 = 0.139_626_340_159_546_36;
 /// Feedback acceleration caps, as fractions of g: sideways and vertical.
 const LATERAL_CAP: f64 = 0.2;
 const VERTICAL_CAP: f64 = 0.5;
-/// Translation gains in the terminal descent.
-pub const KP_TERMINAL: f64 = 0.12;
+/// Velocity-loop gain in the terminal descent, 1/s.
 pub const KD_TERMINAL: f64 = 0.7;
-/// Largest sideways acceleration in the terminal phase, m/s² (absolute: a
-/// share of g was far too weak in Mars gravity).
+/// Largest sideways acceleration in the terminal phase, m/s².
 pub const LATERAL_ACCEL: f64 = 0.4;
 /// …and the booster's when slowing its slide, m/s².
 pub const BRAKE_ACCEL: f64 = 1.2;
 /// Largest sideways speed in the terminal phase, m/s.
-pub const SLIDE: f64 = 4.0;
+pub const SLIDE: f64 = 3.0;
+/// …and per metre from the axis close in, 1/s.
+pub const SLIDE_GAIN: f64 = 0.2;
+/// Far from the axis the slide is as fast as this braking (m/s²) can
+/// still stop at the edge of the centred zone.
+pub const FAR_BRAKE: f64 = 0.3;
 /// Above this height over the rest position the terminal phase sinks fast
 /// (up to FAST_SINK, m/s); below it only once centred, at SINK, m.
-pub const FINAL_HEIGHT: f64 = 8.0;
+pub const FINAL_HEIGHT: f64 = 5.0;
 /// Above this height over the rest position the descent is as fast as can
 /// be stopped (up to HIGH_SINK, m/s), m.
 pub const HIGH: f64 = 100.0;
 pub const HIGH_SINK: f64 = 60.0;
-/// Below this height the fast descent continues only near the axis, m.
-pub const APPROACH_HEIGHT: f64 = 20.0;
 pub const FAST_SINK: f64 = 5.0;
+/// Sink rate per metre above FINAL_HEIGHT while sliding in, and per metre
+/// above the rest position once centred, 1/s.
+pub const APPROACH_GAIN: f64 = 0.5;
+pub const SETTLE_GAIN: f64 = 0.3;
 /// Terminal sink rate, m/s.
-pub const SINK: f64 = 1.0;
+pub const SINK: f64 = 1.3;
 
 /// Largest lean of the booster's axis from the airflow in the descent,
 /// rad (8°): the single yaw fin can still hold it there.
@@ -340,7 +345,7 @@ fn translation_gain(scn: &Scenario, x: &State, thrust: f64) -> f64 {
 const NMP_REFERENCE: f64 = 1.6;
 
 /// Attitude-loop bandwidth the gimbal can actually give at thrust `tz`,
-/// rad/s: a heavy ship on one engine (Mars) saturates a fixed-gain loop and
+/// rad/s: a heavy vehicle on few engines saturates a fixed-gain loop and
 /// wobbles.
 fn bandwidth(scn: &Scenario, x: &State, tz: f64) -> f64 {
     let j = scn.ship.inertia(x[M]);
@@ -388,33 +393,31 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
         // of the spare thrust, not at a crawl that empties the tanks.
         let spare = (limits.1 / m - g).max(0.5);
         (2.0 * 0.33 * spare * (h - HIGH)).sqrt().clamp(FAST_SINK, HIGH_SINK)
-    } else if h > APPROACH_HEIGHT || (h > FINAL_HEIGHT && off < 3.0 * scn.centring) {
-        (0.1 * h).clamp(SINK, FAST_SINK)
-    } else if h > FINAL_HEIGHT {
-        0.0
+    } else if off < scn.centring && side <= scn.settle_side_speed {
+        // Centred and steady: straight down onto the arms, slowing to
+        // SINK at contact (the catch allows 2 m/s).
+        (SETTLE_GAIN * h + SINK).clamp(SINK, FAST_SINK)
     } else {
-        // Full sink rate when centred, a slow one when nearly so, a hover
-        // when far off (a hard centred-and-still test hovered for ages).
-        // Never sink onto the arms or legs while still sliding.
-        if side > scn.settle_side_speed {
-            0.0
-        } else if off < scn.centring {
-            SINK
-        } else if off < 2.0 * scn.centring {
-            0.3 * SINK
-        } else {
-            0.0
-        }
+        // Still sliding in: come down to FINAL_HEIGHT meanwhile and wait
+        // there (hovering high until centred took half a minute). Nearly
+        // centred, keep creeping down rather than hover.
+        let creep = if off < 2.0 * scn.centring && side <= scn.settle_side_speed { 0.3 * SINK } else { 0.0 };
+        (APPROACH_GAIN * (h - FINAL_HEIGHT)).clamp(creep, FAST_SINK)
     };
     // The sideways loop runs through the attitude loop: slow it down with
-    // it, or it circles the axis (seen on Mars).
+    // it, or it circles the axis.
     let k = (bandwidth(scn, x, m * g) / WN).min(translation_gain(scn, x, m * g));
     let kd = KD_TERMINAL * k;
-    // Velocity command toward the axis, at most SLIDE m/s.
-    let mut want = [-KP_TERMINAL / KD_TERMINAL * k * r[0], -KP_TERMINAL / KD_TERMINAL * k * r[1]];
-    // Close enough: only damp the slide, don't keep chasing the exact
-    // axis (that position loop circled the pad on Mars).
-    if off < scn.centring {
+    // Velocity command toward the axis, at most SLIDE m/s. The gain is
+    // low on purpose: steering sideways goes through the attitude loop,
+    // and a stiffer law (a square-root braking curve was tried) weaves
+    // across the axis.
+    let gain = SLIDE_GAIN * k;
+    let far = (2.0 * FAR_BRAKE * (off - scn.centring).max(0.0)).sqrt();
+    let speed = (gain * off).max(far);
+    let mut want = if off > 1e-6 { [-speed * r[0] / off, -speed * r[1] / off] } else { [0.0, 0.0] };
+    // Close enough: only damp the slide, don't keep chasing the exact axis.
+    if off < 0.5 * scn.centring {
         want = [0.0, 0.0];
     }
     let n = want[0].hypot(want[1]);
@@ -495,7 +498,7 @@ pub fn ignition_altitude(scn: &Scenario, x: &State, max_thrust: f64) -> f64 {
         // A steep, fast entry is faster than it could stop from: the air
         // will slow it first. So also judge by the speed the fall predicts
         // (belly-first drag), and take the later of the two. Where the
-        // air is thin and the fall speeds up (Mars), the simple rule wins.
+        // air is thin and the fall speeds up, the simple rule wins.
         let drag = quat::norm(aero::body_force(&scn.ship, 1.0, belly_attitude(0.0), [0.0, 0.0, -1.0]).0);
         let step = ((z0 - scn.gate[2]) / 200.0).max(5.0);
         let (mut z, mut v2) = (z0, vz * vz);
@@ -661,28 +664,31 @@ mod tests {
     }
 
     #[test]
-    fn terminal_slides_in_then_settles_slowly() {
+    fn terminal_slides_in_and_settles() {
         let scn = Scenario::earth();
         let rest = scn.rest_cm_z();
-        // 30 m above the arms' catch position, 6 m out.
-        let x0 = dynamics::state(110e3, [6.0, 0.0, rest + 30.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0, 0.0], [0.0; 3]);
-        let x = fly(&scn, x0, 20.0, |x| terminal(&scn, x, (0.98e6, 2.45e6)));
+        // 14 m above the caught position, 8 m out (about where the plan ends).
+        let x0 = dynamics::state(110e3, [8.0, 0.0, rest + 14.0], [-2.0, 0.0, -2.0], [1.0, 0.0, 0.0, 0.0], [0.0; 3]);
+        // Within 12 s it is over the arms' rails, upright, and going down
+        // at a speed the catch allows (it used to hover for half a minute).
+        let mut x = x0;
+        let mut t = 0.0;
+        while x[R + 2] > rest && t < 12.0 {
+            x = fly(&scn, x, 0.1, |x| terminal(&scn, x, (0.98e6, 2.45e6)));
+            t += 0.1;
+        }
         let off = x[R].hypot(x[R + 1]);
-        assert!(off < 1.0, "off axis by {off}");
-        assert!(x[R + 2] < rest + 8.0 && x[R + 2] > rest, "z {}", x[R + 2]);
-        assert!(quat::tilt(dynamics::attitude(&x)).to_degrees() < 2.0);
-        assert!((x[V + 2] + SINK).abs() < 0.3, "sinking at {}", x[V + 2]);
-        let _ = W;
+        assert!(t < 12.0, "still {} m up after {t} s", x[R + 2] - rest);
+        assert!(off < scn.centring, "off axis by {off}");
+        assert!(-x[V + 2] < 2.0 && x[V].hypot(x[V + 1]) < 1.0, "arriving at {:?}", dynamics::velocity(&x));
+        assert!(quat::tilt(dynamics::attitude(&x)).to_degrees() < 3.0);
+        let _ = (W, SINK);
     }
 
     #[test]
-    fn ignition_altitude_earth_floor_and_mars_physics() {
+    fn ignition_altitude_earth_floor() {
         let e = Scenario::earth();
         let x = dynamics::state(e.start_mass, [0.0, 0.0, 3000.0], [0.0, 0.0, -90.0], belly_attitude(0.0), [0.0; 3]);
         assert_eq!(ignition_altitude(&e, &x, 7.35e6), e.ignition_floor);
-        let m = Scenario::mars();
-        let x = dynamics::state(m.start_mass, [0.0, 0.0, 12000.0], [0.0, 0.0, -450.0], belly_attitude(0.0), [0.0; 3]);
-        let z = ignition_altitude(&m, &x, 7.35e6);
-        assert!((5000.0..14000.0).contains(&z), "{z}");
     }
 }

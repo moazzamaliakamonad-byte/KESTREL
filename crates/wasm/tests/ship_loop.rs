@@ -126,12 +126,6 @@ fn earth_nominal_is_caught() {
 }
 
 #[test]
-fn mars_nominal_lands() {
-    let r = fly(Kind::Mars, Noise::LOW, 0.3, &[], &[]);
-    assert_eq!(r.outcome, Some(Outcome::Landed));
-}
-
-#[test]
 fn earth_engine_out_at_ignition_is_caught() {
     let r = fly(Kind::Earth, Noise::LOW, 0.3, &[], &[Event::EngineOut]);
     assert_eq!(r.outcome, Some(Outcome::Caught));
@@ -261,12 +255,6 @@ fn trace_earth() {
     trace(Kind::Earth);
 }
 
-#[test]
-#[ignore]
-fn trace_mars() {
-    trace(Kind::Mars);
-}
-
 fn trace(kind: Kind) {
     use model::quat;
     let noise = match std::env::var("TRACE_NOISE").as_deref() {
@@ -274,7 +262,8 @@ fn trace(kind: Kind) {
         Ok("high") => Noise::HIGH,
         _ => Noise::OFF,
     };
-    let mut f = ShipFlight::new(ShipFlightConfig { seed: 7, lag: 0.3, noise, ..ShipFlightConfig::new(kind) }).unwrap();
+    let seed = std::env::var("TRACE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(7);
+    let mut f = ShipFlight::new(ShipFlightConfig { seed, lag: 0.3, noise, ..ShipFlightConfig::new(kind) }).unwrap();
     let mut next_print = 0.0;
     let mut last_request = f64::NEG_INFINITY;
     let mut pending: Option<Pending> = None;

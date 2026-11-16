@@ -123,10 +123,4 @@ mod tests {
         assert!(d[W + 1] < 0.0, "{:?}", &d[W..]);
     }
 
-    #[test]
-    fn free_fall_in_vacuum_of_mars_high_up() {
-        let s = Scenario::mars();
-        let d = f(&s, &upright(300e3, 200_000.0), [0.0; 3], &Extra::default());
-        assert!((d[V + 2] + 3.721).abs() < 1e-3);
-    }
 }

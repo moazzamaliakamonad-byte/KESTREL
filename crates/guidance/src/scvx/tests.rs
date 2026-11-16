@@ -17,17 +17,6 @@ fn earth_flip_problem(z: f64, vz: f64) -> ShipProblem {
     p
 }
 
-fn mars_problem() -> ShipProblem {
-    let scn = Scenario::mars();
-    let m = scn.start_mass;
-    let x0 = dynamics::state(m, [400.0, 0.0, 9000.0], [-20.0, 0.0, -480.0], belly_down(), [0.0; 3]);
-    let lim = scn.ship.thrust_limits(3);
-    let mut p = ShipProblem::new(scn, x0, lim);
-    p.late_limits = Some(p.scn.ship.thrust_limits(1));
-    p.switch_node = (p.scn.switch_fraction * (p.nodes - 1) as f64).round() as usize;
-    p
-}
-
 fn check_limits(p: &ShipProblem, plan: &ShipPlan) {
     let tan = p.scn.ship.gimbal_max.tan();
     for (k, (x, u)) in plan.x.iter().zip(&plan.u).enumerate() {
@@ -66,24 +55,6 @@ fn earth_flip_converges() {
     assert!(plan.converged, "not converged in {} iterations", plan.iterations);
     assert!(plan.defect < 1e-3);
     assert!(plan.gate_error < 1.0);
-    assert!(ends_upright(&plan) < 3.0);
-    check_limits(&p, &plan);
-}
-
-#[test]
-fn mars_burn_converges() {
-    let p = mars_problem();
-    let plan = plan_ship(&p, None, COLD_ITERATIONS).expect("plan");
-    eprintln!(
-        "mars: {} it, tf {:.1} s, defect {:.2e}, gate err {:.2} m, fuel {:.0} kg",
-        plan.iterations,
-        plan.final_time,
-        plan.defect,
-        plan.gate_error,
-        p.x0[M] - plan.x.last().unwrap()[M]
-    );
-    assert!(plan.converged);
-    assert!(plan.gate_error < 10.0);
     assert!(ends_upright(&plan) < 3.0);
     check_limits(&p, &plan);
 }

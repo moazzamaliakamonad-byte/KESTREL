@@ -15,8 +15,8 @@
 //!    approach gate if they can stop in time, else on every lit engine
 //!    (ship 3, booster 13) to an intermediate gate higher up, then on the
 //!    final engines to the approach gate.
-//! 4. **Terminal**: slide over the catch axis / pad and settle onto the arms
-//!    or the legs.
+//! 4. **Terminal**: slide in over the catch axis while descending, then
+//!    settle onto the arms.
 //!
 //! Simulation only.
 
@@ -25,7 +25,7 @@ use guidance::scvx::{self, ShipPlan, ShipProblem};
 use guidance::ship_control::{self, Actuation};
 use model::dynamics::{self, M, R, State, V};
 use model::quat::{self, Vec3};
-use model::{Planet, Scenario, Tuning, VehicleKind};
+use model::{Scenario, Tuning, VehicleKind};
 use sim::ship::{Command, SUBSTEP, ShipSim, WindGust};
 use sim::sensor::{Measurement, Noise, Sensor};
 use sim::{Rng, Truth};
@@ -100,8 +100,6 @@ impl Phase {
 pub enum Kind {
     /// The ship back to the tower on Earth.
     Earth,
-    /// The ship onto its legs on Mars.
-    Mars,
     /// The booster back to the tower on Earth.
     Booster,
 }
@@ -110,7 +108,6 @@ impl Kind {
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
             "earth" => Some(Kind::Earth),
-            "mars" => Some(Kind::Mars),
             "booster" => Some(Kind::Booster),
             _ => None,
         }
@@ -118,14 +115,12 @@ impl Kind {
     pub fn as_str(self) -> &'static str {
         match self {
             Kind::Earth => "earth",
-            Kind::Mars => "mars",
             Kind::Booster => "booster",
         }
     }
     pub fn scenario(self) -> Scenario {
         match self {
             Kind::Earth => Scenario::earth(),
-            Kind::Mars => Scenario::mars(),
             Kind::Booster => Scenario::booster(),
         }
     }
@@ -133,7 +128,6 @@ impl Kind {
     pub fn default_start(self) -> (Vec3, Vec3) {
         match self {
             Kind::Earth => ([700.0, 0.0, 5000.0], [-25.0, 0.0, -75.0]),
-            Kind::Mars => ([1500.0, 0.0, 14_000.0], [-40.0, 0.0, -450.0]),
             Kind::Booster => ([900.0, 0.0, 14_000.0], [-30.0, 0.0, -420.0]),
         }
     }
@@ -419,9 +413,6 @@ impl ShipFlight {
                 let lead = -est[V + 2].min(0.0) * scn.ship.ignition_time;
                 if est[R + 2] <= self.ignition_z + lead {
                     self.sim.cluster.ignite_all();
-                    if scn.planet == Planet::Mars {
-                        self.sim.legs_down = true;
-                    }
                     self.phase = Phase::Flip;
                 }
                 ship_control::unpowered(&scn, &est, self.ignition_z)

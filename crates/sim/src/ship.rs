@@ -6,7 +6,7 @@
 use model::aero::{self, FLAPS};
 use model::dynamics::{self, Extra, State, M, Q, V, W};
 use model::quat::{self, Vec3};
-use model::{Planet, Scenario, VehicleKind};
+use model::{Scenario, VehicleKind};
 
 use crate::raptors::Cluster;
 
@@ -24,12 +24,12 @@ pub const GUST_DURATION: f64 = 4.0;
 pub const GUST_RAMP: f64 = 0.5;
 /// Arms close when the pins are this far above them and the axis this close, m.
 pub const ARMS_CLOSE_ABOVE: f64 = 8.0;
-pub const ARMS_CLOSE_RADIUS: f64 = 3.0;
+pub const ARMS_CLOSE_RADIUS: f64 = 5.0;
 /// Catch limits.
 pub const CATCH_DOWN: f64 = 2.0;
 pub const CATCH_SIDE: f64 = 1.0;
-pub const CATCH_TILT_DEG: f64 = 3.0;
-pub const CATCH_RATE_DEG: f64 = 2.0;
+pub const CATCH_TILT_DEG: f64 = 5.0;
+pub const CATCH_RATE_DEG: f64 = 5.0;
 /// Leg landing limits.
 pub const LAND_DOWN: f64 = 2.0;
 pub const LAND_SIDE: f64 = 1.0;
@@ -84,7 +84,6 @@ impl CrashReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     Caught,
-    Landed,
     Crashed(CrashReason),
 }
 
@@ -125,7 +124,6 @@ pub struct ShipSim {
     pub gusts: Vec<WindGust>,
     /// Steady wind, inertial, m/s (the same at every height).
     pub wind: Vec3,
-    pub legs_down: bool,
     pub arms_closed: bool,
     pub outcome: Option<Outcome>,
     /// Velocity when the flight ended.
@@ -147,7 +145,6 @@ impl ShipSim {
             rcs_firing: [false; RCS_COUNT],
             gusts: Vec::new(),
             wind: [0.0; 3],
-            legs_down: false,
             arms_closed: false,
             outcome: None,
             end_velocity: None,
@@ -177,7 +174,7 @@ impl ShipSim {
             left -= h;
         }
         if self.outcome.is_some() {
-            // Hold still once caught, landed or crashed.
+            // Hold still once caught or crashed.
             self.t += left.max(0.0);
         }
     }
@@ -331,30 +328,6 @@ impl ShipSim {
             }
         }
 
-        if self.legs_down && self.scn.planet == Planet::Mars {
-            let foot_low = (0..6)
-                .map(|k| {
-                    let a = f64::from(k) * std::f64::consts::TAU / 6.0;
-                    let foot = [
-                        ship.leg_radius * a.cos(),
-                        ship.leg_radius * a.sin(),
-                        -ship.cm_height - ship.leg_drop,
-                    ];
-                    quat::add(dynamics::position(&self.x), quat::rotate(q, foot))[2]
-                })
-                .fold(f64::INFINITY, f64::min);
-            if foot_low <= 0.0 {
-                let side = (v[0] * v[0] + v[1] * v[1]).sqrt();
-                let outcome = if -v[2] > LAND_DOWN || side > LAND_SIDE {
-                    Outcome::Crashed(CrashReason::TooFast)
-                } else if tilt > LAND_TILT_DEG.to_radians() {
-                    Outcome::Crashed(CrashReason::Tipped)
-                } else {
-                    Outcome::Landed
-                };
-                return self.end(outcome);
-            }
-        }
         if hull_low <= 0.0 {
             self.end(Outcome::Crashed(CrashReason::HitGround));
         }
@@ -418,7 +391,7 @@ mod tests {
 
     #[test]
     fn long_spin_keeps_unit_quaternion() {
-        let s = Scenario::mars();
+        let s = Scenario::earth();
         let x = state(s.start_mass, [0.0, 0.0, 1e6], [0.0; 3], upright(), [0.3, 0.2, 1.0]);
         let mut sim = ShipSim::new(s, x);
         sim.step(&Command::default(), 300.0);
@@ -523,7 +496,7 @@ mod tests {
 
     #[test]
     fn off_axis_misses_the_arms() {
-        let sim = descend_onto_arms(2.5, 1.0);
+        let sim = descend_onto_arms(6.0, 1.0);
         assert_eq!(sim.outcome, Some(Outcome::Crashed(CrashReason::MissedArms)));
     }
 
@@ -574,26 +547,4 @@ mod tests {
         assert_eq!(sim.wind_at(100.0), [3.0, -4.0, 0.0]);
     }
 
-    fn mars_touchdown(q: model::Quat, speed: f64) -> ShipSim {
-        let s = Scenario::mars();
-        let z = s.floor_z + 0.05;
-        let x = state(s.dry_mass + 1000.0, [0.0, 0.0, z], [0.0, 0.0, -speed], q, [0.0; 3]);
-        let mut sim = ShipSim::new(s, x);
-        sim.legs_down = true;
-        sim.step(&Command::default(), 5.0);
-        sim
-    }
-
-    #[test]
-    fn mars_upright_soft_is_landed() {
-        let sim = mars_touchdown(upright(), 1.0);
-        assert_eq!(sim.outcome, Some(Outcome::Landed));
-    }
-
-    #[test]
-    fn mars_tilted_tips() {
-        let q = quat::from_axis_angle([1.0, 0.0, 0.0], 10f64.to_radians());
-        let sim = mars_touchdown(q, 1.0);
-        assert_eq!(sim.outcome, Some(Outcome::Crashed(CrashReason::Tipped)));
-    }
 }

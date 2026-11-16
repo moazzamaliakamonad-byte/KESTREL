@@ -279,7 +279,6 @@ fn outcome_str(o: Option<Outcome>) -> (Value, Value) {
     match o {
         None => (Value::Null, Value::Null),
         Some(Outcome::Caught) => (json!("caught"), Value::Null),
-        Some(Outcome::Landed) => (json!("landed"), Value::Null),
         Some(Outcome::Crashed(r)) => (json!("crashed"), json!(r.as_str())),
     }
 }
@@ -355,7 +354,6 @@ pub fn ship_scenario(kind: &str) -> String {
     json!({
         "ok": true,
         "scenario": k.as_str(),
-        "planet": match s.planet { model::Planet::Earth => "earth", model::Planet::Mars => "mars" },
         "vehicle": vehicle_str(s.ship.kind),
         "propellant": s.start_mass - s.dry_mass,
         "aim": s.aim,
@@ -367,8 +365,6 @@ pub fn ship_scenario(kind: &str) -> String {
             "radius": s.ship.radius,
             "cm_height": s.ship.cm_height,
             "pin_height": s.ship.pin_height,
-            "leg_drop": s.ship.leg_drop,
-            "leg_radius": s.ship.leg_radius,
             "engine_max": s.ship.engine_max,
             "engines": s.ship.engine_count,
             "final_engines": s.ship.final_engines,
@@ -380,6 +376,33 @@ pub fn ship_scenario(kind: &str) -> String {
             "aft_station": s.ship.aft.station,
             "flap_y": s.ship.flap_y,
             "gimbal_max_deg": s.ship.gimbal_max.to_degrees(),
+        },
+        // The model's own coefficients, so the page can show each part's
+        // force with the same formula the simulator integrates.
+        "model": {
+            "c_a": s.ship.c_a,
+            "c_n": s.ship.c_n,
+            "c_n_alpha": s.ship.c_n_alpha,
+            "cp_offset": s.ship.cp_offset,
+            "c_flap": s.ship.c_flap,
+            "fore_area": s.ship.fore.area,
+            "aft_area": s.ship.aft.area,
+            "fin_area": s.ship.fins.map(|f| f.area),
+            "fin_c_delta": s.ship.fins.map(|f| f.c_delta),
+            "fin_radius": s.ship.fins.map(|f| f.radius),
+            "rcs_thrust": s.ship.rcs_thrust,
+            "rcs_fore": s.ship.rcs_fore,
+            "rcs_aft": s.ship.rcs_aft,
+            "inertia_per_kg": s.ship.inertia_per_kg,
+            "gimbal_rate_deg": s.ship.gimbal_rate.to_degrees(),
+            "ignition_time": s.ship.ignition_time,
+        },
+        "limits": {
+            "catch_down": sim::ship::CATCH_DOWN,
+            "catch_side": sim::ship::CATCH_SIDE,
+            "catch_tilt_deg": sim::ship::CATCH_TILT_DEG,
+            "catch_rate_deg": sim::ship::CATCH_RATE_DEG,
+            "arms_close_above": sim::ship::ARMS_CLOSE_ABOVE,
         },
         "start_mass": s.start_mass,
         "dry_mass": s.dry_mass,
@@ -408,7 +431,7 @@ pub struct ShipFlightJs {
 
 #[wasm_bindgen(js_class = ShipFlight)]
 impl ShipFlightJs {
-    /// `{scenario: "earth"|"mars"|"booster", position, velocity, seed?, lag?,
+    /// `{scenario: "earth"|"booster", position, velocity, seed?, lag?,
     /// noise?, tuning?, propellant?, wind?, gust_speed?, failed?}`;
     /// `undefined` if not valid.
     pub fn create(config_json: &str) -> Option<ShipFlightJs> {
@@ -529,15 +552,9 @@ impl ShipFlightJs {
         };
         // Stagnation-point heating, W/m² (Sutton–Graves, 4.5 m nose radius:
         // an estimate for the picture; heating is not part of the dynamics).
-        let k_sg = match s.scn.planet {
-            model::Planet::Earth => 1.7415e-4,
-            model::Planet::Mars => 1.9027e-4,
-        };
+        let k_sg = 1.7415e-4;
         let heat_flux = k_sg * (rho / s.scn.ship.radius).sqrt() * quat::norm(w_air).powi(3);
-        let speed_of_sound = match s.scn.planet {
-            model::Planet::Earth => 340.0 - 0.004 * x[dynamics::R + 2].clamp(0.0, 11_000.0),
-            model::Planet::Mars => 240.0,
-        };
+        let speed_of_sound = 340.0 - 0.004 * x[dynamics::R + 2].clamp(0.0, 11_000.0);
         let thrust = s.cluster.thrust;
         let tn = quat::norm(thrust);
         let gimbal = if tn > 0.0 { (thrust[2] / tn).clamp(-1.0, 1.0).acos().to_degrees() } else { 0.0 };
@@ -575,7 +592,6 @@ impl ShipFlightJs {
             "flaps": s.flaps,
             "rcs": s.rcs_firing,
             "q_dyn": 0.5 * rho * quat::dot(w_air, w_air),
-            "legs": s.legs_down,
             "arms": s.arms_closed,
             "wind": s.wind_at(s.t),
             "guide": guide,
@@ -684,6 +700,6 @@ mod tests {
             assert!(!s[k].is_null(), "missing {k}");
         }
         assert_eq!(s["phase"], "belly-flop");
-        assert_eq!(parse(&ship_scenario("mars"))["planet"], "mars");
+        assert_eq!(parse(&ship_scenario("mars"))["ok"], false);
     }
 }

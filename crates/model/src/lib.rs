@@ -1,5 +1,5 @@
 //! Kestrel shared vehicle model: what the simulator (truth) and guidance
-//! must agree on. A generic Starship-class ship, Earth and Mars, body
+//! must agree on. A generic Starship-class ship and booster, Earth, body
 //! aerodynamics and the rigid-body equations. Simulation only.
 
 pub mod aero;

@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn units_round_trip() {
-        let scn = Scenario::mars();
+        let scn = Scenario::earth();
         let u = Units::new(&scn, scn.start_mass);
         let x = dynamics::state(3e5, [1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [1.0, 0.0, 0.0, 0.0], [0.1, 0.2, 0.3]);
         let back = u.x_si(&u.x_nd(&x));

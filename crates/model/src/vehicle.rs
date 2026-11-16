@@ -14,7 +14,6 @@ pub const G0: f64 = 9.80665;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Planet {
     Earth,
-    Mars,
 }
 
 impl Planet {
@@ -22,7 +21,6 @@ impl Planet {
     pub fn gravity(self) -> f64 {
         match self {
             Planet::Earth => G0,
-            Planet::Mars => 3.721,
         }
     }
 
@@ -30,7 +28,6 @@ impl Planet {
     pub fn density(self, z: f64) -> f64 {
         let (rho0, h) = match self {
             Planet::Earth => (1.225, 8500.0),
-            Planet::Mars => (0.020, 11_100.0),
         };
         rho0 * (-z.max(-500.0) / h).exp()
     }
@@ -124,9 +121,6 @@ pub struct Ship {
     pub inertia_per_kg: Vec3,
     /// Catch pins above the base, m (near the forward flaps).
     pub pin_height: f64,
-    /// Legs (Mars): feet this far below the base, m, on this radius, m.
-    pub leg_drop: f64,
-    pub leg_radius: f64,
 }
 
 impl Ship {
@@ -164,8 +158,6 @@ impl Ship {
             fins: None,
             inertia_per_kg: [230.0, 230.0, 15.0],
             pin_height: 40.0,
-            leg_drop: 3.0,
-            leg_radius: 6.0,
         }
     }
 
@@ -207,8 +199,6 @@ impl Ship {
             }),
             inertia_per_kg: [440.0, 440.0, 18.0],
             pin_height: 62.0,
-            leg_drop: 0.0,
-            leg_radius: 0.0,
         }
     }
 
@@ -245,10 +235,14 @@ impl Ship {
 
 /// The Earth approach gate's distance from the catch axis, m (away from
 /// the mast, on +x).
-pub const APPROACH_OFFSET: f64 = 20.0;
+pub const APPROACH_OFFSET: f64 = 14.0;
 
 /// The booster's approach gate's distance from the catch axis, m.
-pub const BOOSTER_OFFSET: f64 = 12.0;
+pub const BOOSTER_OFFSET: f64 = 14.0;
+
+/// Speed toward the catch axis at the approach gate, m/s: the vehicle
+/// arrives already sliding in over the arms.
+pub const GATE_SLIDE: f64 = 2.0;
 
 /// The tower on Earth (all *illustrative* except the ~145 m height).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -264,14 +258,14 @@ pub struct Catch {
     pub capture_radius: f64,
 }
 
-/// Everything that differs between the Earth and Mars flights.
+/// Everything that differs between the ship's flight and the booster's.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scenario {
     pub planet: Planet,
     pub ship: Ship,
     /// Mass at the start, kg.
     pub start_mass: f64,
-    /// Mass with empty tanks (structure, plus cargo on Mars), kg.
+    /// Mass with empty tanks (structure), kg.
     pub dry_mass: f64,
     /// Guidance ends here (centre of mass), m, at this velocity, m/s.
     pub gate: Vec3,
@@ -286,7 +280,7 @@ pub struct Scenario {
     /// Share of the burn flown on every lit engine before dropping to one.
     pub switch_fraction: f64,
     /// The final descent starts once the axis is this close to its target, m
-    /// (the arms need ~1 m; legs can stand anywhere near the pad).
+    /// (the arms take up a few metres along their rails).
     pub centring: f64,
     /// …and it sinks only while sliding slower than this, m/s.
     pub settle_side_speed: f64,
@@ -320,7 +314,7 @@ impl Scenario {
             mast_x: -14.0,
             mast_half: 4.5,
             tower_top: 145.0,
-            capture_radius: 1.5,
+            capture_radius: 4.0,
         };
         let caught_cm = catch.arm_z - ship.pin_height + ship.cm_height;
         Scenario {
@@ -332,8 +326,8 @@ impl Scenario {
             // Approach gate: out from the tower and above the arms. The
             // final translation over the catch axis and the descent onto
             // the arms are flown by a simple, slow terminal controller.
-            gate: [APPROACH_OFFSET, 0.0, caught_cm + 30.0],
-            gate_velocity: [0.0, 0.0, -1.0],
+            gate: [APPROACH_OFFSET, 0.0, caught_cm + 14.0],
+            gate_velocity: [-GATE_SLIDE, 0.0, -2.0],
             floor_z: caught_cm,
             clearance_x: Some(-1.0),
             catch: Some(catch),
@@ -341,8 +335,8 @@ impl Scenario {
             // Astronaut: a flip from 300 m to 2.5 km is possible).
             ignition_floor: 1000.0,
             switch_fraction: 0.45,
-            centring: 1.0,
-            settle_side_speed: 0.5,
+            centring: 3.0,
+            settle_side_speed: 0.7,
             mid_gate_speed: 25.0,
             // The flip pushes the ship toward the tower: start it beyond.
             aim: [450.0, 0.0],
@@ -361,7 +355,7 @@ impl Scenario {
             mast_x: -14.0,
             mast_half: 4.5,
             tower_top: 145.0,
-            capture_radius: 1.5,
+            capture_radius: 4.0,
         };
         let caught_cm = catch.arm_z - ship.pin_height + ship.cm_height;
         Scenario {
@@ -371,45 +365,18 @@ impl Scenario {
             // A short stand-off from the catch axis (the booster arrives
             // upright and tracks its plan closely, so less than the ship's;
             // none at all and sensor noise put it into the mast).
-            gate: [BOOSTER_OFFSET, 0.0, caught_cm + 25.0],
-            gate_velocity: [0.0, 0.0, -2.0],
+            gate: [BOOSTER_OFFSET, 0.0, caught_cm + 12.0],
+            gate_velocity: [-GATE_SLIDE, 0.0, -2.0],
             floor_z: caught_cm,
             clearance_x: Some(-1.0),
             catch: Some(catch),
             ignition_floor: 0.0,
             switch_fraction: 0.45,
-            centring: 1.0,
-            settle_side_speed: 0.5,
+            centring: 3.0,
+            settle_side_speed: 0.7,
             mid_gate_speed: 50.0,
             // Offshore until the engines are running, then divert in.
             aim: [120.0, 0.0],
-            density_scale: 1.0,
-            ship,
-        }
-    }
-
-    /// Mars: after entry, a long supersonic burn to a landing on legs.
-    /// 100 t of landing propellant (*illustrative*).
-    pub fn mars() -> Scenario {
-        let ship = Ship::starship_class();
-        let touchdown_cm = ship.cm_height + ship.leg_drop;
-        Scenario {
-            planet: Planet::Mars,
-            start_mass: 360e3,
-            dry_mass: 260e3,
-            // Hand over to the terminal descent well above the ground:
-            // short-horizon plans near the end converge poorly.
-            gate: [0.0, 0.0, touchdown_cm + 60.0],
-            gate_velocity: [0.0, 0.0, -3.0],
-            floor_z: touchdown_cm,
-            clearance_x: None,
-            catch: None,
-            ignition_floor: 0.0,
-            switch_fraction: 0.8,
-            centring: 5.0,
-            settle_side_speed: 0.8,
-            mid_gate_speed: 25.0,
-            aim: [0.0, 0.0],
             density_scale: 1.0,
             ship,
         }
@@ -442,7 +409,7 @@ impl Scenario {
         self
     }
 
-    /// Height of the centre of mass when caught / standing on its legs, m.
+    /// Height of the centre of mass when caught, m.
     pub fn rest_cm_z(&self) -> f64 {
         self.floor_z
     }
@@ -455,8 +422,6 @@ mod tests {
     #[test]
     fn density_values() {
         assert!((Planet::Earth.density(0.0) - 1.225).abs() < 1e-12);
-        let mars = Planet::Mars.density(11_100.0);
-        assert!((mars - 0.020 / std::f64::consts::E).abs() < 1e-12);
     }
 
     #[test]
@@ -464,7 +429,7 @@ mod tests {
         // At minimum throttle one engine must not out-push the landed weight
         // by much, or the terminal descent cannot hold 1 m/s.
         // (The flight drops one more engine when too light to hover.)
-        for s in [Scenario::earth(), Scenario::mars(), Scenario::booster()] {
+        for s in [Scenario::earth(), Scenario::booster()] {
             let (min, _) = s.ship.thrust_limits((s.ship.final_engines - 1).max(1));
             let weight = s.dry_mass * s.planet.gravity();
             assert!(min < 1.05 * weight, "{:?}: {min} vs {weight}", s.planet);
