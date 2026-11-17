@@ -201,6 +201,7 @@ version = "0.1.0"
 dependencies = [
  "clarabel",
  "kestrel-model",
+ "kestrel-socp",
 ]
 
 [[package]]

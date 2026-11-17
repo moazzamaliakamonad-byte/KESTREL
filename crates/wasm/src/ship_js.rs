@@ -350,6 +350,20 @@ fn outcome_str(o: Option<Outcome>) -> (Value, Value) {
     }
 }
 
+/// Choose the convex solver inside guidance for this worker: "clarabel"
+/// (default) or "kestrel" (`kestrel-socp`, D-041). Returns false for an
+/// unknown name (nothing changes).
+#[wasm_bindgen]
+pub fn set_planner_solver(name: &str) -> bool {
+    let b = match name {
+        "clarabel" => guidance::scvx::Backend::Clarabel,
+        "kestrel" => guidance::scvx::Backend::Kestrel,
+        _ => return false,
+    };
+    guidance::scvx::set_backend(b);
+    true
+}
+
 /// Solve one representative problem (the booster's first landing-burn
 /// plan) and throw the answer away. A worker calls this once when it
 /// starts: the first solve in a fresh WebAssembly instance is several

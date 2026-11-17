@@ -8,6 +8,7 @@
 
 pub mod discretize;
 mod subproblem;
+pub use subproblem::{Backend, IPM_ITERATIONS, backend, set_backend};
 
 use model::dynamics::{self, M, Q, State};
 use model::quat::{self, Quat, Vec3};

@@ -5,7 +5,7 @@ import { engineLayout } from "@/lib/ship/engines";
 import { LINES } from "@/lib/ship/phrases";
 import { commentator, failEngine, throwGust } from "@/lib/ship/runtime";
 import { PRESETS, SPEEDS, START_LIMITS, useShip, verdict, type CameraMode, type Noise } from "@/lib/ship/store";
-import type { EngineState, Preview, Vehicle } from "@/lib/ship/types";
+import type { EngineState, PlannerSolver, Preview, Vehicle } from "@/lib/ship/types";
 import { Field, Panel, Seg, Slider, Toggle, fmt } from "./controls";
 import css from "./console.module.css";
 
@@ -174,6 +174,18 @@ function Environment() {
       <Slider label="Air density (× standard)" value={options.density} range={[0.5, 1.5]} step={0.05} disabled={locked} format={(x) => `${fmt(x, 2)} ×`} onChange={(x) => setOptions({ density: x })} />
       <Field label="Sensor noise">
         <Seg<Noise> label="Sensor noise" value={options.noise} onChange={(x) => setOptions({ noise: x })} options={[["off", "Off"], ["low", "Low"], ["high", "High"]]} />
+      </Field>
+      <Field label="Guidance solver">
+        <Seg<PlannerSolver>
+          label="Guidance solver"
+          value={options.solver}
+          onChange={(x) => setOptions({ solver: x })}
+          options={[
+            ["clarabel", "Clarabel"],
+            ["kestrel", "Kestrel's own"],
+          ]}
+        />
+        <p className={css.hint}>The convex solver inside every plan. Kestrel&apos;s own allocates no memory while solving and stops after a fixed number of iterations, as flight code needs. Clarabel, a general-purpose solver, is the default: it is faster on the booster&apos;s plans.</p>
       </Field>
       <Field label="Random seed">
         <Seg<string>

@@ -6,6 +6,7 @@ import type {
   Outcome,
   Preview,
   ScenarioInfo,
+  PlannerSolver,
   ScenarioKind,
   ShipPhase,
   Tuning,
@@ -56,6 +57,8 @@ export interface Options {
   noise: Noise;
   /** Fixed random seed, or null for a new one each flight. */
   seed: number | null;
+  /** The convex solver inside guidance. */
+  solver: PlannerSolver;
 }
 
 export interface ViewOptions {
@@ -93,6 +96,7 @@ export const DEFAULT_OPTIONS: Options = {
   lag: 0.3,
   noise: "low",
   seed: null,
+  solver: "clarabel",
 };
 
 export const DEFAULT_VIEW: ViewOptions = {
@@ -184,6 +188,7 @@ export function configOf(s: Pick<ShipState, "scenario" | "start" | "options">): 
     wind: [o.windSpeed * Math.cos(o.windDir * deg), o.windSpeed * Math.sin(o.windDir * deg)],
     gust_speed: o.gustSpeed,
     failed: o.failed,
+    solver: o.solver,
   };
   if (o.propellant !== null) config.propellant = o.propellant * 1000;
   return config;
@@ -352,6 +357,7 @@ function carried(o: Options): Partial<Options> {
     lag: o.lag,
     noise: o.noise,
     seed: o.seed,
+    solver: o.solver,
     propellant: null,
     failed: [],
     gimbal: null,

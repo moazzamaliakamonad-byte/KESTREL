@@ -58,7 +58,6 @@ export interface ShipSnapshot {
   engine_out_margin: number | null;
 }
 
-
 /** Physics options; a missing field keeps the scenario's value. */
 export interface Tuning {
   density_scale?: number;
@@ -138,7 +137,12 @@ export interface FlightConfig {
   wind?: [number, number];
   gust_speed?: number;
   failed?: number[];
+  /** Which convex solver the planner uses (read by the worker, not by the flight). */
+  solver?: PlannerSolver;
 }
+
+/** Clarabel (the default) or Kestrel's own allocation-free solver (D-041). */
+export type PlannerSolver = "clarabel" | "kestrel";
 
 /** `ShipFlight.plan_json()`. */
 export interface PlanDraw {

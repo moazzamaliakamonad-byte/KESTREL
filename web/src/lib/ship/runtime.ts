@@ -164,7 +164,9 @@ function requestPlan(f: ShipFlight, snap: ShipSnapshot) {
   pendingEvent = null;
   const { t, request } = JSON.parse(f.measure_request()) as { t: number; request: unknown };
   const epoch = mpc.sent(snap.t);
-  void client.call("plan_ship", request).then(({ response, ms }) => {
+  // The worker sets its solver from the request (the flight ignores the field).
+  const solver = useShip.getState().options.solver;
+  void client.call("plan_ship", { ...(request as object), solver }).then(({ response, ms }) => {
     if (!mpc.received(epoch, ms) || flight !== f) return;
     f.apply_replan(JSON.stringify(response), t);
     const r = response as PlanResponse;
