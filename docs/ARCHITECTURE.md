@@ -199,7 +199,10 @@ crates/guidance
   ship_control.rs  belly_flop (ship) / descent (booster) -> unpowered(); flip; steady_burn;
                powered (plan tracking); terminal; ignition_altitude; fall_time
 crates/wasm
-  ship_flight.rs  ShipFlight: phases (unpowered -> flip/start-up -> burn legs -> terminal),
+  ship_flight.rs  ShipFlight: phases (unpowered -> flip/start-up -> burn legs -> terminal);
+               the ship plans from engine start (flip on every engine, planned switch
+               to one), relights a spare after a failure, request_replan() on events,
+               emergency full-thrust option after an engine loss;
                legs (full engine set to a mid gate, final engines to the approach gate),
                when to re-plan, prediction of the booster's first plan, options
   ship_js.rs   JS class ShipFlight; plan_ship / preview_ship (worker); ship_scenario
@@ -213,7 +216,11 @@ web/src/lib/ship
   launch.ts    the opening sequence's one clock: count, mission time, cues to speak
   store.ts     zustand: vehicle -> flight kind, start, options, view (incl. open part), mode
                (editing -> launch -> flying -> done), presets, configOf() for Rust
+  record.ts    the flight record: decisions (with reasons and numbers) from the state
+               stream and from guidance's answers, and the state every 0.1 s
+  shown.ts     the state the page shows: live, or the replayed instant (view.scrubT)
   runtime.ts   owns the ShipFlight; steps it per frame (not while paused or held);
+               records decisions; events (gust, failure, setting) re-plan at once;
                stepShip() advances a paused flight for the analysis view;
                schedules plans; publishes to live.ts; reports solve times to the flight
   live.ts      per-frame snapshot, trail, plan, history samples, caption, hold flag
@@ -273,3 +280,14 @@ the models (`Vehicles.tsx`) so a click opens them (`view.part`);
 `Analysis.tsx` draws the force vectors and a marker per part; `Cameras.tsx`
 flies the free camera to the open part; `console/AnalysisPanel.tsx` shows
 `partSheet()` for it.
+
+### Guidance on the page, end to end
+
+`ShipFlight.wants_replan()` (drift, age, or an event) → `measure_request()`
+(the problem as JSON: options, engine switch, tilt cap, funnel, side-speed
+limit) → the worker's `plan_ship` (SCvx: ship 16 nodes, 1e-6 tolerance, up
+to 15 iterations, abandoned after 7 if still infeasible; booster 24 nodes,
+up to 8) → `apply_replan()`. Each answer is also written to the flight
+record with the reason it was asked for. `Stage.GiveWay` lowers the
+picture's cost when recent solves are slow (D-037).
+

@@ -53,20 +53,25 @@ What is simulated, and what is only shown:
 - **The booster may end its final approach on two engines** when too light
   to hover on three at minimum throttle (a rule of this simulation; with
   the quicker approach it did not happen in the runs below).
-- **The final approach takes about 12 s** from the approach gate to the
-  catch (measured below; it was about 35 s before 2026-11-16). Real catches
-  are quicker still: the real vehicle arrives on the arms at the end of its
-  burn, with no separate slide-in.
-- **The ship flies most of its landing burn on one engine** (three for the
-  flip, then one about half a second later): three at minimum throttle are
-  too strong for a nearly empty ship at this ignition height. Real ships
-  keep more engines lit for longer. Tried and reverted (D-027).
+- **The ship flies its burn on one engine** after a guided flip on all
+  three (D-032). Two engines at their minimum throttle push harder than
+  the nearly empty ship weighs, so they cannot fly the slow end of a
+  landing (D-031). If the running engine fails, a shut-down engine is
+  relit: it gives thrust after 1 s, during which the ship falls. Real
+  Raptors relight in flight; whether a real ship would, and how fast, is
+  not published.
+- **Engine-out is survived 15 times in 20** (failure times 49-67 s, noise
+  off and low, measured below). Failures at 65 s and 67 s, the last
+  seconds before the gate, were all lost.
+- **The plan ends 10 m out and 20 m above the arms**; the last 20 m are
+  flown by a simple terminal controller (4-10 s). Plans ending on the arms
+  hit the mast under sensor noise (D-033).
 - **The catch is a test, not contact dynamics**: within 4 m of the catch
   axis, at most 2 m/s down and 1 m/s sideways, tilt under 5°, turning
-  slower than 5°/s (all *illustrative*; widened on 2026-11-16, D-026). The
-  arms are drawn closing on the tower's centre line, not on the vehicle.
-- **Sensor noise "high" with the booster hits the tower** (single runs,
-  seeds 7 and 9, before and after the 2026-11-16 changes).
+  slower than 5°/s (all *illustrative*; D-026). The arms are drawn closing
+  on the tower's centre line, not on the vehicle.
+- **Sensor noise "high"**: the ship was lost in 1 or 2 of 4 runs per
+  configuration (tower strikes); the booster hits the tower in single runs.
 - **Wind** is the same at every height; a gust is a 4 s trapezoid. The
   planner knows neither.
 - **Start envelope.** Booster: caught from 6–20 km at 300–600 m/s in the
@@ -83,6 +88,11 @@ What is simulated, and what is only shown:
 - **Shake, smoke, plume shapes, clouds, sky colours and the blueprint
   drawing** are visual only. The vehicles' shapes are by eye from public
   photographs.
+- **The flight record** keeps every plan, failure, phase and engine change
+  and the full state every 0.1 s; a replayed instant is the nearest
+  recorded frame (up to 0.05 s away). Why a plan was asked for is worked
+  out on the page from the plan and the state (drift, age, an event), the
+  same rules as the flight's, not read back from it.
 - **Analysis view numbers** are the snapshot's, or the model's formulas
   evaluated on it by the page (`parts.ts`): a flap's or fin's force is
   recomputed, not read from the integrator; "each engine" is the total
@@ -289,27 +299,41 @@ time counts ×2 or ×4 in sim time, so guidance effectively reacts later.
 
 **Native scenarios** (`cargo test -p kestrel-wasm --release --test ship_loop --
 --nocapture`, seed 7, low noise, 0.3 s throttle lag, solve latency modelled
-as 0.5 s of sim time). Read on 2026-11-16, after the final-approach retune
-(D-026):
+as 0.5 s of sim time). Read on 2026-11-17 after the guidance redesign
+(D-031 to D-036):
 
 | Scenario | Outcome | Flight time | Propellant used | Plans / failed |
 | --- | --- | --- | --- | --- |
 | Booster, default start (14 km, 420 m/s) | caught | 64.5 s | 85.8 of 120 t | 15 / 0 |
 | Booster, a centre engine out at ignition | caught | 64.6 s | 85.6 t | 14 / 0 |
-| Booster, gusts at 8 s and 20 s | caught | 63.4 s | 84.6 t | 15 / 0 |
-| Booster, every solve taking 1.0 s | caught | 63.5 s | 84.6 t | — |
-| Ship, default (5 km) | caught | 85.5 s | 20.9 of 40 t | 12 / 0 |
-| Ship, engine out at ignition | caught | 88.9 s | 21.8 t | 11 / 3 |
-| Ship, gusts in the belly flop | caught | 84.9 s | 20.7 t | 13 / 0 |
+| Booster, gusts at 8 s and 20 s | caught | 65.2 s | 86.4 t | 15 / 0 |
+| Booster, every solve taking 1.0 s | caught | 63.4 s | 84.6 t | — |
+| Ship, default (5 km) | caught | 85.8 s | 21.7 of 40 t | 16 / 0 |
+| Ship, engine out at ignition | caught | 86.0 s | 21.0 t | 16 / 13 |
+| Ship, gusts in the belly flop | caught | 82.4 s | 20.9 t | 19 / 0 |
+| Ship, the running engine fails at 55 s | caught (1 relight) | 79.8 s | 19.6 t | 16 / 0 |
+| Ship, the running engine fails at 61 s | caught (1 relight) | 86.4 s | 22.4 t | 19 / 1 |
 
-Before the retune the same runs took 85.3 s (booster) and 98.8 s (ship).
+**Robustness board** (`score.py`-style runs of `trace_earth` and
+`engine_out_window`, `--ignored`): 12 nominal ship flights (seeds 7-10,
+noise off, low, high) and 20 engine-out flights (the running engine failed
+at 49, 51, … 67 s, noise off and low). Current configuration: 10 of 12 and
+15 of 20 (median flight 83 s). The one or two nominal losses are under high
+noise (tower strikes). The decision log (D-032, D-033, D-034) lists the
+configurations compared. Single seeds per cell: not a statistical claim.
 
-**Final approach** (time in the terminal phase, from the approach gate to
-the catch; `trace_booster` / `trace_earth`, noise off and low, seeds 7–10,
-8 runs each, all caught): booster 11.6–13.6 s (median 12.6 s), ship
-11.5–14.1 s (median 13.9 s). Before: about 35 s in the single traces read
-(booster 35.8 s, ship 36.1 s). Also run once: ship with high noise and 1 s
-of throttle lag, caught (101.0 s).
+**Planner timing** (2026-11-17, i7-1185G7 laptop on AC power, about 30 %
+background load). Ship flip problem, native, per SCvx iteration:
+discretization 2-3 ms, convex subproblem 22 ms with 24 nodes, 9.5 ms with
+16 (now used), 6.7 ms with 12. Whole plans of the reference flights in
+WebAssembly under Node: ship median 115-134 ms (min 53, max 319), booster
+median 145-200 ms (max 519 ms with the 8-iteration cap). In a Chromium
+worker on a bare page: ship 134 ms, booster 166 ms (medians). On the 3D
+page the same plans were 3-4 times slower before rendering was lightened
+(ship median 439 ms); after: 89 ms in one run and 276-460 ms in four later
+runs, booster 498-597 ms (13-15 plans per flight, all four flights caught).
+These swing with the machine's background load; a desktop with a separate
+graphics card was not measured.
 
 Single runs of other starts (`start_probe`, `--ignored`; **read before the
 retune and not repeated since**, except the 80 km entry, which was re-run
@@ -322,10 +346,10 @@ Booster from 20 km at 550 m/s caught (8.3 t left), from 6 km caught
 25, 30, 45, 60 and 70 km: out of propellant.
 
 **Sensitivity to solve time and frame rate** (`booster_browser_sweep`,
-`--ignored`): booster default start, three seeds per row. Re-run after
-the retune on 2026-11-16: 33 of 33 caught over the eleven conditions in
-the test (the table below is the earlier reading; its 0.8 s row is no
-longer in the test).
+`--ignored`): booster default start, three seeds per row. 2026-11-17: 32 of
+33 caught (lost: fixed 1 s latency, seed 23, since the 8-iteration cap,
+D-036). The table below is an earlier reading; its 0.8 s row is no longer in
+the test.
 
 | Solve latency | Reported solve time | Sim step per frame | Caught |
 | --- | --- | --- | --- |

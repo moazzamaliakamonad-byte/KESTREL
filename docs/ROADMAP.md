@@ -77,8 +77,16 @@ simulation can be, on one page with a mission-control interface.
 - [x] Countdown from ten: number on screen, number spoken and mission clock
       from one timeline; slower opening sequence
 - [x] Flight report after each flight; keyboard help sheet
-- [ ] Ship keeps more engines lit for longer in the landing burn (it drops
-      to one right after the flip; an attempt to ignite lower broke catches)
+- [x] Guidance flies the ship's flip (planned from engine start, engine
+      switch in the plan)
+- [x] Engine-out recovery: a spare relights, guidance re-plans at once
+      (15 of 20 mid-burn failures caught)
+- [x] Plans ending 10 m out and 20 m above the arms; faster planner
+      (ship 2.3x per iteration); events re-plan at once
+- [x] Flight record: every decision with its reason, replay any instant;
+      units and number sources on hover
+- [ ] Ship engine-out in the last seconds before the gate (lost today)
+- [ ] Sensor noise "high": occasional tower strikes
 - [x] Commentary (rendered clips) and camera-aware procedural sound
 - [ ] Simulated ascent, hot staging and boostback (the full mission)
 - [ ] Orbital entry (round planet, heating that matters)
@@ -106,3 +114,6 @@ simulation can be, on one page with a mission-control interface.
   after the approach gate); blueprint analysis view with clickable parts
   and per-part calculations; ten-second countdown on one clock; ship model
   reshaped toward the real vehicle; kestrel mark.
+- 2026-11-17 — M3: guided flip, engine-out relight, approach gate 10 m out
+  and 20 m up, planner 2.3x faster for the ship, event re-plans, flight
+  record with replay, unit and source tooltips.

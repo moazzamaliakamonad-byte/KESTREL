@@ -374,3 +374,131 @@ Template:
   engine shielding on the booster. Proportions by eye from public
   photographs, not from drawings. The header mark and tab icon are a
   hovering kestrel drawn for this project.
+
+## D-031 — Engine-out: relight a spare (supersedes D-027's open question)
+- Date: 2026-11-17
+- Status: accepted
+- Context: the owner asked for the ship to stay on two engines "till the
+  last stages of final approach", and then explained the goal: "if the
+  running engine fails the ship will just fall". Two engines were tried at
+  length (D-027 and since): at their 40 % minimum throttle two Raptors push
+  a nearly empty ship at about 1.6 times its weight, so they cannot fly the
+  slow end of a landing at all; every 2-engine plan near the gate was
+  infeasible.
+- Decision: keep one engine for the burn and solve the actual problem: a
+  shut-down engine is a spare. When fewer engines are lit than the burn
+  needs, the flight software relights one (it gives thrust after its 1 s
+  ignition time), asks for a new plan at once, plans from where the ship
+  will be when the spare lights, and, after an engine loss only, may use
+  98 % of the engine's thrust instead of the usual 75 % margin.
+- Measured (`engine_out_window`, the running engine failed at one of ten
+  times between 49 and 67 s, noise off and low): 15 of 20 caught; before,
+  none. Failures at 65 s and 67 s (the last seconds before the gate) were
+  all lost, as were some at 49-63 s: in traced cases the ship tilted during
+  the second without thrust and its base swung into the mast. See
+  LIMITATIONS.md.
+
+## D-032 — The ship's flip is planned and flown by guidance
+- Date: 2026-11-17
+- Status: accepted (replaces the scripted flip of the M3 ship plan)
+- Context: owner: "starship's guidance don't work until it flips". The flip
+  was a scripted manoeuvre; guidance planned only from the end of it. The
+  M3 build ledger records why: a planned engine switch inside one plan
+  "made re-plans infeasible".
+- Decision: from the moment the engines reach thrust, guidance plans the
+  flip on every lit engine, a switch to one engine at about the end of the
+  flip (node chosen from the tilt still to go, at about 35 deg/s), and the
+  burn; the flight flies it and makes the switch when the plan says. The
+  scripted flip remains only until the first plan arrives. After the flip
+  the plan keeps within 30 deg of upright (the flip may overshoot vertical
+  to brake the 40 m/s it builds up toward the tower).
+- Measured (12 nominal flights, seeds 7-10, noise off/low/high, and 20
+  engine-out flights): with the scripted flip 6 of 12 and 5 of 20 caught;
+  guided 11 of 12 and 14 of 20 (24 nodes). It is the largest single gain
+  of the redesign.
+
+## D-033 — Ship approach: plan to 10 m out, 20 m up (supersedes D-026's gate)
+- Date: 2026-11-17
+- Status: accepted
+- Context: owner: "instead of slide in it should just come in optimised way
+  to the chopsticks". Plans ending on the arms (2 m out, 5 m up) were tried
+  first and caught 9 of 12 nominal flights: any sideways braking next to
+  the tower tilts the ship, and a tilted ship's base swings into the mast
+  (5 m from the hull at the catch axis).
+- Decision: the plan, fuel-optimal and flown from the flip, ends 10 m out
+  from the catch axis (away from the mast) and 20 m above the caught
+  position, moving in at 1 m/s and down at 2 m/s; the terminal controller
+  flies those last 20 m. Narrow approach funnel (3 m at the gate, 0.6 m
+  per metre above), side-speed limit 2 m/s + 0.15 per metre.
+- Measured candidates (nominal / engine-out, of 12 / 20): gate on the arms
+  9/5; 6 m out 20 m up 10/9; 10 m out 20 m up 11/14; 12 m out 9/15; the
+  old 14 m out 14 m up 9/12. Funnel 10 m/1.0 instead of 3 m/0.6: 10/13.
+  Tilt cap of 12 deg for plans made near the tower: no gain (11/13).
+- Consequences: median ship flight 81 s (86 s before the redesign, 99 s on
+  2026-11-15); 4-10 s from the gate to the catch.
+
+## D-034 — Planner speed and robustness, per vehicle
+- Date: 2026-11-17
+- Status: accepted
+- Measured where the time goes (ship flip problem, native): the convex
+  subproblem about 22 ms per SCvx iteration, discretization 3 ms. So:
+  - Ship: 16 nodes instead of 24 and an interior-point tolerance of 1e-6
+    instead of 1e-8: 9.5 ms per subproblem (2.3 times faster), same
+    iterations and fuel; 32 closed-loop flights caught as many (25 of 32
+    both). 12 nodes: 3.3 times faster, 23 of 32.
+  - Ship: a solve still needing virtual control (defect > 1e-2) after 7
+    iterations is abandoned as infeasible (a failed solve took over 1 s).
+  - Booster: kept at 24 nodes and 1e-8 (16 nodes or 1e-6 each failed its
+    slow-solver flights), abandoning nothing early (that lost 2 of 33 in
+    the browser-timing sweep), but capped at 8 iterations (D-036).
+  - Both: a plan is accepted only if, re-flown on the true dynamics, it
+    ends within 15 % of the distance it had to cover from its gate (3 to
+    30 m), instead of always 30 m: plans missing by 20 m next to the tower
+    had been accepted.
+
+## D-035 — Events ask for a plan at once
+- Date: 2026-11-17
+- Status: accepted
+- Context: owner: "replan extremely fast as soon as something happens".
+  Re-plans were triggered by drift (5 m, 2 m/s) or age (3 s), at most every
+  0.5 s of sim time.
+- Decision: a gust, an engine failure, a relight, or a changed wind, lag or
+  noise setting calls `request_replan()`; the page sends the request on
+  the next frame, skipping the 0.5 s minimum gap.
+
+## D-036 — Booster solves capped at 8 iterations
+- Date: 2026-11-17
+- Status: accepted
+- Context: booster plans that ran to the 15-iteration limit were slowly
+  converging, not improving, and took up to 1 s natively and about 3 s on
+  the 3D page, arriving stale.
+- Decision: at most 8. Worst plan on the reference flight (Node,
+  WebAssembly) 519 ms instead of 1 041 ms. The browser-timing sweep, which
+  models a fixed latency and so cannot credit faster solves, loses its
+  most extreme case (1 s latency, seed 23): 32 of 33.
+
+## D-037 — The picture gives way to guidance
+- Date: 2026-11-17
+- Status: accepted
+- Context: the same plan took a median 134 ms in a Chromium worker on a
+  bare page and 439 ms on the 3D page (i7-1185G7 laptop, integrated
+  graphics): the renderer and the planner share one power and memory
+  budget.
+- Decision: no 4x multisampling (SMAA instead, as before 2026-11-16), pixel
+  ratio at most 1.5, and when the median of recent solves passes 250 ms the
+  picture steps down (pixel ratio 1, then no bloom). Ship median on the
+  page: 89 ms in one run after the change; later runs 276-460 ms with the
+  machine at 30 % background load (timings on this laptop vary widely,
+  LIMITATIONS.md).
+
+## D-038 — A flight record; units and sources on hover
+- Date: 2026-11-17
+- Status: accepted
+- Decision: every decision (plans with their reason, solve time and shape;
+  failures; phases; engine changes; relights; the arms; the outcome; the
+  visitor's own actions) is recorded with its numbers, and the full state
+  every 0.1 s; the analysis view lists them and replays any instant. Every
+  unit on screen explains itself on hover, and every "published" or
+  "illustrative" tag gives its source or reason. Dry masses are now marked
+  illustrative: SpaceX has not published them (they were marked published).
+

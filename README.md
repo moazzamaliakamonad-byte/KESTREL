@@ -3,13 +3,16 @@
 **A Starship-class flight simulator in a browser tab.** A Super Heavy-class
 booster falls back from the edge of space engines first, steers with three
 grid fins, lights thirteen engines, drops to three and is caught by the
-tower's arms. The ship belly-flops in, flips and is caught too. The landing burns are planned live by the class of algorithm
+tower's arms. The ship belly-flops in, flips under guidance and is caught too;
+if its engine fails in the landing burn, a spare relights. The landing burns are planned live by the class of algorithm
 used for real propulsive landings (successive convexification, a sequence of
 convex optimizations), in Rust compiled to WebAssembly. Change anything,
 fail any engine, throw gusts at it, pause it mid-air and switch to the
 analysis view: the vehicle becomes a blueprint, every part can be clicked,
 and its calculations (the simulator's own formulas with this instant's
-numbers) open beside it. Step the paused flight a tenth of a second at a time.
+numbers) open beside it. Step the paused flight a tenth of a second at a time,
+and after the flight replay any instant with every decision guidance made and
+why.
 
 This is a **simulation**, built from public figures: published numbers are
 cited and marked, unpublished ones are marked *illustrative*. It is not
