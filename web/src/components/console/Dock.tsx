@@ -138,12 +138,12 @@ function VehicleTab() {
           </p>
         </div>
       </Field>
-      <Slider label="Landing propellant" tag="ill" value={options.propellant ?? standard} range={[standard * 0.5, standard * 1.6]} step={1} disabled={locked} format={(t) => `${fmt(t)} t`} onChange={(t) => setOptions({ propellant: t })} />
-      <Slider label="Gimbal limit" tag="ill" value={options.gimbal ?? i.tuning.gimbal_max_deg} range={[4, 20]} step={0.5} disabled={locked} format={(d) => `${fmt(d, 1)}°`} onChange={(d) => setOptions({ gimbal: d })} />
-      <Slider label="Minimum throttle" tag="pub" value={(options.throttleMin ?? i.tuning.throttle_min) * 100} range={[20, 80]} step={1} disabled={locked} format={(x) => `${fmt(x)} %`} onChange={(x) => setOptions({ throttleMin: x / 100 })} />
-      <Slider label="Specific impulse" tag="pub" value={options.isp ?? i.tuning.isp} range={[280, 380]} step={1} disabled={locked} format={(x) => `${fmt(x)} s`} onChange={(x) => setOptions({ isp: x })} />
-      <Slider label="Ignition delay" tag="ill" value={options.ignition ?? i.tuning.ignition_time} range={[0.2, 3]} step={0.1} disabled={locked} format={(x) => `${fmt(x, 1)} s`} onChange={(x) => setOptions({ ignition: x })} />
-      <Slider label="Throttle lag" tag="ill" value={options.lag} range={[0, 2]} step={0.05} format={(x) => `${fmt(x, 2)} s`} onChange={(x) => setOptions({ lag: x })} />
+      <Slider label="Landing propellant" note="propellant" tag="ill" value={options.propellant ?? standard} range={[standard * 0.5, standard * 1.6]} step={1} disabled={locked} format={(t) => `${fmt(t)} t`} onChange={(t) => setOptions({ propellant: t })} />
+      <Slider label="Gimbal limit" note="gimbal" tag="ill" value={options.gimbal ?? i.tuning.gimbal_max_deg} range={[4, 20]} step={0.5} disabled={locked} format={(d) => `${fmt(d, 1)}°`} onChange={(d) => setOptions({ gimbal: d })} />
+      <Slider label="Minimum throttle" note="throttle" tag="pub" value={(options.throttleMin ?? i.tuning.throttle_min) * 100} range={[20, 80]} step={1} disabled={locked} format={(x) => `${fmt(x)} %`} onChange={(x) => setOptions({ throttleMin: x / 100 })} />
+      <Slider label="Specific impulse" note="isp" tag="pub" value={options.isp ?? i.tuning.isp} range={[280, 380]} step={1} disabled={locked} format={(x) => `${fmt(x)} s`} onChange={(x) => setOptions({ isp: x })} />
+      <Slider label="Ignition delay" note="ignition" tag="ill" value={options.ignition ?? i.tuning.ignition_time} range={[0.2, 3]} step={0.1} disabled={locked} format={(x) => `${fmt(x, 1)} s`} onChange={(x) => setOptions({ ignition: x })} />
+      <Slider label="Throttle lag" note="lag" tag="ill" value={options.lag} range={[0, 2]} step={0.05} format={(x) => `${fmt(x, 2)} s`} onChange={(x) => setOptions({ lag: x })} />
       <button className={css.ghost} disabled={locked} onClick={resetOptions}>
         Restore every default
       </button>

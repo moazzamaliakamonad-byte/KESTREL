@@ -238,40 +238,42 @@ export function Briefing() {
   const info = useShip((s) => s.info[s.scenario]);
   const vehicle = useShip((s) => s.vehicle);
   if (!info) return null;
-  const rows: [string, string, "pub" | "ill"][] =
+  const rows: [string, string, "pub" | "ill", string][] =
     vehicle === "booster"
       ? [
-          ["Height × diameter", `${info.ship.length} m × ${info.ship.radius * 2} m`, "pub"],
-          ["Engines", "33 · inner 13 gimbal", "pub"],
-          ["Thrust per engine", `${fmt(info.ship.engine_max / 1e6, 2)} MN`, "pub"],
-          ["Specific impulse", `${info.ship.isp} s (sea level)`, "pub"],
-          ["Throttle range", `${fmt(info.ship.throttle_min * 100)}–100 %`, "pub"],
-          ["Grid fins", "3 · 90/90/180°", "pub"],
-          ["Empty mass", `${fmt(info.dry_mass / 1000)} t`, "pub"],
-          ["Landing propellant", `${fmt(info.propellant / 1000)} t`, "ill"],
-          ["Gimbal limit", `±${fmt(info.ship.gimbal_max_deg)}°`, "ill"],
-          ["Aerodynamics, inertia", "simplified model", "ill"],
+          ["Height × diameter", `${info.ship.length} m × ${info.ship.radius * 2} m`, "pub", "size"],
+          ["Engines", "33 · inner 13 gimbal", "pub", "engines"],
+          ["Thrust per engine", `${fmt(info.ship.engine_max / 1e6, 2)} MN`, "pub", "thrust"],
+          ["Specific impulse", `${info.ship.isp} s (sea level)`, "pub", "isp"],
+          ["Throttle range", `${fmt(info.ship.throttle_min * 100)}–100 %`, "pub", "throttle"],
+          ["Grid fins", "3 · 90/90/180°", "pub", "engines"],
+          ["Empty mass", `${fmt(info.dry_mass / 1000)} t`, "ill", "dryMass"],
+          ["Landing propellant", `${fmt(info.propellant / 1000)} t`, "ill", "propellant"],
+          ["Gimbal limit", `±${fmt(info.ship.gimbal_max_deg)}°`, "ill", "gimbal"],
+          ["Aerodynamics, inertia", "simplified model", "ill", "aero"],
         ]
       : [
-          ["Height × diameter", `${info.ship.length} m × ${info.ship.radius * 2} m`, "pub"],
-          ["Engines", "3 sea-level + 3 vacuum", "pub"],
-          ["Thrust per engine", `${fmt(info.ship.engine_max / 1e6, 2)} MN`, "pub"],
-          ["Specific impulse", `${info.ship.isp} s (sea level)`, "pub"],
-          ["Flaps", "4 · two forward, two aft", "pub"],
-          ["Empty mass", `${fmt(info.dry_mass / 1000)} t`, "pub"],
-          ["Landing propellant", `${fmt(info.propellant / 1000)} t`, "ill"],
-          ["Gimbal limit", `±${fmt(info.ship.gimbal_max_deg)}°`, "ill"],
-          ["Aerodynamics, inertia", "simplified model", "ill"],
+          ["Height × diameter", `${info.ship.length} m × ${info.ship.radius * 2} m`, "pub", "size"],
+          ["Engines", "3 sea-level + 3 vacuum", "pub", "engines"],
+          ["Thrust per engine", `${fmt(info.ship.engine_max / 1e6, 2)} MN`, "pub", "thrust"],
+          ["Specific impulse", `${info.ship.isp} s (sea level)`, "pub", "isp"],
+          ["Flaps", "4 · two forward, two aft", "pub", "engines"],
+          ["Empty mass", `${fmt(info.dry_mass / 1000)} t`, "ill", "dryMass"],
+          ["Landing propellant", `${fmt(info.propellant / 1000)} t`, "ill", "propellant"],
+          ["Gimbal limit", `±${fmt(info.ship.gimbal_max_deg)}°`, "ill", "gimbal"],
+          ["Aerodynamics, inertia", "simplified model", "ill", "aero"],
         ];
   return (
     <Panel title={vehicle === "booster" ? "Super Heavy-class booster" : "Starship-class ship"} className={css.briefing}>
       <dl className={css.facts}>
-        {rows.map(([k, v, tag]) => (
+        {rows.map(([k, v, tag, src]) => (
           <div key={k}>
             <dt>{k}</dt>
             <dd>
               <Units text={v} />
-              <i data-tag={tag}>{tag === "pub" ? "published" : "illustrative"}</i>
+              <i data-tag={tag} data-note={src}>
+                {tag === "pub" ? "published" : "illustrative"}
+              </i>
             </dd>
           </div>
         ))}

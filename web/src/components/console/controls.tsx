@@ -55,6 +55,7 @@ export function Slider({
   onChange,
   format,
   tag,
+  note,
   disabled,
 }: {
   label: string;
@@ -65,6 +66,8 @@ export function Slider({
   format: (v: number) => string;
   /** "pub" = a published figure, "ill" = illustrative (not published). */
   tag?: "pub" | "ill";
+  /** Key of its source note (`lib/sources.ts`). */
+  note?: string;
   disabled?: boolean;
 }) {
   return (
@@ -72,7 +75,11 @@ export function Slider({
       <span>
         <em>
           {label}
-          {tag && <i data-tag={tag}>{tag === "pub" ? "published" : "illustrative"}</i>}
+          {tag && (
+            <i data-tag={tag} data-note={note}>
+              {tag === "pub" ? "published" : "illustrative"}
+            </i>
+          )}
         </em>
         <b>
           <Units text={format(value)} />

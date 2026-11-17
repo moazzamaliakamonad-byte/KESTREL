@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SOURCES } from "@/lib/sources";
 import { UNITS, splitUnits } from "@/lib/units";
 import css from "./console.module.css";
 
@@ -27,26 +28,28 @@ export function Units({ text }: { text: string }) {
  * clip it).
  */
 export function UnitTip() {
-  const [tip, setTip] = useState<{ unit: string; x: number; y: number } | null>(null);
+  const [tip, setTip] = useState<{ head: string; sub: string; body: string; x: number; y: number } | null>(null);
   useEffect(() => {
     const move = (e: PointerEvent) => {
-      const el = (e.target as Element | null)?.closest?.("[data-unit]");
+      const el = (e.target as Element | null)?.closest?.("[data-unit], [data-note]");
       const unit = el?.getAttribute("data-unit");
-      setTip(unit && UNITS[unit] ? { unit, x: e.clientX, y: e.clientY } : null);
+      const note = el?.getAttribute("data-note");
+      if (unit && UNITS[unit]) setTip({ head: unit, sub: UNITS[unit].name, body: UNITS[unit].what, x: e.clientX, y: e.clientY });
+      else if (note && SOURCES[note]) setTip({ head: SOURCES[note].title, sub: "", body: SOURCES[note].text, x: e.clientX, y: e.clientY });
+      else setTip(null);
     };
     window.addEventListener("pointermove", move);
     return () => window.removeEventListener("pointermove", move);
   }, []);
   if (!tip) return null;
-  const u = UNITS[tip.unit];
   // Keep it on screen: flip to the left near the right edge.
   const left = tip.x > window.innerWidth - 300;
   return (
     <div className={css.unitTip} style={{ top: tip.y + 16, left: left ? undefined : tip.x + 14, right: left ? window.innerWidth - tip.x + 14 : undefined }} role="tooltip">
       <b>
-        {tip.unit} <span>{u.name}</span>
+        {tip.head} <span>{tip.sub}</span>
       </b>
-      <p>{u.what}</p>
+      <p>{tip.body}</p>
     </div>
   );
 }
