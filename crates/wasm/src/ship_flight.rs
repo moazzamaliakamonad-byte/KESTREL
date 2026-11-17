@@ -944,6 +944,13 @@ pub fn predict(scn: &Scenario, x: &State, thrust: Vec3, seconds: f64) -> State {
     x
 }
 
+/// Most SCvx iterations for a booster plan. Past 8 its slow solves were
+/// converging, not improving: plans accepted at 15 iterations took up to a
+/// second (three on the 3D page) and arrived stale. The browser-timing
+/// sweep then lost one case of 33 (a fixed 1 s latency), which faster
+/// solves make less likely in the page itself.
+pub const BOOSTER_ITERATIONS: usize = 8;
+
 /// Solve the options in order as the worker would; the first that plans
 /// wins: `(index, plan)`. Always from a fresh first guess: warm starts from
 /// the previous plan were tried and kept inheriting its shape after it had
@@ -951,7 +958,11 @@ pub fn predict(scn: &Scenario, x: &State, thrust: Vec3, seconds: f64) -> State {
 pub fn plan(options: &[(Leg, ShipProblem)]) -> Result<(usize, ShipPlan), GuidanceError> {
     let mut last = GuidanceError::Infeasible;
     for (i, (_, p)) in options.iter().enumerate() {
-        match scvx::plan_ship(p, None, scvx::COLD_ITERATIONS) {
+        let iterations = match p.scn.ship.kind {
+            VehicleKind::Ship => scvx::COLD_ITERATIONS,
+            VehicleKind::Booster => BOOSTER_ITERATIONS,
+        };
+        match scvx::plan_ship(p, None, iterations) {
             Ok(plan) => return Ok((i, plan)),
             Err(e) => last = e,
         }
