@@ -24,7 +24,7 @@ function Loop() {
 
 /** The 3D view: world, tower, the full stack before a flight, the vehicle, effects, cameras. */
 export function Stage() {
-  const [dpr, setDpr] = useState(2);
+  const [dpr, setDpr] = useState(1.5);
   const [quality, setQuality] = useState<Quality>("high");
   return (
     <Canvas

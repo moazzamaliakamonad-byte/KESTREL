@@ -138,13 +138,13 @@ export function Post({ quality }: { quality: Quality }) {
       </EffectComposer>
     );
   }
-  // Multisampled: the tower's lattice and the drawing's thin lines stay clean.
   return (
-    <EffectComposer multisampling={4}>
+    <EffectComposer multisampling={0}>
       <Bloom mipmapBlur luminanceThreshold={0.92} intensity={1.2} radius={0.72} />
       <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
       <primitive object={blueprint} dispose={null} />
       <Vignette offset={0.28} darkness={0.58} />
+      <SMAA />
     </EffectComposer>
   );
 }
