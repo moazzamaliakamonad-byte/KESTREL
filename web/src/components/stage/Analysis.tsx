@@ -1,5 +1,6 @@
 "use client";
 
+import { shown } from "@/lib/ship/shown";
 import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef, useState } from "react";
@@ -105,7 +106,7 @@ export function Analysis() {
     if (!on || !root.current) return;
     root.current.visible = skin.on;
     const st = useShip.getState();
-    const s = shipLive.snapshot;
+    const s = shown();
     const info = st.info[st.scenario];
     if (!s || !info || !skin.on) return;
     const whole = !st.view.part;

@@ -1,5 +1,6 @@
 "use client";
 
+import { shown } from "@/lib/ship/shown";
 import { useEffect, useState } from "react";
 import { shipLive } from "@/lib/ship/live";
 import { PHASE_LABEL, SPEEDS, analysisOn, phasesOf, useShip, verdict, type CameraMode } from "@/lib/ship/store";
@@ -180,7 +181,7 @@ function Caption() {
 
 /** The flight's numbers, from its recorded history and its last instant. */
 function Report() {
-  const s = shipLive.snapshot;
+  const s = shown();
   const h = shipLive.history;
   if (!s || h.length < 2) return null;
   const peak = (pick: (x: (typeof h)[number]) => number) => h.reduce((m, x) => Math.max(m, pick(x)), 0);

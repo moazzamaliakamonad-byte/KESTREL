@@ -1,4 +1,5 @@
 import type { Vec3 } from "./frames";
+import type { Decision } from "./record";
 import type { PlanDraw, ShipSnapshot } from "./types";
 
 /** One point of the flight's history (for the graphs). SI units. */
@@ -33,6 +34,12 @@ export const shipLive: {
   hold: boolean;
   /** Mission clock of the opening sequence, s (negative before liftoff), or null. */
   launchClock: number | null;
+  /** Every decision of this flight, in time order (`record.ts`). */
+  decisions: Decision[];
+  /** The full state every 0.1 s, for replaying any instant. */
+  frames: ShipSnapshot[];
+  /** Bumped when `decisions` changes. */
+  decisionVersion: number;
 } = {
   snapshot: null,
   trail: [],
@@ -44,6 +51,9 @@ export const shipLive: {
   caption: null,
   hold: false,
   launchClock: null,
+  decisions: [],
+  frames: [],
+  decisionVersion: 0,
 };
 
 /** Longest history kept; when full, every other sample is dropped. */

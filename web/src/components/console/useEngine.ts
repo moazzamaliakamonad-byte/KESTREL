@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { ship_scenario } from "@/wasm/kestrel_wasm";
 import { createSolverClient } from "@/lib/solverClient";
-import { commentator, currentShip, loadShipWasm, setShipClient, startShip, stopShip } from "@/lib/ship/runtime";
+import { commentator, currentShip, loadShipWasm, setShipClient, settingChanged, startShip, stopShip } from "@/lib/ship/runtime";
 import { configOf, useShip } from "@/lib/ship/store";
 import type { Preview, ScenarioInfo, ScenarioKind } from "@/lib/ship/types";
 
@@ -85,6 +85,11 @@ export function useEngine() {
         f.set_lag(o.lag);
         f.set_noise(o.noise);
         f.set_wind(o.windSpeed * Math.cos(a), o.windSpeed * Math.sin(a));
+        // Tell guidance (and the flight record) what changed.
+        const p = prev.options;
+        if (o.windSpeed !== p.windSpeed || o.windDir !== p.windDir) settingChanged("Wind", `${o.windSpeed} m/s toward ${o.windDir}°`);
+        else if (o.lag !== p.lag) settingChanged("Throttle lag", `${o.lag.toFixed(2)} s`);
+        else if (o.noise !== p.noise) settingChanged("Sensor noise", o.noise);
         f.set_gust_speed(o.gustSpeed);
       }
     });

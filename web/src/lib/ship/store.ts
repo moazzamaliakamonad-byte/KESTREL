@@ -68,6 +68,8 @@ export interface ViewOptions {
   part: string | null;
   /** The keyboard help sheet. */
   help: boolean;
+  /** The analysis view replays the recorded instant at this sim time, s (null: live). */
+  scrubT: number | null;
   voice: boolean;
   /** Engine, wind and impact sound. */
   sound: boolean;
@@ -100,6 +102,7 @@ export const DEFAULT_VIEW: ViewOptions = {
   analysis: false,
   part: null,
   help: false,
+  scrubT: null,
   voice: true,
   sound: true,
   plan: true,
@@ -285,8 +288,13 @@ export const useShip = create<ShipState>((set, get) => ({
       view.paused = false;
       view.analysis = false;
     }
-    // A part is open only inside the analysis view.
-    if (!view.analysis) view.part = null;
+    // A part is open, and a recorded instant replayed, only inside the analysis view.
+    if (!view.analysis) {
+      view.part = null;
+      view.scrubT = null;
+    }
+    // Replaying needs the flight to stand still.
+    if (s.mode === "flying" && !view.paused) view.scrubT = null;
     set({ view });
   },
   setPreview(preview, previewing = false) {

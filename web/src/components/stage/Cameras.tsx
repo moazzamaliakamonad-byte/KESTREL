@@ -1,12 +1,12 @@
 "use client";
 
+import { shown } from "@/lib/ship/shown";
 import { OrbitControls } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useRef } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { quatToScene, toScene, type Vec3 } from "@/lib/ship/frames";
-import { shipLive } from "@/lib/ship/live";
 import { partOf } from "@/lib/ship/parts";
 import { analysisOn, useShip, type CameraMode } from "@/lib/ship/store";
 import type { ShipSnapshot } from "@/lib/ship/types";
@@ -69,7 +69,7 @@ export function Cameras() {
     const st = useShip.getState();
     const editing = st.mode === "editing";
     const launching = st.mode === "launch";
-    const snap = editing || launching ? null : shipLive.snapshot;
+    const snap = editing || launching ? null : shown();
     // Undo last frame's shake before moving the camera.
     if (shaken.current) cam.position.copy(steady.current);
     const p: Vec3 = snap?.position ?? st.start.position;

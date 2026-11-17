@@ -1,10 +1,10 @@
 "use client";
 
+import { shown as shownState } from "@/lib/ship/shown";
 import { Environment } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { shipLive } from "@/lib/ship/live";
 import { useShip } from "@/lib/ship/store";
 import type { ScenarioInfo } from "@/lib/ship/types";
 import { Backdrop, skin } from "./Blueprint";
@@ -375,7 +375,7 @@ function Tower({ c, radius }: { c: Catch; radius: number }) {
   const reach = -face + 13;
   useFrame((_, dt) => {
     const mode = useShip.getState().mode;
-    const closed = (mode === "flying" || mode === "done") && !!shipLive.snapshot?.arms;
+    const closed = (mode === "flying" || mode === "done") && !!shownState()?.arms;
     shown.current += ((closed ? 1 : 0) - shown.current) * Math.min(1, dt * 1.4);
     height.current += (c.arm_z - height.current) * Math.min(1, dt * 2);
     if (carriage.current) carriage.current.position.y = height.current;

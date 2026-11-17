@@ -11,6 +11,7 @@ import { clampDt, createMpc } from "../mpc";
 import type { SolverClient } from "../solverClient";
 import { Commentator, callouts } from "./commentary";
 import { pushSample, sampleOf, shipLive } from "./live";
+import { FRAME_EVERY, decisionsBetween, planDecision, pushFrame, replanReason, type Decision } from "./record";
 import { configOf, useShip, type FlightView } from "./store";
 import type { PlanDraw, ShipSnapshot } from "./types";
 
@@ -25,6 +26,33 @@ let client: SolverClient | null = null;
 const mpc = createMpc(SHIP_REPLAN_PERIOD);
 let lastTrail = -Infinity;
 let lastSample = -Infinity;
+let lastFrame = -Infinity;
+/** Something happened that makes the plan wrong (said in the next plan's reason). */
+let pendingEvent: string | null = null;
+/** Re-plan without waiting for the usual minimum gap (something happened). */
+let urgent = false;
+
+function record(d: Decision | Decision[]) {
+  const list = Array.isArray(d) ? d : [d];
+  if (!list.length) return;
+  shipLive.decisions = [...shipLive.decisions, ...list];
+  shipLive.decisionVersion += 1;
+}
+
+/** A visitor's action during the flight, recorded as a decision. */
+export function noteEvent(title: string, why: string, facts: [string, string][] = [], merge?: string) {
+  const s = shipLive.snapshot;
+  if (!s) return;
+  const last = shipLive.decisions.at(-1);
+  // A slider dragged: one entry, not one per step.
+  if (merge && last?.kind === "event" && last.title.startsWith(merge) && s.t - last.t < 1.5) {
+    shipLive.decisions = [...shipLive.decisions.slice(0, -1), { t: s.t, kind: "event", title, why, facts }];
+    shipLive.decisionVersion += 1;
+  } else {
+    record({ t: s.t, kind: "event", title, why, facts });
+  }
+  pendingEvent = `${title}: ${why}`;
+}
 export const commentator = new Commentator();
 
 export function loadShipWasm(): Promise<unknown> {
@@ -71,8 +99,14 @@ export function stopShip() {
   shipLive.replans = 0;
   shipLive.history = [];
   shipLive.caption = null;
+  shipLive.decisions = [];
+  shipLive.frames = [];
+  shipLive.decisionVersion += 1;
   lastTrail = -Infinity;
   lastSample = -Infinity;
+  lastFrame = -Infinity;
+  pendingEvent = null;
+  urgent = false;
 }
 
 function viewOf(s: ShipSnapshot): FlightView {
@@ -112,6 +146,11 @@ function publish(snap: ShipSnapshot, prev: ShipSnapshot | null) {
     shipLive.history = pushSample(shipLive.history, sampleOf(snap));
     lastSample = snap.t;
   }
+  if (snap.t - lastFrame >= FRAME_EVERY || snap.outcome) {
+    shipLive.frames = pushFrame(shipLive.frames, snap);
+    lastFrame = snap.t;
+  }
+  record(decisionsBetween(prev, snap));
   const view = viewOf(snap);
   if (!sameView(st.flight, view)) st.setFlight(view);
   if (snap.outcome) st.finish();
@@ -119,12 +158,23 @@ function publish(snap: ShipSnapshot, prev: ShipSnapshot | null) {
 
 /** Ask the worker for a plan if the flight wants one (at most one request in flight). */
 function requestPlan(f: ShipFlight, snap: ShipSnapshot) {
-  if (!client || !mpc.shouldRequest(snap.t, f.wants_replan())) return;
+  if (!client || !mpc.shouldRequest(snap.t, f.wants_replan(), urgent)) return;
+  urgent = false;
+  const reason = replanReason(snap, shipLive.plan, pendingEvent);
+  pendingEvent = null;
   const { t, request } = JSON.parse(f.measure_request()) as { t: number; request: unknown };
   const epoch = mpc.sent(snap.t);
   void client.call("plan_ship", request).then(({ response, ms }) => {
     if (!mpc.received(epoch, ms) || flight !== f) return;
     f.apply_replan(JSON.stringify(response), t);
+    const r = response as PlanResponse;
+    const now = shipLive.snapshot ?? snap;
+    const drawn = r.ok ? (JSON.parse(f.plan_json()) as PlanDraw | null) : null;
+    record(
+      r.ok && drawn
+        ? planDecision(now, reason, { ok: true, plan: drawn, ms, iterations: r.plan?.iterations, converged: r.plan?.converged, engines: r.leg?.engines ?? 1, gateZ: r.leg?.gate?.[2] ?? NaN })
+        : planDecision(now, reason, { ok: false, ms, error: r.error?.kind ?? "no answer" }),
+    );
     // Tell the flight how long solves take (in sim time), so the booster
     // plans from where it will be when the next one arrives.
     const recent = mpc.solveMs.slice(-4);
@@ -171,15 +221,42 @@ export function stepShip(seconds: number): ShipSnapshot | null {
   return snap;
 }
 
+interface PlanResponse {
+  ok: boolean;
+  leg?: { engines: number; gate: number[] };
+  plan?: { iterations: number; converged: boolean };
+  error?: { kind: string };
+}
+
 /** Throw a gust toward the page's gust direction. */
 export function throwGust() {
   const o = useShip.getState().options;
   const a = (o.gustDir * Math.PI) / 180;
   flight?.set_gust_speed(o.gustSpeed);
   flight?.gust_toward(Math.cos(a), Math.sin(a));
+  noteEvent("Gust thrown", `A ${o.gustSpeed} m/s gust for 4 s. The plan did not expect it: guidance re-plans at once.`, [
+    ["Gust speed", `${o.gustSpeed} m/s`],
+    ["Toward", `${o.gustDir}°`],
+  ]);
+  urgent = true;
+  flight?.request_replan();
 }
 
 /** Fail landing engine `i` in flight. */
 export function failEngine(i: number): boolean {
-  return flight?.fail_engine(i) ?? false;
+  const ok = flight?.fail_engine(i) ?? false;
+  if (ok) {
+    noteEvent(`Engine ${i + 1} failed (by you)`, "Its thrust is gone. Guidance re-plans at once with the engines left, and a spare relights if the burn is short of engines.");
+    urgent = true;
+    flight?.request_replan();
+  }
+  return ok;
+}
+
+/** A physics or environment setting changed mid-flight: re-plan at once. */
+export function settingChanged(what: string, value: string) {
+  if (!flight) return;
+  noteEvent(`${what} changed to ${value}`, "The world the plan assumed is different now: guidance re-plans at once.", [], what);
+  urgent = true;
+  flight.request_replan();
 }

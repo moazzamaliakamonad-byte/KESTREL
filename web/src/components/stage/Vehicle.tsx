@@ -1,5 +1,6 @@
 "use client";
 
+import { shown } from "@/lib/ship/shown";
 import { Billboard } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { useRef } from "react";
@@ -7,7 +8,6 @@ import * as THREE from "three";
 import { HEATING_OFF } from "@/lib/ship/commentary";
 import { quatToScene, rotateInv, startAttitude, toScene, type PQuat, type Vec3 } from "@/lib/ship/frames";
 import { launchState, type LaunchState } from "@/lib/ship/launch";
-import { shipLive } from "@/lib/ship/live";
 import { useShip } from "@/lib/ship/store";
 import type { EngineState } from "@/lib/ship/types";
 import { BlueprintSkin, skin } from "./Blueprint";
@@ -47,7 +47,7 @@ export function Vehicle() {
     if (!g) return;
     const st = useShip.getState();
     const flying = st.mode === "flying" || st.mode === "done";
-    const s = flying ? shipLive.snapshot : null;
+    const s = flying ? shown() : null;
     const position: Vec3 = s?.position ?? st.start.position;
     const q: PQuat = s?.quat ?? startAttitude(st.vehicle, st.start.velocity);
     g.position.set(...toScene(position));

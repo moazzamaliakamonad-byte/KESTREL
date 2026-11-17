@@ -1,5 +1,6 @@
 "use client";
 
+import { shown } from "@/lib/ship/shown";
 import { useEffect, useRef } from "react";
 import { rotate } from "@/lib/ship/frames";
 import { shipLive, type Sample } from "@/lib/ship/live";
@@ -146,7 +147,7 @@ export function Telemetry() {
   const vehicle = useShip((s) => s.vehicle);
   const flight = useShip((s) => s.flight);
   const info = useShip((s) => s.info[s.scenario]);
-  const s = shipLive.snapshot;
+  const s = shown();
   if (!s || !info) return null;
   const speed = Math.hypot(...s.velocity);
   const z = s.position[2];
