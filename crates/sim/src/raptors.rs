@@ -1,14 +1,14 @@
 //! The landing engines (the ship's three sea-level engines, or the
 //! booster's inner thirteen with the centre three first): ignition, a
 //! shared gimbal that slews at a limited rate, throttle with an optional
-//! first-order lag, shutdown (commanded by the flight software; no relight)
-//! and failures.
+//! first-order lag, shutdown (commanded by the flight software), relight of
+//! a shut-down engine (when a running one fails) and failures.
 //!
 //! All lit engines share one thrust direction and throttle (a simplification:
 //! real engines gimbal individually and sit off the axis).
 
-use model::quat::{self, Vec3};
 use model::Ship;
+use model::quat::{self, Vec3};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EngineState {
@@ -16,7 +16,7 @@ pub enum EngineState {
     /// Lit and spinning up: seconds until thrust.
     Igniting(f64),
     Running,
-    /// Shut down by the engine manager; stays off for the rest of the flight.
+    /// Shut down by the engine manager; a spare that can be relit.
     Shutdown,
     Failed,
 }
@@ -66,15 +66,52 @@ impl Cluster {
     }
 
     pub fn running(&self) -> u8 {
-        self.engines.iter().filter(|e| **e == EngineState::Running).count() as u8
+        self.engines
+            .iter()
+            .filter(|e| **e == EngineState::Running)
+            .count() as u8
     }
 
-    /// Engines that can still give thrust (running, igniting or never lit).
+    /// Engines that can still give thrust (running, igniting, never lit, or
+    /// shut down and able to relight).
     pub fn healthy(&self) -> u8 {
         self.engines
             .iter()
-            .filter(|e| matches!(e, EngineState::Off | EngineState::Igniting(_) | EngineState::Running))
+            .filter(|e| !matches!(e, EngineState::Failed))
             .count() as u8
+    }
+
+    /// Seconds until the soonest igniting engine gives thrust (0: none igniting).
+    pub fn spin_up_left(&self) -> f64 {
+        self.engines
+            .iter()
+            .filter_map(|e| match e {
+                EngineState::Igniting(left) => Some(*left),
+                _ => None,
+            })
+            .reduce(f64::min)
+            .unwrap_or(0.0)
+            .max(0.0)
+    }
+
+    /// Relight shut-down engines until `n` are lit (or none are left).
+    /// They give thrust after the ignition time. Returns how many were lit.
+    pub fn relight_to(&mut self, n: u8) -> u8 {
+        let mut lit = 0;
+        while self.lit() < n {
+            match self
+                .engines
+                .iter()
+                .position(|e| *e == EngineState::Shutdown)
+            {
+                Some(i) => {
+                    self.engines[i] = EngineState::Igniting(self.ignition_time);
+                    lit += 1;
+                }
+                None => break,
+            }
+        }
+        lit
     }
 
     /// Engines running or about to be.
@@ -86,7 +123,10 @@ impl Cluster {
     }
 
     pub fn failed(&self) -> usize {
-        self.engines.iter().filter(|e| **e == EngineState::Failed).count()
+        self.engines
+            .iter()
+            .filter(|e| **e == EngineState::Failed)
+            .count()
     }
 
     /// `(min, max)` thrust of the engines running now, N.
@@ -112,7 +152,10 @@ impl Cluster {
     /// Fail engine `i`. False if it is already failed, does not exist, or
     /// the limit is reached.
     pub fn fail(&mut self, i: usize) -> bool {
-        if i >= self.engines.len() || self.engines[i] == EngineState::Failed || self.failed() >= self.max_failed() {
+        if i >= self.engines.len()
+            || self.engines[i] == EngineState::Failed
+            || self.failed() >= self.max_failed()
+        {
             return false;
         }
         self.engines[i] = EngineState::Failed;
@@ -276,7 +319,11 @@ mod tests {
         let sideways = [5e6, 0.0, 0.0];
         c.step(sideways, 0.1);
         let angle = c.direction[2].acos();
-        assert!((angle - 3f64.to_radians()).abs() < 1e-6, "{}", angle.to_degrees());
+        assert!(
+            (angle - 3f64.to_radians()).abs() < 1e-6,
+            "{}",
+            angle.to_degrees()
+        );
         for _ in 0..100 {
             c.step(sideways, 0.01);
         }
@@ -294,7 +341,26 @@ mod tests {
         c.step([0.0, 0.0, 1.2e6], 0.01);
         assert!((quat::norm(c.thrust) - 1.2e6).abs() < 1.0);
         c.ignite_all();
-        assert_eq!(c.lit(), 1, "shut-down engines do not relight");
+        assert_eq!(c.lit(), 1, "ignite_all lights only engines never lit");
+    }
+
+    #[test]
+    fn a_spare_relights_when_the_running_engine_fails() {
+        let mut c = cluster();
+        c.ignite_all();
+        c.step([0.0, 0.0, 6e6], 1.5);
+        c.shutdown_to(1);
+        assert_eq!(c.healthy(), 3, "shut-down engines are spares");
+        assert!(c.fail(0));
+        assert_eq!(c.lit(), 0);
+        assert_eq!(c.relight_to(1), 1);
+        assert_eq!(c.lit(), 1);
+        assert_eq!(c.running(), 0, "it has to spin up first");
+        c.step([0.0, 0.0, 1.2e6], 0.5);
+        assert_eq!(c.running(), 0);
+        c.step([0.0, 0.0, 1.2e6], 0.51);
+        assert_eq!(c.running(), 1);
+        assert_eq!(c.relight_to(1), 0, "already enough lit");
     }
 
     #[test]
