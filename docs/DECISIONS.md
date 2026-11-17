@@ -599,3 +599,37 @@ Template:
   Setting up the solver anew for every plan cost 4-9 ms per plan (the
   ordering); keeping set-up solvers removed it.
 - Speed: see LIMITATIONS.md, "Solve-time benchmark".
+
+## D-042 — Entry from orbit: a guided 3-DoF entry that hands over to the landing
+- Date: 2026-11-17
+- Status: accepted
+- Context: the roadmap's "orbital entry (round planet, heating that
+  matters)". The ship's highest start was a fall from 80 km at 2.5 km/s.
+- Decision:
+  - Truth: a point mass on a round, non-rotating Earth (μ/r² gravity,
+    1976 standard atmosphere), lift and drag at a Mach-dependent angle of
+    attack (*illustrative*: lift-to-drag 0.46 hypersonic, drag only below
+    Mach 1.5), bank angle rolling at 15°/s (`model::entry`, `sim::entry`).
+  - Heating that matters: Sutton-Graves stagnation heating, tile
+    temperature by radiative equilibrium; above 1 700 K for 8 s the heat
+    shield burns through (all *illustrative*).
+  - Guidance (`guidance::entry`): a numerical predictor-corrector in the
+    family of FNPEG (Lu 2014). Every second it flies the rest of the entry
+    ahead with a constant bank and bisects the bank until the hand-over
+    lands on the aim point; bank reversals keep the heading on the tower
+    within a deadband (10° fast, 0.25° slow); near the tile limit a
+    heating override lifts the ship.
+  - Hand-over at 25 km to the existing 6-DoF flight, in the tower's frame,
+    aiming 27.5 km before the tower: start probes found 20.5-28 km caught
+    (the belly flop carries the ship about 20 km on) and the entry ends
+    about 2.5 km short of its aim.
+  - The page: a "From orbit" start with distance and angle, the entry at
+    ×16 on a procedural globe, its own telemetry, real time at the
+    hand-over.
+- Measured: nominal (3 300 km, -1.0°) entry 624 s, peak 1 674 K and 0.38
+  MW/m², 2.9 g, hand-over 25.1 km out, caught at 827 s; 14 of 20 starts
+  in the corridor sweep caught (LIMITATIONS.md).
+- Tried: a 1 650 K tile limit (every start in the swept range came within
+  50 K of it or above); aiming the heading at the aim point instead of the
+  tower (the ship arrived with 88 m/s sideways, which the belly flop
+  cannot remove, and was lost); the hand-over aimed at 3 km and 25 km out.

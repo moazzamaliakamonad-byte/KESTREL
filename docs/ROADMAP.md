@@ -97,7 +97,9 @@ simulation can be, on one page with a mission-control interface.
 
 - [x] Commentary (rendered clips) and camera-aware procedural sound
 - [ ] Simulated ascent, hot staging and boostback (the full mission)
-- [ ] Orbital entry (round planet, heating that matters)
+- [x] Orbital entry (round planet, heating that matters): a guided
+      entry from 120 km and 7.5 km/s on a round Earth, tiles that can
+      burn through, hand-over to the landing (D-042)
 - [x] Custom solver: no heap allocation in the loop, bounded iterations
       (`crates/socp`; a choice on the page; Clarabel stays the default,
       D-041)

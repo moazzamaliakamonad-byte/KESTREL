@@ -186,6 +186,9 @@ crates/model      what truth and guidance must agree on (no dependencies)
                fin_gain / fin_force / fin_allocate (booster's three grid fins)
   dynamics.rs  x' = f(x, T): state [m, r, v, q, w] (14), thrust at the gimbal point
   quat.rs      quaternion algebra
+  entry.rs     entry from orbit: round Earth, 1976 atmosphere (table), entry aerodynamics,
+               Sutton-Graves heating and tile temperature, 3-DoF dynamics in Earth-centred
+               coordinates steered by bank angle (D-042)
 crates/socp       Kestrel's own interior-point SOCP solver (D-041): Solver::new analyses the
                   pattern (minimum-degree ordering, elimination tree) and allocates
                   everything; update() + solve() allocate nothing; at most 40 iterations.
@@ -194,6 +197,8 @@ crates/socp       Kestrel's own interior-point SOCP solver (D-041): Solver::new 
   solver.rs    Ruiz equilibration, Mehrotra predictor-corrector, KKT assembly/refinement
   tests/       known answers, 40 random problems against Clarabel, a counting allocator
 crates/sim
+  entry.rs     EntrySim: the entry's truth (RK4, 0.1 s), bank rate limit, heat load,
+               burn-through, hand-over altitude
   ship.rs      ShipSim: RK4 in 10 ms substeps; flaps or fins (slew, clamp); RCS; steady
                wind + gusts; contact with mast, arms, ground; Outcome (caught/crashed)
   raptors.rs   Cluster: N landing engines (ship 3; booster 13, centre three first),
@@ -207,10 +212,14 @@ crates/guidance
                re-integration)
   ship_control.rs  belly_flop (ship) / descent (booster) -> unpowered(); flip; steady_burn;
                powered (plan tracking); terminal; ignition_altitude; fall_time
+  entry.rs     entry guidance: predictor-corrector on the bank angle (bisection), bank
+               reversals on a heading deadband, heating override; entry_start geometry
   envelope.rs  engine-out envelope: the largest sink speed from which a relit spare can
                still stop the ship above the arms (point-mass bound, D-039)
 crates/wasm
-  ship_flight.rs  ShipFlight: phases (unpowered -> flip/start-up -> burn legs -> terminal);
+  ship_flight.rs  ShipFlight: phases ([entry from orbit ->] unpowered -> flip/start-up -> burn
+               legs -> terminal); the entry hands over at 25 km by rebuilding the flight from
+               its state in the tower's frame;
                the ship plans from engine start (flip on every engine, planned switch
                to one), relights a spare after a failure, request_replan() on events,
                emergency full-thrust option and a lower emergency gate after an engine
@@ -254,6 +263,10 @@ web/src/components/console  DOM overlay
   Console (top bar, timeline, action bar, caption, verdict, keys), Dock (Mission, Vehicle,
   Environment, View), Telemetry (rail, attitude ball, engine map, graphs), AnalysisPanel,
   Launch (opening overlay, phase banner, analysis intro), useEngine (workers, preview)
+web/src/components/stage/Entry.tsx  the entry scene: procedural globe (Earth-centred, turned so the
+                            ship is at the origin), atmosphere rim, stars, predicted ground track,
+                            ship at its angle of attack and bank, plasma wake, its own camera;
+                            NotInEntry hides the landing scenery meanwhile
 web/scripts/make-voice.mjs  renders phrases.ts to public/voice/*.mp3 (dev tool)
 web/e2e/console.spec.ts     opt-in Playwright tests of the page (catch, engine out, analysis, reset);
                             E2E_BASE_URL=http://localhost:3000 runs them against a dev server

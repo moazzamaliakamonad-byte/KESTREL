@@ -57,9 +57,10 @@ return to the same tower.
   analysis view with per-part calculations, commentary and sound, a
   navigation filter, an engine-out envelope, and Kestrel's own convex
   solver (no memory allocation while solving, a fixed iteration cap;
-  Clarabel stays the default) with a published benchmark. Not built: a
-  simulated ascent, hot staging and boostback (the opening sequence is an
-  illustration), orbital entry.
+  Clarabel stays the default) with a published benchmark, and a guided
+  entry from orbit (120 km, 7.5 km/s, a round Earth, tiles that can burn
+  through) that hands over to the landing. Not built: a simulated ascent,
+  hot staging and boostback (the opening sequence is an illustration).
 
 Measured numbers and every known approximation:
 [LIMITATIONS.md](LIMITATIONS.md). Plan: [docs/ROADMAP.md](docs/ROADMAP.md).

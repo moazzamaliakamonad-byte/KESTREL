@@ -28,19 +28,39 @@ What is simulated, and what is only shown:
   The opening sequence (countdown, liftoff, the stages parting at 64 km,
   the title card) is an illustration timed by hand. The screen says so
   while it plays.
-- **Not simulated: orbital entry.** The ship's "Entry" start is a steep
-  fall from 80 km at 2.5 km/s (about Mach 7), not an entry from orbit
-  (7.8 km/s, a shallow path over thousands of kilometres on a round
-  planet). In the dense air it decelerates far harder than a real vehicle
-  or crew could take; nothing limits it.
-- **Heating is an estimate for the picture only.** The glow and the
-  "Heating" readout use the Sutton–Graves stagnation-point formula with a
-  4.5 m nose radius. Heat does nothing to the vehicle. In every start the
-  page offers it stays below about 0.15 MW/m² (a real orbital entry is in
-  the MW/m² range).
-- **Flat ground, constant gravity, exponential atmosphere, no Mach
-  effects.** The booster starts supersonic and the ship's entry start
-  hypersonic with the same drag coefficients as at low speed. No plume–air
+- **Entry from orbit is a point mass on a round, non-rotating Earth**
+  (the "From orbit" start, D-042). From 120 km at 7.5 km/s, 3 000-3 600 km
+  out: the ship's position and velocity only (3-DoF), lift and drag from
+  *illustrative* coefficients (lift-to-drag 0.46 at Mach 5 and above,
+  fading to the belly flop's drag only below Mach 1.5), the 1976 standard
+  atmosphere, gravity μ/r². No Earth rotation (no Coriolis, no rotating
+  air), no attitude dynamics: the bank angle rolls at 15°/s toward what
+  guidance asks. Entry guidance reads the true state (no entry
+  navigation). At 25 km the 6-DoF flight takes over from the entry's
+  state; the attitude there is set belly down, not carried over.
+- **Heating matters in the entry, and only there.** Stagnation-point heat
+  flux (Sutton–Graves, 4.5 m effective nose radius, *illustrative*) sets
+  the tile temperature by radiative equilibrium (emissivity 0.85,
+  *illustrative*). Above the limit (1 700 K, *illustrative*) for more than
+  8 s the heat shield burns through and the flight is lost. No heat soak,
+  no ablation, no tile-by-tile damage, one point on the vehicle. Nominal
+  entry: peak 0.38 MW/m², 1 674 K, 2.9 g. After the hand-over heating is
+  again an estimate for the picture.
+- **The entry corridor** (`orbit_sweep`, `--ignored`, low noise, seed 7,
+  2026-11-17): of 20 starts (3 000-3 600 km out, entry angle 0.8-1.5°
+  down) 14 were caught. Too close and shallow: short of the hand-over
+  window (one burned through); too far and steep: past it. The page's
+  prediction flies each start. Guidance steers the heading at the tower
+  and hands over within about 2.5 km of its aim when the start is on the
+  ground track; with the aim moved 10 km sideways it handed over 6 km
+  short, outside the window (not a supported start).
+- **The globe is procedural**: noise land, sea, ice and clouds, not real
+  geography. The site's coordinates (Starbase, Texas) only place the
+  ground track.
+- **After the entry (and in every other start): flat ground, constant
+  gravity, exponential atmosphere, no Mach effects.** The booster starts
+  supersonic and the ship's 80 km start hypersonic with the same drag
+  coefficients as at low speed. No plume–air
   interaction during the burn.
 - **Aerodynamics are a simple model**: crossflow drag of a cylinder, a
   linear lift slope for the booster (slender-body value), flaps as drag
