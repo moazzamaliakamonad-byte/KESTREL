@@ -140,7 +140,23 @@ pub struct Solver {
     dsv: Vec<f64>,
     status: Status,
     iterations: usize,
+    // Equilibration (Ruiz): the solver works on D⁻¹x, rows scaled by E,
+    // the objective by `cost`.
+    d: Vec<f64>,
+    e: Vec<f64>,
+    cost: f64,
+    col_norm: Vec<f64>,
+    row_norm: Vec<f64>,
+    /// First row of A of each SOC block (its rows are consecutive), to
+    /// scale the block as one.
+    soc_rows: Vec<(usize, usize)>,
+    x_out: Vec<f64>,
 }
+
+/// Ruiz equilibration passes and the bounds on any one scale factor.
+const RUIZ_PASSES: usize = 15;
+const SCALE_MIN: f64 = 1e-4;
+const SCALE_MAX: f64 = 1e4;
 
 fn norm(v: &[f64]) -> f64 {
     v.iter().map(|c| c * c).sum::<f64>().sqrt()
@@ -367,9 +383,102 @@ impl Solver {
             dsv: vec![0.0; m_cone],
             status: Status::Unsolved,
             iterations: 0,
+            d: vec![1.0; n],
+            e: vec![1.0; a.m],
+            cost: 1.0,
+            col_norm: vec![0.0; n],
+            row_norm: vec![0.0; a.m],
+            soc_rows: Vec::new(),
+            x_out: vec![0.0; n],
         };
+        // Rows of each SOC block, in A's row order.
+        let mut cone_to_row = vec![0; solver.m_cone];
+        for (row, &(is_eq, i)) in solver.row_kind.iter().enumerate() {
+            if !is_eq {
+                cone_to_row[i] = row;
+            }
+        }
+        solver.soc_rows = solver
+            .blocks
+            .iter()
+            .filter(|b| b.soc)
+            .map(|b| (cone_to_row[b.start], b.dim))
+            .collect();
         solver.split_b(b);
+        solver.equilibrate();
         Ok(solver)
+    }
+
+    /// Ruiz equilibration of the data in place: scale columns (D) and rows
+    /// (E, one factor per SOC block) until every row and column of
+    /// [P Aᵀ; A 0] has largest entry near 1, then the objective (`cost`).
+    /// Works on the stored data; allocates nothing.
+    fn equilibrate(&mut self) {
+        let (n, m) = (self.n, self.a.m);
+        self.d.fill(1.0);
+        self.e.fill(1.0);
+        for _ in 0..RUIZ_PASSES {
+            for j in 0..n {
+                self.col_norm[j] = self.p_diag[j].abs();
+            }
+            self.row_norm.fill(0.0);
+            for j in 0..n {
+                for k in self.a.colptr[j]..self.a.colptr[j + 1] {
+                    let v = self.a.nzval[k].abs();
+                    let r = self.a.rowval[k];
+                    self.col_norm[j] = self.col_norm[j].max(v);
+                    self.row_norm[r] = self.row_norm[r].max(v);
+                }
+            }
+            // One factor per SOC block: its largest row.
+            for &(r0, dim) in &self.soc_rows {
+                let rows = r0..r0 + dim;
+                let mx = self.row_norm[rows.clone()]
+                    .iter()
+                    .fold(0.0f64, |a, v| a.max(*v));
+                self.row_norm[rows].fill(mx);
+            }
+            let factor = |v: f64| {
+                if v < 1e-8 {
+                    1.0
+                } else {
+                    (1.0 / v.sqrt()).clamp(SCALE_MIN, SCALE_MAX)
+                }
+            };
+            for j in 0..n {
+                let dj = factor(self.col_norm[j]);
+                self.col_norm[j] = dj;
+                self.d[j] = (self.d[j] * dj).clamp(SCALE_MIN, SCALE_MAX);
+                self.p_diag[j] *= dj * dj;
+                self.q[j] *= dj;
+            }
+            for r in 0..m {
+                let er = factor(self.row_norm[r]);
+                self.row_norm[r] = er;
+                self.e[r] = (self.e[r] * er).clamp(SCALE_MIN, SCALE_MAX);
+            }
+            for j in 0..n {
+                for k in self.a.colptr[j]..self.a.colptr[j + 1] {
+                    self.a.nzval[k] *= self.row_norm[self.a.rowval[k]] * self.col_norm[j];
+                }
+            }
+            for (r, &(is_eq, i)) in self.row_kind.iter().enumerate() {
+                if is_eq {
+                    self.b_eq[i] *= self.row_norm[r];
+                } else {
+                    self.h[i] *= self.row_norm[r];
+                }
+            }
+        }
+        // Objective scale: P and q of order one.
+        let mean_p = self.p_diag.iter().map(|v| v.abs()).sum::<f64>() / n.max(1) as f64;
+        let max_q = self.q.iter().fold(0.0f64, |a, v| a.max(v.abs()));
+        let c = (1.0 / mean_p.max(max_q).max(1e-8)).clamp(SCALE_MIN, SCALE_MAX);
+        self.cost = c;
+        for j in 0..n {
+            self.p_diag[j] *= c;
+            self.q[j] *= c;
+        }
     }
 
     fn split_b(&mut self, b: &[f64]) {
@@ -398,6 +507,7 @@ impl Solver {
         self.p_diag.copy_from_slice(p_diag);
         self.q.copy_from_slice(q);
         self.split_b(b);
+        self.equilibrate();
         self.status = Status::Unsolved;
         Ok(())
     }
@@ -886,11 +996,16 @@ impl Solver {
                 self.z[i] += alpha * self.dz[i];
             }
         }
+        // Back to the caller's variables: x = D x̃.
+        for j in 0..n {
+            self.x_out[j] = self.d[j] * self.x[j];
+        }
         self.status
     }
 
-    /// The solution in the input's row order: (x, s, dual of each row).
+    /// The solution (the caller's variables, not the scaled ones).
+    #[allow(clippy::misnamed_getters)]
     pub fn x(&self) -> &[f64] {
-        &self.x
+        &self.x_out
     }
 }
