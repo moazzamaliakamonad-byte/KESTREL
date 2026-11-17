@@ -4,6 +4,7 @@
 
 pub mod aero;
 pub mod dynamics;
+pub mod entry;
 pub mod quat;
 pub mod vehicle;
 
