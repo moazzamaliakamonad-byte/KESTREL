@@ -66,14 +66,17 @@ Notes:
 - End-to-end tests are opt-in: `npx playwright install chromium` once, then
   `npm run e2e`. `PW_GPU=1` makes Playwright use the real GPU (Windows,
   Direct3D); otherwise WebGL runs in software and is slow.
-- `npm run measure` (browser) and `npm run bench` (Node) time the solver.
+- `E2E_BASE_URL=http://localhost:3000` runs the end-to-end tests against a
+  running dev server instead of a static build; `PW_BROWSER=firefox` runs
+  them in Firefox (`npx playwright install firefox` once).
+- `npm run measure` (browser; `MEASURE_SOLVER=kestrel` for Kestrel's own
+  solver) and `cargo run --release -p kestrel-wasm --example
+  bench_solvers` (native, both solvers) time the planner.
 - The commentary clips in `web/public/voice/` are generated. To change a
   line: edit `web/src/lib/ship/phrases.ts`, then run
   `web/scripts/make-voice.mjs` as its header describes (it needs two npm
   packages installed in a scratch folder, not in the project, and downloads
   an open text-to-speech model of about 90 MB on first use).
-- The Playwright tests in `web/e2e/` were written for the M2 page and do not
-  match the current one (see ROADMAP.md).
 
 ## Test policy
 
