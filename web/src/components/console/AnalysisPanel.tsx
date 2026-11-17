@@ -9,6 +9,7 @@ import { stepShip } from "@/lib/ship/runtime";
 import { useShip } from "@/lib/ship/store";
 import { Graph } from "./Telemetry";
 import { Panel, fmt, useTick } from "./controls";
+import { Units } from "./Units";
 import css from "./console.module.css";
 
 const altitude = (s: Sample) => s.altitude;
@@ -40,7 +41,9 @@ function Row({ c }: { c: Calc }) {
   return (
     <div className={css.calc} data-tight={(c.share ?? 0) > 0.9 || undefined}>
       <span>{c.label}</span>
-      <b>{c.value}</b>
+      <b>
+        <Units text={c.value} />
+      </b>
       {c.formula && <code>{c.formula}</code>}
       {c.share !== undefined && (
         <div className={css.calcBar}>
@@ -152,7 +155,9 @@ function Decisions() {
                   {d.facts.map(([k, v]) => (
                     <div key={k}>
                       <dt>{k}</dt>
-                      <dd>{v}</dd>
+                      <dd>
+                        <Units text={v} />
+                      </dd>
                     </div>
                   ))}
                 </dl>

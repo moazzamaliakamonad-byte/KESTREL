@@ -11,6 +11,7 @@ import { Dock } from "./Dock";
 import { LaunchOverlay, PhaseBanner, launchLines } from "./Launch";
 import { Briefing, Telemetry } from "./Telemetry";
 import { fmt, useNow, useTick } from "./controls";
+import { UnitTip, Units } from "./Units";
 import css from "./console.module.css";
 
 const CAMERA_KEYS: CameraMode[] = ["director", "chase", "track", "onboard", "tower", "orbit"];
@@ -201,7 +202,9 @@ function Report() {
       {rows.map(([k, v]) => (
         <div key={k}>
           <dt>{k}</dt>
-          <dd>{v}</dd>
+          <dd>
+            <Units text={v} />
+          </dd>
         </div>
       ))}
     </dl>
@@ -272,7 +275,9 @@ function Help() {
               <dt>
                 <kbd>{k}</kbd>
               </dt>
-              <dd>{v}</dd>
+              <dd>
+            <Units text={v} />
+          </dd>
             </div>
           ))}
         </dl>
@@ -339,6 +344,7 @@ export function Console() {
       </footer>
       <Verdict />
       <Help />
+      <UnitTip />
       {error && (
         <div className={css.error} role="alert">
           {error}

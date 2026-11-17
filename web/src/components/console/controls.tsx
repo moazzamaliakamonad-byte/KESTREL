@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { Units } from "./Units";
 import css from "./console.module.css";
 
 /** Re-render every `ms` (for numbers read from `shipLive`). */
@@ -73,7 +74,9 @@ export function Slider({
           {label}
           {tag && <i data-tag={tag}>{tag === "pub" ? "published" : "illustrative"}</i>}
         </em>
-        <b>{format(value)}</b>
+        <b>
+          <Units text={format(value)} />
+        </b>
       </span>
       <input type="range" min={range[0]} max={range[1]} step={step} value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} />
     </label>

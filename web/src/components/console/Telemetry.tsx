@@ -9,6 +9,7 @@ import { PHASE_LABEL, useShip } from "@/lib/ship/store";
 import type { ShipSnapshot } from "@/lib/ship/types";
 import { EngineMap } from "./Dock";
 import { Panel, fmt, useTick } from "./controls";
+import { Units } from "./Units";
 import css from "./console.module.css";
 
 /** Where the nose points, seen from above: centre = upright, rim = horizontal. */
@@ -112,6 +113,7 @@ export function Graph({ pick, label, unit, scale = 1, digits = 0 }: { pick: (s: 
       g.fillStyle = "rgba(90, 209, 255, 0.12)";
       g.fill();
       if (value.current) value.current.textContent = `${ys[ys.length - 1].toFixed(digits)} ${unit}`;
+      if (value.current) value.current.dataset.unit = unit;
     };
     draw();
     const id = setInterval(draw, 200);
@@ -134,9 +136,15 @@ function Readout({ label, value, unit, sub }: { label: string; value: string; un
       <span>{label}</span>
       <b>
         {value}
-        <i>{unit}</i>
+        <i className={css.unit} data-unit={unit}>
+          {unit}
+        </i>
       </b>
-      {sub && <em>{sub}</em>}
+      {sub && (
+        <em>
+          <Units text={sub} />
+        </em>
+      )}
     </div>
   );
 }
@@ -169,17 +177,25 @@ export function Telemetry() {
       </div>
       <div className={css.grid}>
         <span>Descent rate</span>
-        <b>{fmt(-s.velocity[2], 1)} m/s</b>
+        <b>
+          <Units text={`${fmt(-s.velocity[2], 1)} m/s`} />
+        </b>
         <span>Tilt</span>
         <b>{fmt(s.tilt_deg, 1)}°</b>
         <span>Dynamic pressure</span>
-        <b>{fmt(s.q_dyn / 1000, 1)} kPa</b>
+        <b>
+          <Units text={`${fmt(s.q_dyn / 1000, 1)} kPa`} />
+        </b>
         <span>Thrust / weight</span>
         <b>{fmt(s.thrust_mag / Math.max(1, s.weight), 2)}</b>
         <span>Heating</span>
-        <b>{fmt(s.heat_flux / 1000, s.heat_flux < 1e4 ? 1 : 0)} kW/m²</b>
+        <b>
+          <Units text={`${fmt(s.heat_flux / 1000, s.heat_flux < 1e4 ? 1 : 0)} kW/m²`} />
+        </b>
         <span>Mass</span>
-        <b>{fmt(s.mass / 1000, 1)} t</b>
+        <b>
+          <Units text={`${fmt(s.mass / 1000, 1)} t`} />
+        </b>
       </div>
       <Bar label="Propellant" value={s.propellant / full} text={`${fmt(s.propellant / 1000, 1)} t`} tone={s.propellant / full < 0.15 ? "warm" : undefined} />
       <Bar label={`Thrust · ${lit} lit`} value={s.thrust_mag / max} text={`${fmt(s.thrust_mag / 1e6, 2)} MN`} marks={lit ? [s.thrust_limits[0] / max, s.thrust_limits[1] / max] : []} tone="warm" />
@@ -254,7 +270,7 @@ export function Briefing() {
           <div key={k}>
             <dt>{k}</dt>
             <dd>
-              {v}
+              <Units text={v} />
               <i data-tag={tag}>{tag === "pub" ? "published" : "illustrative"}</i>
             </dd>
           </div>
