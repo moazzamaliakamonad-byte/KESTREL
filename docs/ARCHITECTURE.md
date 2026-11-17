@@ -240,6 +240,8 @@ web/src/components/console  DOM overlay
   Environment, View), Telemetry (rail, attitude ball, engine map, graphs), AnalysisPanel,
   Launch (opening overlay, phase banner, analysis intro), useEngine (workers, preview)
 web/scripts/make-voice.mjs  renders phrases.ts to public/voice/*.mp3 (dev tool)
+web/e2e/console.spec.ts     opt-in Playwright tests of the page (catch, engine out, analysis, reset);
+                            E2E_BASE_URL=http://localhost:3000 runs them against a dev server
 ```
 
 Per frame while flying (`Stage` -> `runtime.shipFrame`): step the flight
@@ -264,7 +266,7 @@ ship, the booster parked beside the pad, or end).
 
 - Firefox solve time (Chromium measured: ~244 ms with a GPU).
 - M3: solve times of the 6-DoF planner are not benchmarked yet (only spot
-  readings, LIMITATIONS.md); the new page has no end-to-end test yet.
+  readings, LIMITATIONS.md).
 - Lossless convexification is not guaranteed when the ground constraint is
   active (closest landings near the ground); such landing times are skipped.
 

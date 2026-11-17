@@ -99,9 +99,13 @@ What is simulated, and what is only shown:
   divided by the engines lit. Stepping a paused flight lets plans arrive
   with no delay in sim time, so a stepped flight is not the same flight as
   one left running.
-- The page has no end-to-end test yet (the old Playwright tests drove the
-  M2 page and no longer apply); it was checked by hand and with scripted
-  headless runs.
+- **End-to-end tests** (`web/e2e/console.spec.ts`, opt-in, Playwright):
+  a booster flight caught, a ship flight with its running engine failed
+  in the landing burn and caught, pause → analysis view → open a part →
+  step → resume, and reset mid-flight. 4 of 4 passed on 2026-11-17 against
+  the dev server with the real GPU (Chromium, this laptop, ×1, about 4
+  minutes). They check what a visitor sees, not the physics; a slow
+  machine can make a flight fail (solve delay counts in sim time).
 
 ## The earlier 3-DoF page (M0–M2; code kept, no longer served)
 

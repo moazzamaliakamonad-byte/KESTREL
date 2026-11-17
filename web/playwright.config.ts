@@ -2,14 +2,18 @@ import { defineConfig } from "@playwright/test";
 
 // End-to-end tests against the static export (run `npm run build` first; the
 // `e2e` script does). Opt-in only: they download and drive a real browser.
+// E2E_BASE_URL=http://localhost:3000 runs them against a running dev server
+// instead (no build, no server started here).
+const external = process.env.E2E_BASE_URL;
+
 export default defineConfig({
   testDir: "e2e",
-  timeout: 120_000,
+  timeout: 300_000,
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],
   use: {
-    baseURL: "http://localhost:4174",
+    baseURL: external ?? "http://localhost:4174",
     viewport: { width: 1440, height: 900 },
     launchOptions: {
       // Default: software WebGL (works everywhere, slow). PW_GPU=1 uses the
@@ -19,10 +23,12 @@ export default defineConfig({
         : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
     },
   },
-  webServer: {
-    command: "npx --no-install serve out -l 4174",
-    url: "http://localhost:4174",
-    reuseExistingServer: false,
-    timeout: 60_000,
-  },
+  webServer: external
+    ? undefined
+    : {
+        command: "npx --no-install serve out -l 4174",
+        url: "http://localhost:4174",
+        reuseExistingServer: false,
+        timeout: 60_000,
+      },
 });
