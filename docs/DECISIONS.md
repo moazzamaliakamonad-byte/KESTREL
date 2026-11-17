@@ -502,7 +502,6 @@ Template:
   "illustrative" tag gives its source or reason. Dry masses are now marked
   illustrative: SpaceX has not published them (they were marked published).
 
-
 ## D-039 — Late engine-out: an emergency gate and an envelope
 - Date: 2026-11-17
 - Status: accepted
@@ -540,16 +539,63 @@ Template:
 - Decision: a complementary filter, the simplest navigation filter: every
   10 ms the estimate is carried forward by the accelerometers (the true
   velocity change over the step, taken as exact) and pulled toward the
-  position reading with a 2 s time constant and toward the velocity
-  reading with 1 s. Guidance and every controller use the estimate; the
-  plan request uses it too (it used a fresh raw reading).
-- Measured (ship, nominal, 0.3 s lag): seeds 7-10 x off/low/high 12 of 12
-  (raw readings: 9 to 10 of 12); seeds 11-30, high noise 20 of 20 (raw
-  19), low 20 of 20 (raw 20). Engine-out sweep 19 of 20 (raw 17). Time
-  constants 4 s/2 s: 16 of 20 at low noise (the ship circled the catch
-  axis in its final approach); 8 s/4 s: 15 of 20 engine-out.
-- Booster (seeds 11-30): high noise 11 of 20 with raw readings, 20 of 20
-  with 4 s/2 s, 18 of 20 with 2 s/1 s; low noise 20 of 20 in all three.
-  So the time constants are per vehicle: ship 2 s/1 s, booster 4 s/2 s.
-  Browser-timing sweep 33 of 33 (32 before).
+  position and velocity readings with time constants per vehicle: ship
+  1 s and 0.5 s, booster 4 s and 2 s. Guidance and every controller use
+  the estimate. A plan request uses the estimate carried forward to the
+  moment of the request.
+- Correction (same day): the first version handed plan requests the
+  estimate from the previous 10 ms step, stamped "now". At the booster's
+  400 m/s that is 4 m: the page's prediction (zero-latency plans) failed
+  275 of 303 plans and the ship's hit the tower. The noisy scoreboard did
+  not show it, and the numbers first logged here were measured with it.
+  A test now flies both predictions (`tests/preview.rs`). Re-measured
+  after the fix (all below).
+- Measured, ship (seeds 7-10 x off/low/high, engine-out sweep of 20,
+  seeds 11-30 at high and low noise):
 
+  | Filter | Nominal | Engine-out | High noise | Low noise |
+  | --- | --- | --- | --- | --- |
+  | none (raw readings) | 11/12 | 18/20 | 11/20 | 20/20 |
+  | 1 s / 0.5 s (chosen) | 12/12 | 20/20 | 19/20 | 19/20 |
+  | 2 s / 1 s | 12/12 | 17/20 | 18/20 | 20/20 |
+  | 4 s / 2 s | 12/12 | 20/20 | 19/20 | 18/20 |
+  | 2 s / 0.5 s | 12/12 | 18/20 | 15/20 | 20/20 |
+  | 4 s / 1 s | 12/12 | 16/20 | 18/20 | 20/20 |
+
+- Final engine-out sweep with the chosen filter: 20 of 20.
+- Measured, booster (seeds 11-30): raw readings 11/20 at high noise and
+  19/20 at low; 4 s / 2 s 20/20 and 20/20. Browser-timing sweep 33 of 33
+  (32 before).
+- One seed per cell; differences of one or two flights are noise.
+
+## D-041 — Kestrel's own convex solver, beside Clarabel
+- Date: 2026-11-17
+- Status: accepted
+- Context: the brief's stretch goal and the roadmap: a solver "with no
+  heap allocation and bounded run time, as flight code needs".
+- Decision: `crates/socp`, an interior-point solver for the same problem
+  form as Clarabel: Nesterov-Todd scaling, Mehrotra predictor-corrector,
+  Ruiz equilibration, a sparse LDLᵀ factorization (QDLDL's algorithm) of
+  the regularized KKT matrix with a minimum-degree ordering, one step of
+  iterative refinement, at most 40 iterations. Everything is allocated in
+  `Solver::new`; `solve` and `update` allocate nothing (a counting
+  allocator test checks it). Guidance keeps one set-up solver per problem
+  shape per thread, so after the first plan of each shape no setup runs.
+- Clarabel stays the default; Kestrel's own is a choice on the page
+  ("Guidance solver") and natively (`KESTREL_SOLVER=kestrel`). Its
+  iterations cost about the same as Clarabel's but it takes more of them:
+  booster plans about 30-45 % slower (median 88-99 ms against 66-70 ms
+  natively), ship plans 5-10 % faster (48-53 against 54-58 ms; LIMITATIONS.md,
+  "Solve-time benchmark"). The booster is the vehicle sensitive to solve
+  time (D-036). Flight outcomes with the final guidance (D-040) are the same with either:
+  ship nominal 12/12, engine-out sweep 20/20, seeds 11-30 at high and low
+  noise 38/40 (Clarabel 38/40); booster 40/40 (Clarabel 40/40);
+  booster browser-timing sweep 33/33; every regression test passes with
+  both. Their answers differ by about 10⁻⁶ relative (at most 7·10⁻⁴), so
+  single flights near a knife edge can go either way.
+- Tried: without equilibration the solver stalled (maximum iterations or
+  numerical errors) on the hard subproblems after an engine loss at
+  ignition, 34 of 37 plans failing; with it, every subproblem solved.
+  Setting up the solver anew for every plan cost 4-9 ms per plan (the
+  ordering); keeping set-up solvers removed it.
+- Speed: see LIMITATIONS.md, "Solve-time benchmark".

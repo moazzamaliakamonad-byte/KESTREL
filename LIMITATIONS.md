@@ -60,21 +60,20 @@ What is simulated, and what is only shown:
   relit: it gives thrust after 1 s, during which the ship falls. Real
   Raptors relight in flight; whether a real ship would, and how fast, is
   not published.
-- **Engine-out is survived 19 times in 20** (the running engine failed at
+- **Engine-out is survived 20 times in 20** (the running engine failed at
   49, 51, ... 67 s, noise off and low; measured 2026-11-17 after D-039 and
-  D-040; 15 of 20 before both). Failures at 65 s and 67 s, the last
-  seconds before the gate, are now caught; at 67 s the ship was just
-  inside the engine-out envelope (+0.6 and +0.1 m/s). The one loss (63 s,
-  low noise) ran out of propellant well inside the envelope (+8.8 m/s):
-  guidance's fault, not physics.
+  D-040; 15 of 20 before both). Failures at 67 s, the last seconds before
+  the gate, began just outside the engine-out envelope (-0.1 and
+  -0.8 m/s) and were still caught: the arms accept 2 m/s. Other starts,
+  seeds and failure times were not swept.
 - **The engine-out envelope** (`guidance::envelope`, shown as
   "Engine-out" in the telemetry) is a point-mass estimate: if the running
   engine failed now, could a spare lit 1.3 s later (ignition plus throttle
   lag) at full thrust still stop the ship above the arms? It ignores
-  attitude, sideways motion and sensing errors. In the sweep every
-  failure began inside it (the latest at +0.1 m/s); before the filter, a
-  failure that began 1.9 m/s outside it was lost. The arms accept 2 m/s,
-  so a ship a little outside could still be caught. Below about 17 m
+  attitude, sideways motion and sensing errors. In the sweep the latest
+  failures began just outside it (by up to 0.8 m/s) and were caught;
+  earlier, one that began 1.9 m/s outside was lost. The arms accept
+  2 m/s, so a ship a little outside can still be caught. Below about 17 m
   above the arms nothing is survivable, not even hovering: the fall during
   the gap alone takes more height than is left.
 
@@ -88,10 +87,11 @@ What is simulated, and what is only shown:
 - **Sensor noise and the navigation filter** (D-040): guidance flies on a
   complementary filter's estimate (accelerometers, taken as exact, plus
   the noisy position and velocity readings), not on raw readings. Ship,
-  nominal: 12 of 12 (seeds 7-10, noise off, low and high) and 40 of 40
-  (seeds 11-30, high and low noise; 39 of 40 before). Booster, seeds
-  11-30: 20 of 20 at high noise (11 of 20 before), 20 of 20 at low. Real
-  accelerometers drift and have noise; these do not.
+  seeds 11-30: 19 of 20 at high noise (11 of 20 on raw readings), 19 of
+  20 at low (20 of 20 raw); seeds 7-10 at all levels 12 of 12 (11 raw).
+  Booster, seeds 11-30: 20 of 20 at high noise (11 raw), 20 of 20 at low
+  (19 raw). Real accelerometers drift and have noise; these do not. One
+  seed per cell: differences of one or two flights are noise.
 - **Wind** is the same at every height; a gust is a 4 s trapezoid. The
   planner knows neither.
 - **Start envelope.** Booster: caught from 6–20 km at 300–600 m/s in the
@@ -343,11 +343,10 @@ as 0.5 s of sim time). Read on 2026-11-17 after the guidance redesign
 `engine_out_window`, `--ignored`): 12 nominal ship flights (seeds 7-10,
 noise off, low, high) and 20 engine-out flights (the running engine failed
 at 49, 51, … 67 s, noise off and low). Current configuration (2026-11-17,
-after D-040): 12 of 12 and 19 of 20 (10 and 17 before the navigation
-filter). The decision log (D-032, D-033, D-034, D-039, D-040) lists
+after D-040): 12 of 12 and 20 of 20 (11 and 18 without the navigation
+filter, with the fix of D-040). The decision log (D-032, D-033, D-034, D-039, D-040) lists
 
 the configurations compared. Single seeds per cell: not a statistical claim.
-
 
 **Planner timing** (2026-11-17, i7-1185G7 laptop on AC power, about 30 %
 background load). Ship flip problem, native, per SCvx iteration:
@@ -415,6 +414,56 @@ Not measured: a benchmark of 6-DoF solve times; Firefox or Safari; phones
 (the layout was checked at phone width only as a screenshot); frame rates;
 any Monte Carlo of the M3 flights; ×2 and faster after the retune; how
 the blueprint view performs on a slow GPU.
+
+### Solve-time benchmark (M3, both solvers)
+
+What is timed: a whole plan (every SCvx iteration: discretization and
+the convex subproblem), for every plan request the reference flights
+make. Clarabel 0.11.1 against Kestrel's own solver (`crates/socp`,
+D-041), same requests, same guidance.
+
+**Native** (`cargo run --release -p kestrel-wasm --example bench_solvers`;
+2026-11-17; i7-1185G7, 32 GB, Windows 11, mains power, about 12-28 %
+background load; the flights are recorded once with Clarabel (low noise,
+seed 7, 0.3 s lag, 0.5 s solve latency) and each recorded request is
+solved 5 times per solver, median kept; three runs):
+
+| Requests | Solver | Median | p90 | Max |
+| --- | --- | --- | --- | --- |
+| Booster, 13 | Clarabel | 66-70 ms | 73-80 ms | 78-96 ms |
+| Booster, 13 | Kestrel | 88-99 ms | 112-129 ms | 117-146 ms |
+| Ship, 17 | Clarabel | 54-58 ms | 88-98 ms | 93-114 ms |
+| Ship, 17 | Kestrel | 48-53 ms | 81-85 ms | 97-105 ms |
+
+Both solved every request. Kestrel's iterations cost about as much as
+Clarabel's (about 0.6 ms each for the ship's 1 741-row KKT system) but it
+needs more of them (15-25 per subproblem). Without keeping set-up solvers
+between plans it was slower still (4-9 ms of ordering per plan).
+
+**In the browser** (`E2E_BASE_URL=http://localhost:3000 PW_GPU=1
+MEASURE_SOLVER=... npx playwright test e2e/measure.spec.ts`: one flight
+per vehicle at ×1 on the full 3D page, dev build, headless Chromium 158
+with the laptop's integrated GPU, each plan timed in the worker; single
+runs):
+
+| Flight | Solver | Plans | Median | p90 | Max | Outcome |
+| --- | --- | --- | --- | --- | --- | --- |
+| Booster | Clarabel | 11 | 342 ms | 623 ms | 646 ms | caught |
+| Ship | Clarabel | 15 | 295 ms | 625 ms | 1 879 ms | caught |
+| Booster | Kestrel | 17 | 302 ms | 983 ms | 1 330 ms | hit the tower |
+| Ship | Kestrel | 13 | 373 ms | 582 ms | 748 ms | caught |
+
+On the page plans take 4-6 times longer than natively: rendering and
+planning share one laptop's power and memory budget (D-037). The booster
+is sensitive to late plans (D-036); its loss with Kestrel's solver came
+with its slowest plans (about 1 s). One flight per row: not a statistical
+claim. Not measured: other machines, Firefox, Safari, phones.
+
+**Run-time bound.** Kestrel's solver stops after 40 interior-point
+iterations, each a fixed amount of work for a given problem shape, so
+its worst case per subproblem is bounded; the SCvx loop around it is
+capped at 15 iterations (ship) and 8 (booster). Measured worst cases are
+in the tables; the bound itself was not timed.
 
 ### Comparison with Malyuta et al. (arXiv:2106.09125, eq. 108, Fig. 21)
 

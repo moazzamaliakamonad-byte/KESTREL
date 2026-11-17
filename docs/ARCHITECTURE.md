@@ -186,6 +186,13 @@ crates/model      what truth and guidance must agree on (no dependencies)
                fin_gain / fin_force / fin_allocate (booster's three grid fins)
   dynamics.rs  x' = f(x, T): state [m, r, v, q, w] (14), thrust at the gimbal point
   quat.rs      quaternion algebra
+crates/socp       Kestrel's own interior-point SOCP solver (D-041): Solver::new analyses the
+                  pattern (minimum-degree ordering, elimination tree) and allocates
+                  everything; update() + solve() allocate nothing; at most 40 iterations.
+  csc.rs       sparse matrices          ldl.rs   QDLDL-style LDLᵀ and the ordering
+  cones.rs     NT scaling, Jordan algebra, step to the cone boundary
+  solver.rs    Ruiz equilibration, Mehrotra predictor-corrector, KKT assembly/refinement
+  tests/       known answers, 40 random problems against Clarabel, a counting allocator
 crates/sim
   ship.rs      ShipSim: RK4 in 10 ms substeps; flaps or fins (slew, clamp); RCS; steady
                wind + gusts; contact with mast, arms, ground; Outcome (caught/crashed)
@@ -193,9 +200,11 @@ crates/sim
                ignition delay, shared gimbal with slew, lag, shutdown, fail(i)
 crates/guidance
   scvx/        successive convexification: discretize.rs (first-order hold, sensitivities
-               by RK4, finite-difference Jacobians), subproblem.rs (Clarabel SOCP with
-               virtual control, trust region, soft comfort constraints), mod.rs (iteration,
-               cold/warm references, acceptance by re-integration)
+               by RK4, finite-difference Jacobians), subproblem.rs (the SOCP with
+               virtual control, trust region, soft comfort constraints, answered by
+               Clarabel or by kestrel-socp, set_backend(); kept set-up solvers per
+               thread), mod.rs (iteration, cold/warm references, acceptance by
+               re-integration)
   ship_control.rs  belly_flop (ship) / descent (booster) -> unpowered(); flip; steady_burn;
                powered (plan tracking); terminal; ignition_altitude; fall_time
   envelope.rs  engine-out envelope: the largest sink speed from which a relit spare can
@@ -208,7 +217,6 @@ crates/wasm
                loss; engine_out_margin() for the page; navigate(): the navigation
                filter (complementary: accelerometers + readings, D-040) that every
                controller and plan request reads;
-
 
                legs (full engine set to a mid gate, final engines to the approach gate),
                when to re-plan, prediction of the booster's first plan, options
@@ -272,8 +280,9 @@ ship, the booster parked beside the pad, or end).
 ## Open questions
 
 - Firefox solve time (Chromium measured: ~244 ms with a GPU).
-- M3: solve times of the 6-DoF planner are not benchmarked yet (only spot
-  readings, LIMITATIONS.md).
+- M3: Kestrel's own solver needs more interior-point iterations than
+  Clarabel (benchmark in LIMITATIONS.md); a better starting point or
+  centring might close the gap.
 - Lossless convexification is not guaranteed when the ground constraint is
   active (closest landings near the ground); such landing times are skipped.
 
