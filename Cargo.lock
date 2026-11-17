@@ -215,6 +215,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-socp"
+version = "0.1.0"
+dependencies = [
+ "clarabel",
+]
+
+[[package]]
 name = "kestrel-wasm"
 version = "0.1.0"
 dependencies = [
