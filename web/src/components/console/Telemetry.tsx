@@ -239,7 +239,6 @@ export function Telemetry() {
             </b>
           </>
         )}
-
         <Spark values={shipLive.solveMs} />
       </div>
     </Panel>

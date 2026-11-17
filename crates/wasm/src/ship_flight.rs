@@ -96,13 +96,13 @@ pub const ENVELOPE_FLOOR: f64 = 0.0;
 
 /// Navigation filter time constants, s: how slowly the estimate follows
 /// the position and velocity readings (between readings it is carried by
-/// the accelerometers). Per vehicle, chosen over 52 flights each (D-040):
+/// the accelerometers). Per vehicle, chosen over 72 flights (ship) and 52
+/// (booster) each (D-040):
 /// (position, velocity).
-pub const NAV_SHIP: (f64, f64) = (2.0, 1.0);
+pub const NAV_SHIP: (f64, f64) = (1.0, 0.5);
 pub const NAV_BOOSTER: (f64, f64) = (4.0, 2.0);
 
 /// Default wind gust speed, m/s.
-
 pub const GUST_SPEED: f64 = 15.0;
 /// Attitude sensor error σ (rad) and rate error σ (rad/s), high noise.
 pub const ATT_SIGMA_HIGH: (f64, f64) = (0.003_490_658_503_988_659, 0.000_872_664_625_997_164_9);
@@ -286,6 +286,8 @@ pub struct ShipFlight {
     /// change the accelerometers measured over the last step.
     nav: Option<(Vec3, Vec3)>,
     imu_dv: Vec3,
+    /// Length of the last control step, s.
+    imu_h: f64,
 }
 
 impl ShipFlight {
@@ -340,6 +342,7 @@ impl ShipFlight {
             replan_now: false,
             nav: None,
             imu_dv: [0.0; 3],
+            imu_h: 0.0,
         })
     }
 
@@ -560,7 +563,6 @@ impl ShipFlight {
     }
 
     /// Spare engines lit after a failure, this flight.
-
     pub fn relights(&self) -> u32 {
         self.relights
     }
@@ -689,6 +691,7 @@ impl ShipFlight {
         // The accelerometers (with the gravity model): what the velocity
         // did over the step. Taken as exact; real ones drift slowly.
         self.imu_dv = quat::sub(dynamics::velocity(&self.sim.x), v_before);
+        self.imu_h = h;
         if self.sim.outcome.is_some() {
             self.phase = Phase::Done;
         }
@@ -781,7 +784,7 @@ impl ShipFlight {
     /// gate first, else every lit engine to an intermediate gate.
     pub fn problem(&mut self) -> (f64, Vec<(Leg, ShipProblem)>) {
         self.replan_now = false;
-        let measured = self.est;
+        let measured = self.estimate_now();
         // The booster's first plan: it is braking at 4 g with no plan to
         // follow, so by the time the plan comes back it is somewhere else
         // (a second of solving is 60 m/s). Plan from where it will be
@@ -975,7 +978,6 @@ impl ShipFlight {
     /// estimate forward with the measured acceleration, then pull it toward
     /// the reading with time constants NAV_SHIP or NAV_BOOSTER (a
     /// complementary filter, the simplest form of a
-
     /// navigation filter's position/velocity fusion). The reading's
     /// attitude, rates and mass are used as they are.
     fn navigate(&mut self, raw: State, h: f64) -> State {
@@ -983,6 +985,7 @@ impl ShipFlight {
             VehicleKind::Ship => NAV_SHIP,
             VehicleKind::Booster => NAV_BOOSTER,
         };
+
         let (p_m, v_m) = (dynamics::position(&raw), dynamics::velocity(&raw));
         let (p, v) = match self.nav {
             Some((p, v)) if tp > 0.0 => {
@@ -1005,9 +1008,24 @@ impl ShipFlight {
         x
     }
 
+    /// The state now, for a plan request: the navigation estimate carried
+    /// forward over the step taken since it was made (it is a step old; at
+    /// the booster's 400 m/s that is 4 m, and plans stamped "now" from it
+    /// started off their own track).
+    fn estimate_now(&mut self) -> State {
+        let mut x = self.est;
+        if let Some((p, v)) = self.nav {
+            let (dv, h) = (self.imu_dv, self.imu_h);
+            for i in 0..3 {
+                x[R + i] = p[i] + (v[i] + 0.5 * dv[i]) * h;
+                x[V + i] = v[i] + dv[i];
+            }
+        }
+        x
+    }
+
     pub fn release(&mut self) {
         self.nav = None;
-
         self.grabbed = false;
     }
 

@@ -744,7 +744,6 @@
 .guidance b[data-tone="warm"] {
   color: var(--warm);
 }
-
 .grid b,
 .guidance b {
   font-family: var(--font-geist-mono), ui-monospace, monospace;

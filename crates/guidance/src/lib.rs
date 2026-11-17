@@ -6,7 +6,6 @@
 
 pub mod envelope;
 pub mod params;
-
 pub mod problem;
 pub mod replan;
 pub mod scaling;
