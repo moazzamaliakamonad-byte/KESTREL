@@ -89,6 +89,12 @@ describe("commentary", () => {
     expect(callouts("earth", snap({}), snap({ outcome: "crashed", reason: "out of propellant" }))[0].text).toMatch(/ran out of propellant/);
   });
 
+  it("calls a spare engine relighting after a failure", () => {
+    const before = snap({ phase: "landing-burn", engines: ["failed", "shutdown", "shutdown", ...running(0).slice(3)] });
+    const after = snap({ phase: "landing-burn", engines: ["failed", "igniting", "shutdown", ...running(0).slice(3)] });
+    expect(texts(callouts("earth", before, after))).toMatch(/spare engine/);
+  });
+
   it("every line it can say is in the list of clips to render, under a unique file name", () => {
     const all = new Set(allPhrases());
     const flights: [Parameters<typeof callouts>[0], ShipSnapshot | null, ShipSnapshot][] = [

@@ -41,6 +41,7 @@ export const LINES = {
   arms: "Tower arms are closing.",
   braking: "No landing plan from here. Braking.",
   gust: "Wind gust.",
+  relight: "A spare engine is relighting.",
   // Outcomes.
   boosterCaught: "Catch confirmed. Booster is on the tower.",
   shipCaught: "Catch confirmed. Ship is on the tower.",

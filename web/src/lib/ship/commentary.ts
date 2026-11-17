@@ -61,6 +61,8 @@ export function callouts(kind: ScenarioKind, prev: ShipSnapshot | null, next: Sh
 
   const newlyFailed = next.engines.findIndex((e, i) => e === "failed" && prev.engines[i] !== "failed");
   if (failed(next) > failed(prev) && newlyFailed >= 0) out.push({ text: engineOut(newlyFailed), urgent: true });
+  // A shut-down engine lighting again: the flight replacing a failed one.
+  if (next.engines.some((e, i) => e === "igniting" && prev.engines[i] === "shutdown")) out.push({ text: LINES.relight });
 
   if (next.phase !== prev.phase) {
     switch (next.phase) {
