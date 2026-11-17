@@ -19,10 +19,11 @@ cited and marked, unpublished ones are marked *illustrative*. It is not
 flight software and not any company's data. See
 [LIMITATIONS.md](LIMITATIONS.md).
 
-![Kestrel M1 demo (the first, 3-DoF version of the page)](docs/img/m1-demo.gif)
+![Kestrel: the opening sequence, the booster's landing burn, the blueprint analysis view, the catch, and the ship's entry from orbit](docs/img/m3-demo.gif)
 
-<sub>The recording above is the first milestone's page (a 3-DoF lander on
-Mars); the current page has not been re-recorded yet.</sub>
+<sub>Recorded from the page (`web/scripts/record-demo.mjs`), frames taken
+at moments of the flights, so it runs faster than real time; the ascent
+and staging at the start are an illustration, the rest is simulated.</sub>
 
 Named after the kestrel, the small falcon that hovers motionless in a headwind
 before it drops onto a precise spot.

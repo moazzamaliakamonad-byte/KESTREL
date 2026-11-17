@@ -105,7 +105,7 @@ simulation can be, on one page with a mission-control interface.
       D-041)
 - [x] Published benchmark of solve times, both solvers, native and in
       the browser (LIMITATIONS.md, method stated)
-- [ ] Update the end-to-end tests and the demo recording for the new page
+- [x] Update the end-to-end tests and the demo recording for the new page
 - [~] `learn/` chapter for M3 (local only)
 
 ## Change log
