@@ -109,6 +109,8 @@ pub const ATT_SIGMA_HIGH: (f64, f64) = (0.003_490_658_503_988_659, 0.000_872_664
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
+    /// The ship from orbit: hypersonic entry steered by bank angle.
+    Entry,
     BellyFlop,
     Flip,
     Burn,
@@ -119,6 +121,7 @@ pub enum Phase {
 impl Phase {
     pub fn as_str(self) -> &'static str {
         match self {
+            Phase::Entry => "entry",
             Phase::BellyFlop => "belly-flop",
             Phase::Flip => "flip",
             Phase::Burn => "landing-burn",
@@ -193,6 +196,71 @@ pub struct ShipFlightConfig {
     pub gust_speed: f64,
     /// Landing engines that never light (indices).
     pub failed: Vec<usize>,
+    /// Start from orbit (the ship only): the entry, then the 6-DoF flight
+    /// from where it hands over (`position`/`velocity` are then unused).
+    pub entry: Option<EntryConfig>,
+}
+
+/// An entry from orbit (*illustrative* numbers, chosen so guidance has
+/// margin both ways; D-042).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EntryConfig {
+    /// Distance along the surface from the entry interface to the tower, m.
+    pub range: f64,
+    /// Flight-path angle at the entry interface, rad (negative: down).
+    pub gamma: f64,
+    /// Speed at the entry interface, m/s.
+    pub speed: f64,
+}
+
+impl Default for EntryConfig {
+    fn default() -> Self {
+        EntryConfig {
+            range: ENTRY_RANGE,
+            gamma: ENTRY_GAMMA,
+            speed: ENTRY_SPEED,
+        }
+    }
+}
+
+/// Default entry: 3 300 km out, 1 degree down, 7.5 km/s.
+pub const ENTRY_RANGE: f64 = 3_300e3;
+pub const ENTRY_GAMMA: f64 = -0.017_453_292_519_943_295;
+pub const ENTRY_SPEED: f64 = 7_500.0;
+/// The entry hands over to the 6-DoF flight at this altitude, m...
+pub const HANDOVER_ALTITUDE: f64 = 25_000.0;
+/// ...aiming this far (along the surface) before the tower, m: the belly
+/// flop carries the ship about 20 km on; hand-overs 20.5 to 28 km out
+/// were caught (start probes, D-042), and the entry ends about 2.5 km
+/// short of its aim, so it aims 27.5 km out.
+pub const HANDOVER_AIM: f64 = 27_500.0;
+/// The landing site (Starbase, Texas: 25.99 N, 97.15 W). Earth does not
+/// rotate here, so it only places the ground track on the globe.
+pub const SITE_LAT_DEG: f64 = 25.99;
+pub const SITE_LON_DEG: f64 = -97.15;
+
+/// The entry phase in progress.
+#[derive(Debug, Clone)]
+pub struct EntryPhase {
+    pub sim: sim::entry::EntrySim,
+    pub guide: guidance::entry::EntryGuidance,
+    pub last: Option<guidance::entry::EntryCommand>,
+    since: f64,
+    /// Unit vector of the tower site.
+    pub site: Vec3,
+}
+
+/// What the entry did, kept after the hand-over.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EntrySummary {
+    pub duration: f64,
+    pub peak_heat_flux: f64,
+    pub peak_tile: f64,
+    pub heat_load: f64,
+    pub peak_g: f64,
+    pub reversals: u32,
+    /// Distance from the aim point at the hand-over, m.
+    pub miss: f64,
 }
 
 impl ShipFlightConfig {
@@ -211,6 +279,7 @@ impl ShipFlightConfig {
             wind: [0.0; 2],
             gust_speed: GUST_SPEED,
             failed: Vec::new(),
+            entry: None,
         }
     }
 
@@ -288,6 +357,10 @@ pub struct ShipFlight {
     imu_dv: Vec3,
     /// Length of the last control step, s.
     imu_h: f64,
+    /// The configuration, kept to build the 6-DoF flight at the hand-over.
+    config: ShipFlightConfig,
+    entry: Option<Box<EntryPhase>>,
+    entry_summary: Option<EntrySummary>,
 }
 
 impl ShipFlight {
@@ -318,14 +391,25 @@ impl ShipFlight {
         for i in &c.failed {
             sim.cluster.fail(*i);
         }
+        let entry = match (c.entry, c.kind) {
+            (Some(e), Kind::Earth) => Some(Box::new(Self::entry_phase(&sim.scn, e)?)),
+            _ => None,
+        };
         Ok(ShipFlight {
+            phase: if entry.is_some() {
+                Phase::Entry
+            } else {
+                Phase::BellyFlop
+            },
+            entry,
+            entry_summary: None,
+            config: c.clone(),
             kind: c.kind,
             sim,
             sensor: Sensor::new(c.noise, c.seed),
             att_rng: Rng::new(c.seed ^ 0x9e37_79b9_7f4a_7c15),
             att_err: [0.0; 6],
             noise: c.noise,
-            phase: Phase::BellyFlop,
             guide: Guide::None,
             leg: None,
             grabbed: false,
@@ -344,6 +428,136 @@ impl ShipFlight {
             imu_dv: [0.0; 3],
             imu_h: 0.0,
         })
+    }
+
+    /// The entry start and guidance (from the ship mass and size).
+    fn entry_phase(scn: &Scenario, e: EntryConfig) -> Result<EntryPhase, &'static str> {
+        let ok = e.range.is_finite() && e.gamma.is_finite() && e.speed.is_finite();
+        if !ok
+            || !(1_000e3..=6_000e3).contains(&e.range)
+            || !(-0.07..=0.0).contains(&e.gamma)
+            || !(6_000.0..=8_000.0).contains(&e.speed)
+        {
+            return Err("bad entry configuration");
+        }
+        let site =
+            model::entry::surface_point(SITE_LAT_DEG.to_radians(), SITE_LON_DEG.to_radians());
+        let (x, target) = guidance::entry::entry_start(
+            site,
+            e.range,
+            e.speed,
+            e.gamma,
+            HANDOVER_AIM,
+            HANDOVER_ALTITUDE,
+        );
+        let aero = model::entry::EntryAero::ship(scn.ship.length, scn.ship.radius);
+        Ok(EntryPhase {
+            sim: sim::entry::EntrySim::new(aero, scn.start_mass, x, HANDOVER_ALTITUDE),
+            guide: guidance::entry::EntryGuidance::new(target),
+            last: None,
+            since: f64::INFINITY,
+            site,
+        })
+    }
+
+    /// The entry in progress (None once handed over, or without one).
+    pub fn entry(&self) -> Option<&EntryPhase> {
+        self.entry.as_deref()
+    }
+
+    /// What the entry did (after the hand-over).
+    pub fn entry_summary(&self) -> Option<EntrySummary> {
+        self.entry_summary
+    }
+
+    /// Fly the entry for `dt` seconds: guidance every CYCLE, truth in its
+    /// own steps. At the hand-over the 6-DoF flight starts from where the
+    /// entry ended; if the tiles burn through, the flight is lost.
+    fn entry_step(&mut self, dt: f64) {
+        let Some(e) = self.entry.as_deref_mut() else {
+            return;
+        };
+        let mut left = dt;
+        while left > 1e-9 && e.sim.outcome.is_none() {
+            if e.since >= guidance::entry::CYCLE {
+                // Entry guidance reads the truth: no entry navigation is modelled.
+                let cmd = e.guide.command(&e.sim.aero, &e.sim.x, e.sim.mass);
+                e.sim.bank_cmd = cmd.bank;
+                e.last = Some(cmd);
+                e.since = 0.0;
+            }
+            let h = left
+                .min(sim::entry::ENTRY_STEP)
+                .min(guidance::entry::CYCLE - e.since)
+                .max(1e-6);
+            e.sim.step(h);
+            e.since += h;
+            left -= h;
+        }
+        match e.sim.outcome {
+            Some(sim::entry::EntryOutcome::HandOver) => self.hand_over(),
+            Some(sim::entry::EntryOutcome::BurnedThrough) => {
+                self.sim.t = e.sim.t;
+                self.sim.outcome = Some(sim::ship::Outcome::Crashed(
+                    sim::ship::CrashReason::BurnedThrough,
+                ));
+                self.phase = Phase::Done;
+            }
+            None => {}
+        }
+    }
+
+    /// Start the 6-DoF flight from the end of the entry, in the tower frame:
+    /// x along the surface back toward where the ship comes from, z up.
+    fn hand_over(&mut self) {
+        let Some(e) = self.entry.take() else {
+            return;
+        };
+        use model::entry as me;
+        let site = e.site;
+        let r = me::position(&e.sim.x);
+        let v = me::velocity(&e.sim.x);
+        let up_ship = me::unit(r);
+        // Horizontal direction from the site toward the ship.
+        let toward = me::unit(quat::sub(
+            up_ship,
+            quat::scale(site, quat::dot(up_ship, site)),
+        ));
+        let side = quat::cross(site, toward);
+        let x = me::surface_distance(site, r);
+        let y = quat::dot(quat::sub(r, quat::scale(site, me::RADIUS)), side);
+        let z = me::altitude(&e.sim.x);
+        // Velocity: horizontal parts along the tower axes, vertical along the ship up.
+        let vz = quat::dot(v, up_ship);
+        let vh = quat::sub(v, quat::scale(up_ship, vz));
+        let velocity = [quat::dot(vh, toward), quat::dot(vh, side), vz];
+        let summary = EntrySummary {
+            duration: e.sim.t,
+            peak_heat_flux: e.sim.peak_heat_flux,
+            peak_tile: e.sim.peak_tile,
+            heat_load: e.sim.heat_load,
+            peak_g: e.sim.peak_g,
+            reversals: e.guide.reversals,
+            miss: me::surface_distance(r, e.guide.target.aim),
+        };
+        let mut c = self.config.clone();
+        c.entry = None;
+        c.position = [x, y, z];
+        c.velocity = velocity;
+        match ShipFlight::new(c) {
+            Ok(mut next) => {
+                next.sim.t = e.sim.t;
+                next.entry_summary = Some(summary);
+                next.config = self.config.clone();
+                *self = next;
+            }
+            Err(_) => {
+                self.sim.outcome = Some(sim::ship::Outcome::Crashed(
+                    sim::ship::CrashReason::HitGround,
+                ));
+                self.phase = Phase::Done;
+            }
+        }
     }
 
     pub fn sim(&self) -> &ShipSim {
@@ -608,6 +822,10 @@ impl ShipFlight {
         if self.grabbed || self.phase == Phase::Done || !(dt.is_finite() && dt > 0.0) {
             return;
         }
+        if self.phase == Phase::Entry {
+            self.entry_step(dt);
+            return;
+        }
         let mut left = dt;
         while left > 1e-9 && self.phase != Phase::Done {
             let h = left.min(SUBSTEP);
@@ -677,7 +895,7 @@ impl ShipFlight {
                 }
                 ship_control::terminal(&scn, &est, self.command_limits())
             }
-            Phase::Done => self.last,
+            Phase::Entry | Phase::Done => self.last,
         };
         self.relight();
         self.last = act;

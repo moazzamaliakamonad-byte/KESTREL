@@ -46,6 +46,84 @@ struct ConfigDto {
     /// Landing engines failed from the start.
     #[serde(default)]
     failed: Vec<usize>,
+    /// Start from orbit (the ship only).
+    #[serde(default)]
+    entry: Option<EntryDto>,
+}
+
+/// An entry from orbit as the page sends it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct EntryDto {
+    /// Distance from the entry interface to the tower, km.
+    range_km: f64,
+    /// Flight-path angle at the entry interface, degrees (negative: down).
+    gamma_deg: f64,
+}
+
+/// The entry now, for the page (null when there is none in progress).
+fn entry_json(f: &ShipFlight) -> Value {
+    let Some(e) = f.entry() else {
+        return Value::Null;
+    };
+    use model::entry as me;
+    let s = &e.sim;
+    let r = me::position(&s.x);
+    let (lat, lon) = me::lat_lon(r);
+    let (slat, slon) = me::lat_lon(e.site);
+    let alt = me::altitude(&s.x);
+    let l = me::loads(&s.aero, &s.x, s.mass);
+    let q = s.heat_flux();
+    let cmd = e.last;
+    json!({
+        "t": s.t,
+        "altitude": alt,
+        "speed": s.speed(),
+        "mach": l.mach,
+        "q_dyn": l.q_dyn,
+        "density": l.rho,
+        "gamma_deg": me::flight_path_angle(&s.x).to_degrees(),
+        "heat_flux": q,
+        "tile": me::tile_temperature(q),
+        "tile_limit": me::TILE_LIMIT,
+        "overheat": s.overheat,
+        "overheat_limit": me::OVERHEAT_TIME,
+        "heat_load": s.heat_load,
+        "g": l.lift.hypot(l.drag) / model::vehicle::G0,
+        "lift_to_drag": if l.drag > 0.0 { l.lift / l.drag } else { 0.0 },
+        "bank_deg": s.bank.to_degrees(),
+        "bank_cmd_deg": s.bank_cmd.to_degrees(),
+        "reversals": e.guide.reversals,
+        "heat_limited": cmd.is_some_and(|c| c.heat_limited),
+        "heading_error_deg": cmd.map_or(0.0, |c| c.heading_error.to_degrees()),
+        "predicted_overshoot": cmd.map_or(0.0, |c| c.prediction.overshoot),
+        "predicted_time": cmd.map_or(0.0, |c| c.prediction.time),
+        "to_site": me::surface_distance(r, e.site),
+        "to_aim": me::surface_distance(r, e.guide.target.aim),
+        "lat": lat.to_degrees(),
+        "lon": lon.to_degrees(),
+        "site": [slat.to_degrees(), slon.to_degrees()],
+        "handover_altitude": s.handover_altitude,
+        "position": r,
+        "velocity": me::velocity(&s.x),
+        "peak_tile": s.peak_tile,
+        "peak_g": s.peak_g,
+    })
+}
+
+/// What the entry did, after the hand-over (null without one).
+fn entry_summary_json(f: &ShipFlight) -> Value {
+    match f.entry_summary() {
+        Some(s) => json!({
+            "duration": s.duration,
+            "peak_heat_flux": s.peak_heat_flux,
+            "peak_tile": s.peak_tile,
+            "heat_load": s.heat_load,
+            "peak_g": s.peak_g,
+            "reversals": s.reversals,
+            "miss": s.miss,
+        }),
+        None => Value::Null,
+    }
 }
 
 /// Physics options as the page sends them (angles in degrees). A missing
@@ -114,6 +192,11 @@ fn config(json: &str) -> Option<ShipFlightConfig> {
         wind: c.wind.unwrap_or([0.0; 2]),
         gust_speed: c.gust_speed.unwrap_or(base.gust_speed),
         failed: c.failed,
+        entry: c.entry.map(|e| ship_flight::EntryConfig {
+            range: e.range_km * 1e3,
+            gamma: e.gamma_deg.to_radians(),
+            ..Default::default()
+        }),
         ..base
     })
 }
@@ -397,7 +480,27 @@ pub fn preview_ship(config_json: &str) -> String {
     let mut phases = vec![json!({"t": 0.0, "phase": f.phase().label(kind)})];
     let mut since = 0.0;
     let mut last_phase = f.phase();
-    while f.phase() != Phase::Done && f.sim().t < 400.0 {
+    // The entry (from orbit): its ground track every 10 s, then the
+    // 6-DoF flight as usual.
+    let mut track: Vec<[f64; 3]> = Vec::new();
+    let mut next_track = 0.0;
+    while f.phase() == Phase::Entry {
+        if let Some(e) = f.entry()
+            && e.sim.t >= next_track
+        {
+            let (lat, lon) = model::entry::lat_lon(model::entry::position(&e.sim.x));
+            track.push([lat.to_degrees(), lon.to_degrees(), e.sim.altitude()]);
+            next_track += 10.0;
+        }
+        f.step(1.0);
+    }
+    if f.phase() != Phase::Done {
+        path = vec![dynamics::position(&f.sim().x)];
+        phases.push(json!({"t": f.sim().t, "phase": f.phase().label(kind), "position": dynamics::position(&f.sim().x)}));
+        last_phase = f.phase();
+    }
+    let limit = f.sim().t + 400.0;
+    while f.phase() != Phase::Done && f.sim().t < limit {
         f.step(0.05);
         since += 0.05;
         if f.wants_replan() {
@@ -419,6 +522,7 @@ pub fn preview_ship(config_json: &str) -> String {
     let (outcome, reason) = outcome_str(f.sim().outcome);
     json!({
         "ok": true, "path": path, "phases": phases, "outcome": outcome, "reason": reason, "t": f.sim().t,
+        "entry": entry_summary_json(&f), "entry_track": track,
         "propellant": f.sim().propellant(),
     })
     .to_string()
@@ -694,6 +798,8 @@ impl ShipFlightJs {
             "outcome": outcome,
             "reason": reason,
             "end_velocity": s.end_velocity,
+            "entry": entry_json(f),
+            "entry_summary": entry_summary_json(f),
             "engine_out_margin": f.engine_out_margin(),
         })
         .to_string()

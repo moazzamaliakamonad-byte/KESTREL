@@ -549,3 +549,99 @@ fn an_event_asks_for_a_plan_at_once() {
     let _ = f.problem();
     assert!(!f.wants_replan());
 }
+
+/// From orbit: the guided entry, the hand-over, the belly flop, the
+/// landing burn and the catch (low noise, seed 7).
+#[test]
+fn earth_from_orbit_is_caught() {
+    use kestrel_wasm::ship_flight::EntryConfig;
+    let t0 = std::time::Instant::now();
+    let mut f = ShipFlight::new(ShipFlightConfig {
+        seed: 7,
+        lag: 0.3,
+        noise: Noise::LOW,
+        entry: Some(EntryConfig::default()),
+        ..ShipFlightConfig::new(Kind::Earth)
+    })
+    .unwrap();
+    assert_eq!(f.phase(), Phase::Entry);
+    let mut pending: Option<Pending> = None;
+    let mut last_request = f64::NEG_INFINITY;
+    let mut handed = None;
+    while f.phase() != Phase::Done && f.sim().t < 2_000.0 {
+        f.step(if f.phase() == Phase::Entry {
+            0.5
+        } else {
+            FRAME
+        });
+        if handed.is_none() && f.phase() != Phase::Entry {
+            handed = Some((
+                f.sim().t,
+                dynamics::position(&f.sim().x),
+                dynamics::velocity(&f.sim().x),
+            ));
+        }
+        deliver(&mut f, &mut pending);
+        request(&mut f, &mut pending, &mut last_request);
+    }
+    let s = f.entry_summary().expect("entry summary");
+    eprintln!(
+        "orbit: hand-over {handed:?}; entry {:.0} s, miss {:.0} m, peak tile {:.0} K, peak {:.2} MW/m2, {:.1} g, {} reversals; end {:?} at {:.0} s ({:.1} s wall)",
+        s.duration,
+        s.miss,
+        s.peak_tile,
+        s.peak_heat_flux / 1e6,
+        s.peak_g,
+        s.reversals,
+        f.sim().outcome,
+        f.sim().t,
+        t0.elapsed().as_secs_f64()
+    );
+    assert_eq!(f.sim().outcome, Some(Outcome::Caught));
+    assert!(s.peak_tile < model::entry::TILE_LIMIT);
+}
+
+/// From orbit over entry angles and distances (`--ignored --nocapture`).
+#[test]
+#[ignore]
+fn orbit_sweep() {
+    use kestrel_wasm::ship_flight::EntryConfig;
+    for range_km in [3_000.0, 3_150.0, 3_300.0, 3_450.0, 3_600.0] {
+        for gamma_deg in [-0.8f64, -1.0, -1.2, -1.5] {
+            let mut f = ShipFlight::new(ShipFlightConfig {
+                seed: 7,
+                lag: 0.3,
+                noise: Noise::LOW,
+                entry: Some(EntryConfig {
+                    range: range_km * 1e3,
+                    gamma: gamma_deg.to_radians(),
+                    ..EntryConfig::default()
+                }),
+                ..ShipFlightConfig::new(Kind::Earth)
+            })
+            .unwrap();
+            let mut pending: Option<Pending> = None;
+            let mut last_request = f64::NEG_INFINITY;
+            let mut handed = None;
+            while f.phase() != Phase::Done && f.sim().t < 2_000.0 {
+                f.step(if f.phase() == Phase::Entry {
+                    0.5
+                } else {
+                    FRAME
+                });
+                if handed.is_none() && f.phase() != Phase::Entry {
+                    handed = Some(dynamics::position(&f.sim().x)[0]);
+                }
+                deliver(&mut f, &mut pending);
+                request(&mut f, &mut pending, &mut last_request);
+            }
+            let s = f.entry_summary();
+            eprintln!(
+                "ORBIT {range_km} km {gamma_deg} deg: hand-over x {:?} m, peak tile {:?} K, {:?}",
+                handed.map(|x| x.round()),
+                s.map(|s| s.peak_tile.round()),
+                f.sim().outcome
+            );
+        }
+    }
+}

@@ -25,3 +25,13 @@ fn ship_preview_is_caught() {
         preview(r#"{"scenario":"earth","position":[700,0,5000],"velocity":[-25,0,-75],"lag":0.3}"#);
     assert_eq!(r["outcome"], "caught", "{r:?}");
 }
+
+#[test]
+fn from_orbit_preview_is_caught() {
+    let r = preview(
+        r#"{"scenario":"earth","position":[700,0,5000],"velocity":[-25,0,-75],"lag":0.3,"entry":{"range_km":3300,"gamma_deg":-1.0}}"#,
+    );
+    assert_eq!(r["outcome"], "caught", "{r:?}");
+    assert!(r["entry"]["peak_tile"].as_f64().unwrap() < model::entry::TILE_LIMIT);
+    assert!(r["entry_track"].as_array().unwrap().len() > 30);
+}
