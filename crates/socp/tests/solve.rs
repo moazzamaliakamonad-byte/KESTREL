@@ -1,6 +1,7 @@
 //! Small problems with known answers, and random problems checked against
-#![allow(clippy::needless_range_loop)]
 //! Clarabel.
+
+#![allow(clippy::needless_range_loop)]
 
 use socp::{Cone, Csc, Settings, Solver, Status};
 
