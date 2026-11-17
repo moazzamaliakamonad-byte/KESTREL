@@ -8,6 +8,7 @@
 //! Simulation only. Not flight software.
 
 pub mod engine;
+pub mod entry;
 pub mod raptors;
 pub mod rng;
 pub mod sensor;

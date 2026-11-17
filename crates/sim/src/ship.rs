@@ -66,6 +66,8 @@ pub enum CrashReason {
     TooFast,
     Tipped,
     OutOfPropellant,
+    /// The tiles overheated in the entry from orbit.
+    BurnedThrough,
 }
 
 impl CrashReason {
@@ -77,6 +79,7 @@ impl CrashReason {
             CrashReason::TooFast => "too fast",
             CrashReason::Tipped => "tipped over",
             CrashReason::OutOfPropellant => "out of propellant",
+            CrashReason::BurnedThrough => "heat shield burned through",
         }
     }
 }
