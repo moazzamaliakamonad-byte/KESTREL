@@ -47,6 +47,8 @@ pub struct Sub<'a> {
     pub w_virtual: f64,
     pub w_trust: f64,
     pub w_trust_sigma: f64,
+    /// Interior-point tolerance (gap and feasibility).
+    pub tolerance: f64,
 }
 
 /// Price of loosening a comfort constraint by one non-dimensional unit.
@@ -312,6 +314,10 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
     let settings = DefaultSettings {
         verbose: false,
         max_iter: 100,
+        tol_gap_abs: p.tolerance,
+        tol_gap_rel: p.tolerance,
+        tol_feas: p.tolerance,
+        tol_ktratio: p.tolerance.max(1e-6),
         ..Default::default()
     };
     let mut solver = DefaultSolver::new(&pm, &q, &a, &bv, &cones, settings)

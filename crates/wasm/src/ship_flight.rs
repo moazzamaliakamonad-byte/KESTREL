@@ -498,6 +498,12 @@ impl ShipFlight {
         self.relights > 0
     }
 
+    /// Something happened that the plan did not expect (a gust, a failure,
+    /// a changed setting): re-plan at the next chance, not after drift.
+    pub fn request_replan(&mut self) {
+        self.replan_now = true;
+    }
+
     /// Spare engines lit after a failure, this flight.
     pub fn relights(&self) -> u32 {
         self.relights

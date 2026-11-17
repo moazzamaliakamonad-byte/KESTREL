@@ -550,6 +550,11 @@ impl ShipFlightJs {
         self.inner.gust(dir);
     }
 
+    /// Re-plan at the next chance (something happened).
+    pub fn request_replan(&mut self) {
+        self.inner.request_replan();
+    }
+
     /// A gust blowing toward the horizontal direction `(dx, dy)`.
     pub fn gust_toward(&mut self, dx: f64, dy: f64) {
         self.inner.gust_toward(dx, dy);

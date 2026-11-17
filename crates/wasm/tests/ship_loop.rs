@@ -513,3 +513,30 @@ fn engine_out_window() {
         }
     }
 }
+
+/// Something happens (a gust, a failure, a changed setting): guidance asks
+/// for a new plan at once, not only when the ship has drifted.
+#[test]
+fn an_event_asks_for_a_plan_at_once() {
+    let mut f = ShipFlight::new(ShipFlightConfig {
+        seed: 7,
+        lag: 0.3,
+        noise: Noise::OFF,
+        ..ShipFlightConfig::new(Kind::Earth)
+    })
+    .unwrap();
+    let mut pending: Option<Pending> = None;
+    let mut last_request = f64::NEG_INFINITY;
+    // Fly until the ship is on a plan with nothing to re-plan for.
+    while !(matches!(f.guide(), Guide::Plan { .. }) && !f.wants_replan()) && f.sim().t < 200.0 {
+        f.step(FRAME);
+        deliver(&mut f, &mut pending);
+        request(&mut f, &mut pending, &mut last_request);
+    }
+    assert!(!f.wants_replan(), "never settled on a plan");
+    f.request_replan();
+    assert!(f.wants_replan());
+    // Asking for the plan clears it.
+    let _ = f.problem();
+    assert!(!f.wants_replan());
+}

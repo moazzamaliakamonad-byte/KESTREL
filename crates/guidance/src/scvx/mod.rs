@@ -16,8 +16,19 @@ use model::{Scenario, VehicleKind};
 use crate::GuidanceError;
 use discretize::{NX, Units};
 
-/// Nodes per plan.
+/// Nodes per plan: the ship 16 (each subproblem solves 2.3 times faster
+/// than with 24, and 32 closed-loop flights, nominal and engine-out,
+/// caught as many: 25 of 32 both; 12 caught 23). The booster keeps 24:
+/// with 16 its plans failed when solves took a second (slow-solver test).
 pub const NODES: usize = 24;
+pub const SHIP_NODES: usize = 16;
+/// Interior-point tolerance of each subproblem: the solver's default for
+/// the booster, 1e-6 for the ship (about a fifth less time per
+/// subproblem, same number of SCvx iterations; looser cost more
+/// iterations than it saved). The booster's browser sweep caught one
+/// fewer with 1e-6.
+pub const SOCP_TOLERANCE: f64 = 1e-8;
+pub const SHIP_SOCP_TOLERANCE: f64 = 1e-6;
 /// Largest planned body rate, rad/s (40°/s).
 pub const OMEGA_MAX: f64 = 0.698_131_700_797_731_8;
 /// Most SCvx iterations for a cold start and for a warm re-plan.
@@ -87,18 +98,23 @@ impl ShipProblem {
                 Some(BOOSTER_TILT)
             }
         };
+        let nodes = match scn.ship.kind {
+            VehicleKind::Ship => SHIP_NODES,
+            VehicleKind::Booster => NODES,
+        };
         ShipProblem {
             scn,
             x0,
             thrust_limits,
             late_limits: None,
-            switch_node: NODES,
+            // (No switch: past the last node.)
+            switch_node: nodes,
             upright_from: None,
             max_tilt,
             tilt_from: 2,
             approach: (APPROACH_RADIUS, APPROACH_TAN),
             side_speed: (SIDE_SPEED_0, SIDE_SPEED_SLOPE),
-            nodes: NODES,
+            nodes,
         }
     }
 
@@ -330,6 +346,10 @@ pub fn plan_ship(
             w_virtual: W_VIRTUAL,
             w_trust: W_TRUST,
             w_trust_sigma: W_TRUST_SIGMA,
+            tolerance: match scn.ship.kind {
+                VehicleKind::Ship => SHIP_SOCP_TOLERANCE,
+                VehicleKind::Booster => SOCP_TOLERANCE,
+            },
         })?;
         let mut step: f64 = (sub.sigma - sigma).abs();
         for n in 0..xs.len() {
