@@ -60,21 +60,21 @@ What is simulated, and what is only shown:
   relit: it gives thrust after 1 s, during which the ship falls. Real
   Raptors relight in flight; whether a real ship would, and how fast, is
   not published.
-- **Engine-out is survived 17 times in 20** (failure times 49-67 s, noise
-  off and low, measured below; 15 before the emergency gate, D-039).
-  Failures at 65 s and 67 s, the last seconds before the gate, are now
-  caught with no noise; the one at 67 s with low noise is lost, and it was
-  outside the engine-out envelope when the engine failed. The other two
-  losses (49 s low noise, 61 s no noise) were well inside it: those are
-  guidance's fault (the ship swings sideways into the mast after an
-  unconverged plan), not physics.
+- **Engine-out is survived 19 times in 20** (the running engine failed at
+  49, 51, ... 67 s, noise off and low; measured 2026-11-17 after D-039 and
+  D-040; 15 of 20 before both). Failures at 65 s and 67 s, the last
+  seconds before the gate, are now caught; at 67 s the ship was just
+  inside the engine-out envelope (+0.6 and +0.1 m/s). The one loss (63 s,
+  low noise) ran out of propellant well inside the envelope (+8.8 m/s):
+  guidance's fault, not physics.
 - **The engine-out envelope** (`guidance::envelope`, shown as
   "Engine-out" in the telemetry) is a point-mass estimate: if the running
   engine failed now, could a spare lit 1.3 s later (ignition plus throttle
   lag) at full thrust still stop the ship above the arms? It ignores
-  attitude, sideways motion and sensing errors. In the sweep every catch
-  but one began inside it or on its edge (+0.0 m/s); the arms accept
-  2 m/s, so a ship a little outside can still be caught. Below about 17 m
+  attitude, sideways motion and sensing errors. In the sweep every
+  failure began inside it (the latest at +0.1 m/s); before the filter, a
+  failure that began 1.9 m/s outside it was lost. The arms accept 2 m/s,
+  so a ship a little outside could still be caught. Below about 17 m
   above the arms nothing is survivable, not even hovering: the fall during
   the gap alone takes more height than is left.
 
@@ -85,8 +85,13 @@ What is simulated, and what is only shown:
   axis, at most 2 m/s down and 1 m/s sideways, tilt under 5°, turning
   slower than 5°/s (all *illustrative*; D-026). The arms are drawn closing
   on the tower's centre line, not on the vehicle.
-- **Sensor noise "high"**: the ship was lost in 1 or 2 of 4 runs per
-  configuration (tower strikes); the booster hits the tower in single runs.
+- **Sensor noise and the navigation filter** (D-040): guidance flies on a
+  complementary filter's estimate (accelerometers, taken as exact, plus
+  the noisy position and velocity readings), not on raw readings. Ship,
+  nominal: 12 of 12 (seeds 7-10, noise off, low and high) and 40 of 40
+  (seeds 11-30, high and low noise; 39 of 40 before). Booster, seeds
+  11-30: 20 of 20 at high noise (11 of 20 before), 20 of 20 at low. Real
+  accelerometers drift and have noise; these do not.
 - **Wind** is the same at every height; a gust is a 4 s trapezoid. The
   planner knows neither.
 - **Start envelope.** Booster: caught from 6–20 km at 300–600 m/s in the
@@ -212,7 +217,8 @@ These are deliberate and will be revisited at the milestone noted.
 | Flat, non-rotating ground; constant gravity | indefinitely |
 | No aerodynamic forces | M3 |
 | Thrust direction follows a first-order lag (no gimbal or attitude dynamics) | M3 |
-| No state estimator (raw sensor readings) | not planned |
+| No state estimator (raw sensor readings) | M3: a complementary filter on the 6-DoF page (D-040); the 3-DoF page still uses raw readings |
+
 | No fuel slosh | stretch goal |
 
 ## Measured results
@@ -337,8 +343,9 @@ as 0.5 s of sim time). Read on 2026-11-17 after the guidance redesign
 `engine_out_window`, `--ignored`): 12 nominal ship flights (seeds 7-10,
 noise off, low, high) and 20 engine-out flights (the running engine failed
 at 49, 51, … 67 s, noise off and low). Current configuration (2026-11-17,
-after D-039): 10 of 12 and 17 of 20. The two nominal losses are under high
-noise (tower strikes). The decision log (D-032, D-033, D-034, D-039) lists
+after D-040): 12 of 12 and 19 of 20 (10 and 17 before the navigation
+filter). The decision log (D-032, D-033, D-034, D-039, D-040) lists
+
 the configurations compared. Single seeds per cell: not a statistical claim.
 
 

@@ -205,7 +205,10 @@ crates/wasm
                the ship plans from engine start (flip on every engine, planned switch
                to one), relights a spare after a failure, request_replan() on events,
                emergency full-thrust option and a lower emergency gate after an engine
-               loss; engine_out_margin() for the page;
+               loss; engine_out_margin() for the page; navigate(): the navigation
+               filter (complementary: accelerometers + readings, D-040) that every
+               controller and plan request reads;
+
 
                legs (full engine set to a mid gate, final engines to the approach gate),
                when to re-plan, prediction of the booster's first plan, options

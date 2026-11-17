@@ -528,3 +528,28 @@ Template:
     controller.
   - Preferring a converged plan from any option over an unconverged one
     after a failure: 15 of 20.
+
+## D-040 — A navigation filter between the sensors and guidance
+- Date: 2026-11-17
+- Status: accepted
+- Context: under "high" sensor noise the ship hit the tower in 1-2 of 4
+  runs. Traced: the position reading wanders by up to 8 m (correlated over
+  2 s); the controller chased it, really moving the ship sideways, and
+  drift-triggered re-plans pulled different ways. M0-M2 recorded "no state
+  estimator" as a deliberate simplification.
+- Decision: a complementary filter, the simplest navigation filter: every
+  10 ms the estimate is carried forward by the accelerometers (the true
+  velocity change over the step, taken as exact) and pulled toward the
+  position reading with a 2 s time constant and toward the velocity
+  reading with 1 s. Guidance and every controller use the estimate; the
+  plan request uses it too (it used a fresh raw reading).
+- Measured (ship, nominal, 0.3 s lag): seeds 7-10 x off/low/high 12 of 12
+  (raw readings: 9 to 10 of 12); seeds 11-30, high noise 20 of 20 (raw
+  19), low 20 of 20 (raw 20). Engine-out sweep 19 of 20 (raw 17). Time
+  constants 4 s/2 s: 16 of 20 at low noise (the ship circled the catch
+  axis in its final approach); 8 s/4 s: 15 of 20 engine-out.
+- Booster (seeds 11-30): high noise 11 of 20 with raw readings, 20 of 20
+  with 4 s/2 s, 18 of 20 with 2 s/1 s; low noise 20 of 20 in all three.
+  So the time constants are per vehicle: ship 2 s/1 s, booster 4 s/2 s.
+  Browser-timing sweep 33 of 33 (32 before).
+

@@ -94,7 +94,15 @@ pub const EMERGENCY_GATE_DROP: f64 = 12.0;
 pub const ENVELOPE_SHARE: f64 = 1.0;
 pub const ENVELOPE_FLOOR: f64 = 0.0;
 
+/// Navigation filter time constants, s: how slowly the estimate follows
+/// the position and velocity readings (between readings it is carried by
+/// the accelerometers). Per vehicle, chosen over 52 flights each (D-040):
+/// (position, velocity).
+pub const NAV_SHIP: (f64, f64) = (2.0, 1.0);
+pub const NAV_BOOSTER: (f64, f64) = (4.0, 2.0);
+
 /// Default wind gust speed, m/s.
+
 pub const GUST_SPEED: f64 = 15.0;
 /// Attitude sensor error σ (rad) and rate error σ (rad/s), high noise.
 pub const ATT_SIGMA_HIGH: (f64, f64) = (0.003_490_658_503_988_659, 0.000_872_664_625_997_164_9);
@@ -274,6 +282,10 @@ pub struct ShipFlight {
     relights: u32,
     /// A failure made the plan wrong: re-plan without waiting for drift.
     replan_now: bool,
+    /// Navigation filter: estimated position and velocity, and the velocity
+    /// change the accelerometers measured over the last step.
+    nav: Option<(Vec3, Vec3)>,
+    imu_dv: Vec3,
 }
 
 impl ShipFlight {
@@ -326,6 +338,8 @@ impl ShipFlight {
             solve_time: 0.0,
             relights: 0,
             replan_now: false,
+            nav: None,
+            imu_dv: [0.0; 3],
         })
     }
 
@@ -606,7 +620,8 @@ impl ShipFlight {
     }
 
     fn control_step(&mut self, h: f64) {
-        let est = self.measure();
+        let raw = self.measure();
+        let est = self.navigate(raw, h);
         self.est = est;
         let scn = self.sim.scn.clone();
         let t = self.sim.t;
@@ -669,7 +684,11 @@ impl ShipFlight {
             flaps: act.flaps,
             rcs: act.rcs,
         };
+        let v_before = dynamics::velocity(&self.sim.x);
         self.sim.step(&cmd, h);
+        // The accelerometers (with the gravity model): what the velocity
+        // did over the step. Taken as exact; real ones drift slowly.
+        self.imu_dv = quat::sub(dynamics::velocity(&self.sim.x), v_before);
         if self.sim.outcome.is_some() {
             self.phase = Phase::Done;
         }
@@ -762,7 +781,7 @@ impl ShipFlight {
     /// gate first, else every lit engine to an intermediate gate.
     pub fn problem(&mut self) -> (f64, Vec<(Leg, ShipProblem)>) {
         self.replan_now = false;
-        let measured = self.measure();
+        let measured = self.est;
         // The booster's first plan: it is braking at 4 g with no plan to
         // follow, so by the time the plan comes back it is somewhere else
         // (a second of solving is 60 m/s). Plan from where it will be
@@ -952,7 +971,43 @@ impl ShipFlight {
         self.sim.x[R..R + 3].copy_from_slice(&[p[0], p[1], z]);
     }
 
+    /// Blend a sensor reading into the navigation estimate: carry the
+    /// estimate forward with the measured acceleration, then pull it toward
+    /// the reading with time constants NAV_SHIP or NAV_BOOSTER (a
+    /// complementary filter, the simplest form of a
+
+    /// navigation filter's position/velocity fusion). The reading's
+    /// attitude, rates and mass are used as they are.
+    fn navigate(&mut self, raw: State, h: f64) -> State {
+        let (tp, tv) = match self.sim.scn.ship.kind {
+            VehicleKind::Ship => NAV_SHIP,
+            VehicleKind::Booster => NAV_BOOSTER,
+        };
+        let (p_m, v_m) = (dynamics::position(&raw), dynamics::velocity(&raw));
+        let (p, v) = match self.nav {
+            Some((p, v)) if tp > 0.0 => {
+                let dv = self.imu_dv;
+                let mut p = std::array::from_fn(|i| p[i] + (v[i] + 0.5 * dv[i]) * h);
+                let mut v: Vec3 = std::array::from_fn(|i| v[i] + dv[i]);
+                let (kp, kv) = ((h / tp).min(1.0), (h / tv).min(1.0));
+                for i in 0..3 {
+                    p[i] += kp * (p_m[i] - p[i]);
+                    v[i] += kv * (v_m[i] - v[i]);
+                }
+                (p, v)
+            }
+            _ => (p_m, v_m),
+        };
+        self.nav = Some((p, v));
+        let mut x = raw;
+        x[R..R + 3].copy_from_slice(&p);
+        x[V..V + 3].copy_from_slice(&v);
+        x
+    }
+
     pub fn release(&mut self) {
+        self.nav = None;
+
         self.grabbed = false;
     }
 
