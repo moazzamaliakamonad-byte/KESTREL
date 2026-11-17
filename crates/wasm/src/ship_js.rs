@@ -153,6 +153,24 @@ struct OptionDto {
     leg: LegDto,
     x0: Vec<f64>,
     thrust_limits: (f64, f64),
+    /// A planned engine switch (the ship's flip): the range after it, and
+    /// the node it happens at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    late_limits: Option<(f64, f64)>,
+    #[serde(default)]
+    switch_node: usize,
+    /// The rest of the problem the flight chose: the tilt cap and from
+    /// which node it and the upright constraint apply (None: the default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_tilt: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tilt_from: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    upright_from: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    approach: Option<(f64, f64)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    side_speed: Option<(f64, f64)>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -174,6 +192,9 @@ struct PlanDto {
     converged: bool,
     gate_error: f64,
     defect: f64,
+    /// Plan time of its engine switch, s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    switch_time: Option<f64>,
 }
 
 impl From<&ShipPlan> for PlanDto {
@@ -187,6 +208,7 @@ impl From<&ShipPlan> for PlanDto {
             converged: p.converged,
             gate_error: p.gate_error,
             defect: p.defect,
+            switch_time: p.switch_time,
         }
     }
 }
@@ -198,7 +220,11 @@ fn state_of(v: &[f64]) -> Option<State> {
 
 impl PlanDto {
     fn into_plan(self) -> Option<ShipPlan> {
-        let x = self.x.iter().map(|v| state_of(v)).collect::<Option<Vec<_>>>()?;
+        let x = self
+            .x
+            .iter()
+            .map(|v| state_of(v))
+            .collect::<Option<Vec<_>>>()?;
         let n = self.t.len();
         if n < 2 || x.len() != n || self.u.len() != n || !self.final_time.is_finite() {
             return None;
@@ -212,7 +238,7 @@ impl PlanDto {
             defect: self.defect,
             gate_error: self.gate_error,
             converged: self.converged,
-            switch_time: None,
+            switch_time: self.switch_time.filter(|s| s.is_finite() && *s >= 0.0),
         })
     }
 }
@@ -227,6 +253,13 @@ fn request_of(kind: Kind, scn: &Scenario, options: &[(Leg, ShipProblem)]) -> Req
                 leg: (*leg).into(),
                 x0: p.x0.to_vec(),
                 thrust_limits: p.thrust_limits,
+                late_limits: p.late_limits,
+                switch_node: p.switch_node,
+                max_tilt: p.max_tilt,
+                tilt_from: Some(p.tilt_from),
+                upright_from: p.upright_from,
+                approach: Some(p.approach),
+                side_speed: Some(p.side_speed),
             })
             .collect(),
     }
@@ -251,7 +284,38 @@ fn problems_of(req: RequestDto) -> Option<Vec<(Leg, ShipProblem)>> {
             if !(lo.is_finite() && hi.is_finite() && 0.0 < lo && lo < hi) {
                 return None;
             }
-            Some((leg, ShipProblem::new(scn, x0, (lo, hi))))
+            let mut p = ShipProblem::new(scn, x0, (lo, hi));
+            if let Some((a, b)) = o.late_limits {
+                if !(a.is_finite() && b.is_finite() && 0.0 < a && a < b)
+                    || o.switch_node < 1
+                    || o.switch_node >= p.nodes
+                {
+                    return None;
+                }
+                p.late_limits = Some((a, b));
+                p.switch_node = o.switch_node;
+            }
+            if let Some(t) = o.max_tilt {
+                if !(t.is_finite() && t > 0.0) {
+                    return None;
+                }
+                p.max_tilt = Some(t);
+            }
+            p.tilt_from = o.tilt_from.unwrap_or(2).min(p.nodes - 1);
+            p.upright_from = o.upright_from.filter(|u| *u < p.nodes);
+            if let Some((r, k)) = o.approach {
+                if !(r.is_finite() && k.is_finite() && r > 0.0 && k > 0.0) {
+                    return None;
+                }
+                p.approach = (r, k);
+            }
+            if let Some((a, b)) = o.side_speed {
+                if !(a.is_finite() && b.is_finite() && a > 0.0 && b >= 0.0) {
+                    return None;
+                }
+                p.side_speed = (a, b);
+            }
+            Some((leg, p))
         })
         .collect()
 }
@@ -260,7 +324,10 @@ fn problems_of(req: RequestDto) -> Option<Vec<(Leg, ShipProblem)>> {
 /// `{ok: true, index, leg, plan}` or `{ok: false, error}`.
 #[wasm_bindgen]
 pub fn plan_ship(request_json: &str) -> String {
-    let Some(options) = serde_json::from_str::<RequestDto>(request_json).ok().and_then(problems_of) else {
+    let Some(options) = serde_json::from_str::<RequestDto>(request_json)
+        .ok()
+        .and_then(problems_of)
+    else {
         return failure("BadRequest", "could not read ship request".into()).to_string();
     };
     match ship_flight::plan(&options) {
@@ -450,7 +517,8 @@ impl ShipFlightJs {
     /// `{t, request}` for the worker.
     pub fn measure_request(&mut self) -> String {
         let (t, options) = self.inner.problem();
-        json!({"t": t, "request": request_of(self.inner.kind, &self.inner.sim().scn, &options)}).to_string()
+        json!({"t": t, "request": request_of(self.inner.kind, &self.inner.sim().scn, &options)})
+            .to_string()
     }
 
     /// Install the worker's answer to a request measured at sim time `t`.
@@ -461,7 +529,9 @@ impl ShipFlightJs {
         };
         if v["ok"] == true {
             let leg = serde_json::from_value::<LegDto>(v["leg"].clone());
-            let plan = serde_json::from_value::<PlanDto>(v["plan"].clone()).ok().and_then(PlanDto::into_plan);
+            let plan = serde_json::from_value::<PlanDto>(v["plan"].clone())
+                .ok()
+                .and_then(PlanDto::into_plan);
             if let (Ok(leg), Some(plan)) = (leg, plan)
                 && t.is_finite()
             {
@@ -557,7 +627,11 @@ impl ShipFlightJs {
         let speed_of_sound = 340.0 - 0.004 * x[dynamics::R + 2].clamp(0.0, 11_000.0);
         let thrust = s.cluster.thrust;
         let tn = quat::norm(thrust);
-        let gimbal = if tn > 0.0 { (thrust[2] / tn).clamp(-1.0, 1.0).acos().to_degrees() } else { 0.0 };
+        let gimbal = if tn > 0.0 {
+            (thrust[2] / tn).clamp(-1.0, 1.0).acos().to_degrees()
+        } else {
+            0.0
+        };
         let (outcome, reason) = outcome_str(s.outcome);
         let (guide, leg_engines) = match (f.guide(), f.leg()) {
             (Guide::Plan { .. }, Some(l)) => ("plan", l.engines),
@@ -629,13 +703,22 @@ mod tests {
         serde_json::from_str(s).expect("JSON")
     }
 
-    const EARTH: &str = r#"{"scenario":"earth","position":[700,0,5000],"velocity":[-25,0,-75],"noise":"low"}"#;
+    const EARTH: &str =
+        r#"{"scenario":"earth","position":[700,0,5000],"velocity":[-25,0,-75],"noise":"low"}"#;
 
     #[test]
     fn bad_configs_are_refused() {
         assert!(ShipFlightJs::create("{}").is_none());
-        assert!(ShipFlightJs::create(r#"{"scenario":"venus","position":[0,0,5000],"velocity":[0,0,0]}"#).is_none());
-        assert!(ShipFlightJs::create(r#"{"scenario":"earth","position":[0,0,10],"velocity":[0,0,0]}"#).is_none());
+        assert!(
+            ShipFlightJs::create(
+                r#"{"scenario":"venus","position":[0,0,5000],"velocity":[0,0,0]}"#
+            )
+            .is_none()
+        );
+        assert!(
+            ShipFlightJs::create(r#"{"scenario":"earth","position":[0,0,10],"velocity":[0,0,0]}"#)
+                .is_none()
+        );
         assert_eq!(parse(&plan_ship("garbage"))["ok"], false);
         assert_eq!(parse(&preview_ship("{}"))["ok"], false);
     }
@@ -696,7 +779,21 @@ mod tests {
     fn snapshot_has_the_panels_fields() {
         let f = ShipFlightJs::create(EARTH).unwrap();
         let s = parse(&f.snapshot());
-        for k in ["t", "phase", "position", "quat", "engines", "flaps", "rcs", "q_dyn", "propellant", "aero_force", "heat_flux", "mach", "weight"] {
+        for k in [
+            "t",
+            "phase",
+            "position",
+            "quat",
+            "engines",
+            "flaps",
+            "rcs",
+            "q_dyn",
+            "propellant",
+            "aero_force",
+            "heat_flux",
+            "mach",
+            "weight",
+        ] {
             assert!(!s[k].is_null(), "missing {k}");
         }
         assert_eq!(s["phase"], "belly-flop");

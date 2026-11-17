@@ -37,7 +37,13 @@ pub fn body_force(ship: &Ship, rho: f64, q: Quat, w_air: Vec3) -> (Vec3, Vec3) {
 
 /// Force (inertial, N) and torque (body, N·m) of the four flaps, each
 /// exposed by `e ∈ [0, 1]`.
-pub fn flap_force(ship: &Ship, rho: f64, q: Quat, w_air: Vec3, exposure: [f64; FLAPS]) -> (Vec3, Vec3) {
+pub fn flap_force(
+    ship: &Ship,
+    rho: f64,
+    q: Quat,
+    w_air: Vec3,
+    exposure: [f64; FLAPS],
+) -> (Vec3, Vec3) {
     let (_, wn) = split(q, w_air);
     let unit = -0.5 * rho * ship.c_flap * quat::norm(wn);
     let mut force = [0.0; 3];
@@ -53,7 +59,8 @@ pub fn flap_force(ship: &Ship, rho: f64, q: Quat, w_air: Vec3, exposure: [f64; F
 
 /// Unit radial directions of the grid fins in body axes: +y, −y, +x
 /// (a 90/90/180° arrangement; the ±y pair carries the catch hardpoints).
-pub const FIN_RADIAL: [Vec3; crate::vehicle::FINS] = [[0.0, 1.0, 0.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]];
+pub const FIN_RADIAL: [Vec3; crate::vehicle::FINS] =
+    [[0.0, 1.0, 0.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]];
 
 /// The force of one fin per radian of deflection, N/rad: dynamic pressure
 /// of the axial flow × fin area × slope.
@@ -67,8 +74,16 @@ pub fn fin_gain(ship: &Ship, rho: f64, q: Quat, w_air: Vec3) -> f64 {
 /// deflected by `deflection` (rad). A fin turns about its radial axis and
 /// pushes tangentially: `F_i = k δ_i (b_z × e_r,i)`. Their lift at an
 /// angle of attack is part of the body model (`c_n_alpha`).
-pub fn fin_force(ship: &Ship, rho: f64, q: Quat, w_air: Vec3, deflection: [f64; FLAPS]) -> (Vec3, Vec3) {
-    let Some(f) = ship.fins else { return ([0.0; 3], [0.0; 3]) };
+pub fn fin_force(
+    ship: &Ship,
+    rho: f64,
+    q: Quat,
+    w_air: Vec3,
+    deflection: [f64; FLAPS],
+) -> (Vec3, Vec3) {
+    let Some(f) = ship.fins else {
+        return ([0.0; 3], [0.0; 3]);
+    };
     let k = fin_gain(ship, rho, q, w_air);
     let mut force = [0.0; 3];
     let mut torque = [0.0; 3];
@@ -87,7 +102,9 @@ pub fn fin_force(ship: &Ship, rho: f64, q: Quat, w_air: Vec3, deflection: [f64; 
 /// Pitch (about y) comes from the ±y pair, yaw (about x) from the +x fin,
 /// roll from all three.
 pub fn fin_allocate(ship: &Ship, k: f64, tau: Vec3) -> ([f64; FLAPS], Vec3) {
-    let Some(f) = ship.fins else { return ([0.0; FLAPS], [0.0; 3]) };
+    let Some(f) = ship.fins else {
+        return ([0.0; FLAPS], [0.0; 3]);
+    };
     if k * f.station.abs() < 1.0 {
         return ([0.0; FLAPS], [0.0; 3]);
     }
@@ -145,7 +162,11 @@ mod tests {
         let (mut lo, mut hi) = (1.0, 500.0);
         for _ in 0..60 {
             let mid = (lo + hi) / 2.0;
-            if drag(mid) < weight { lo = mid } else { hi = mid }
+            if drag(mid) < weight {
+                lo = mid
+            } else {
+                hi = mid
+            }
         }
         assert!((80.0..100.0).contains(&lo), "terminal speed {lo}");
     }
@@ -176,7 +197,11 @@ mod tests {
         let (mut lo, mut hi) = (1.0, 2000.0);
         for _ in 0..60 {
             let mid = (lo + hi) / 2.0;
-            if drag(mid) < weight { lo = mid } else { hi = mid }
+            if drag(mid) < weight {
+                lo = mid
+            } else {
+                hi = mid
+            }
         }
         assert!((280.0..360.0).contains(&lo), "terminal speed {lo}");
         // Top tipped toward +x (a + rotation about y) while falling: the
@@ -193,7 +218,12 @@ mod tests {
         let up = [1.0, 0.0, 0.0, 0.0];
         let w = [0.0, 0.0, -300.0];
         let k = fin_gain(&s.ship, 1.0, up, w);
-        for tau in [[2e6, 0.0, 0.0], [0.0, -3e6, 0.0], [0.0, 0.0, 4e5], [1e6, 2e6, -3e5]] {
+        for tau in [
+            [2e6, 0.0, 0.0],
+            [0.0, -3e6, 0.0],
+            [0.0, 0.0, 4e5],
+            [1e6, 2e6, -3e5],
+        ] {
             let (d, made) = fin_allocate(&s.ship, k, tau);
             let (_, t) = fin_force(&s.ship, 1.0, up, w, d);
             for i in 0..3 {

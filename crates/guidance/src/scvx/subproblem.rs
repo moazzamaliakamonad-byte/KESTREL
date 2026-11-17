@@ -38,8 +38,9 @@ pub struct Sub<'a> {
     /// From this node on, tilt ≤ θ, as `‖(q_x, q_y)‖ ≤ sin(θ/2)`.
     pub upright_from: usize,
     pub upright_sin_half: f64,
-    /// sin(half the largest tilt) allowed from node 2 on (soft), if any.
+    /// sin(half the largest tilt) allowed from node `tilt_from` on (soft), if any.
     pub tilt_sin_half: Option<f64>,
+    pub tilt_from: usize,
     /// Sideways speed `‖v_xy‖ ≤ c0 + c1 · (z − gate_z)` from node 2 on.
     pub side_speed: (f64, f64),
     pub sigma_bounds: (f64, f64),
@@ -113,7 +114,11 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
     // Dynamics: x_{k+1} − A x_k − B⁻u_k − B⁺u_{k+1} − Sσ − ν_k − z_k = 0.
     for (m, iv) in p.ivs.iter().enumerate() {
         for i in 0..NX {
-            let mut t = vec![(l.x(m + 1, i), 1.0), (l.nu(m, i), -1.0), (l.sigma(), -iv.s[i])];
+            let mut t = vec![
+                (l.x(m + 1, i), 1.0),
+                (l.nu(m, i), -1.0),
+                (l.sigma(), -iv.s[i]),
+            ];
             for j in 0..NX {
                 if iv.a[i][j] != 0.0 {
                     t.push((l.x(m, j), -iv.a[i][j]));
@@ -162,8 +167,15 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
         // Lower thrust bound, linearized around the reference direction.
         let ub = p.us[m];
         let nb = (ub[0] * ub[0] + ub[1] * ub[1] + ub[2] * ub[2]).sqrt();
-        let dir = if nb > 1e-9 { ub.map(|c| c / nb) } else { [0.0, 0.0, 1.0] };
-        nonneg.push((0..3).map(|j| (l.u(m, j), dir[j])).collect(), -p.t_bounds[m].0);
+        let dir = if nb > 1e-9 {
+            ub.map(|c| c / nb)
+        } else {
+            [0.0, 0.0, 1.0]
+        };
+        nonneg.push(
+            (0..3).map(|j| (l.u(m, j), dir[j])).collect(),
+            -p.t_bounds[m].0,
+        );
     }
     for m in 0..k {
         nonneg.push(vec![(l.soft(m), 1.0)], 0.0);
@@ -195,19 +207,28 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
         // so a ship pushed off its plan still gets a plan back.
         let (r0, tg) = p.approach;
         let mut b = Block::default();
-        b.push(vec![(l.x(m, R + 2), tg), (l.soft(m), 1.0)], r0 - tg * p.gate_r[2]);
+        b.push(
+            vec![(l.x(m, R + 2), tg), (l.soft(m), 1.0)],
+            r0 - tg * p.gate_r[2],
+        );
         b.push(vec![(l.x(m, R), 1.0)], -p.gate_r[0]);
         b.push(vec![(l.x(m, R + 1), 1.0)], -p.gate_r[1]);
         socs.push(b);
         if m >= 2 {
             let (c0, c1) = p.side_speed;
             let mut b = Block::default();
-            b.push(vec![(l.x(m, R + 2), c1), (l.soft(m), 1.0)], c0 - c1 * p.gate_r[2]);
+            b.push(
+                vec![(l.x(m, R + 2), c1), (l.soft(m), 1.0)],
+                c0 - c1 * p.gate_r[2],
+            );
             b.push(vec![(l.x(m, V), 1.0)], 0.0);
             b.push(vec![(l.x(m, V + 1), 1.0)], 0.0);
             socs.push(b);
         }
-        if let Some(s) = p.tilt_sin_half.filter(|_| m >= 2 && m < p.upright_from) {
+        if let Some(s) = p
+            .tilt_sin_half
+            .filter(|_| m >= p.tilt_from && m < p.upright_from)
+        {
             let mut b = Block::default();
             b.push(vec![(l.soft(m), 0.1)], s);
             b.push(vec![(l.x(m, Q + 1), 1.0)], 0.0);
@@ -261,7 +282,11 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
     // Assemble A, b, cones in block order.
     let (mut ri, mut ci, mut vv, mut bv) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut cones = Vec::new();
-    let emit = |blk: &Block, ri: &mut Vec<usize>, ci: &mut Vec<usize>, vv: &mut Vec<f64>, bv: &mut Vec<f64>| {
+    let emit = |blk: &Block,
+                ri: &mut Vec<usize>,
+                ci: &mut Vec<usize>,
+                vv: &mut Vec<f64>,
+                bv: &mut Vec<f64>| {
         for (terms, c) in &blk.rows {
             let row = bv.len();
             for &(col, val) in terms {
@@ -299,8 +324,12 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
         }
         other => return Err(GuidanceError::SolverFailed(format!("{other:?}"))),
     };
-    let xs = (0..k).map(|m| std::array::from_fn(|i| x[l.x(m, i)])).collect();
-    let us = (0..k).map(|m| std::array::from_fn(|j| x[l.u(m, j)])).collect();
+    let xs = (0..k)
+        .map(|m| std::array::from_fn(|i| x[l.x(m, i)]))
+        .collect();
+    let us = (0..k)
+        .map(|m| std::array::from_fn(|j| x[l.u(m, j)]))
+        .collect();
     let virtual_l1 = (0..k - 1)
         .flat_map(|m| (0..NX).map(move |i| (m, i)))
         .map(|(m, i)| x[l.nu(m, i)].abs())

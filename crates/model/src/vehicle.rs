@@ -187,8 +187,14 @@ impl Ship {
             c_n_alpha: 2.0,
             cp_offset: 10.0,
             c_flap: 0.0,
-            fore: FlapPair { station: 0.0, area: 0.0 },
-            aft: FlapPair { station: 0.0, area: 0.0 },
+            fore: FlapPair {
+                station: 0.0,
+                area: 0.0,
+            },
+            aft: FlapPair {
+                station: 0.0,
+                area: 0.0,
+            },
             flap_y: 0.0,
             fins: Some(GridFins {
                 station: 34.0,
@@ -233,9 +239,16 @@ impl Ship {
     }
 }
 
-/// The Earth approach gate's distance from the catch axis, m (away from
-/// the mast, on +x).
-pub const APPROACH_OFFSET: f64 = 14.0;
+/// The ship's plan ends this far out from the catch axis (away from the
+/// mast), m, this high above the caught position, m, moving in at
+/// SHIP_GATE_IN m/s and down at SHIP_GATE_SINK m/s; the last metres onto
+/// the arms are a short descent by the terminal controller. Chosen by
+/// flying 32 flights per candidate (nominal and engine-out, three noise
+/// levels): gates nearer the arms hit the mast under sensor noise.
+pub const SHIP_GATE_OUT: f64 = 10.0;
+pub const SHIP_GATE_HEIGHT: f64 = 20.0;
+pub const SHIP_GATE_IN: f64 = 1.0;
+pub const SHIP_GATE_SINK: f64 = 2.0;
 
 /// The booster's approach gate's distance from the catch axis, m.
 pub const BOOSTER_OFFSET: f64 = 14.0;
@@ -326,8 +339,10 @@ impl Scenario {
             // Approach gate: out from the tower and above the arms. The
             // final translation over the catch axis and the descent onto
             // the arms are flown by a simple, slow terminal controller.
-            gate: [APPROACH_OFFSET, 0.0, caught_cm + 14.0],
-            gate_velocity: [-GATE_SLIDE, 0.0, -2.0],
+            // Straight to the arms: on the catch axis, a little above
+            // them, still coming down.
+            gate: [SHIP_GATE_OUT, 0.0, caught_cm + SHIP_GATE_HEIGHT],
+            gate_velocity: [-SHIP_GATE_IN, 0.0, -SHIP_GATE_SINK],
             floor_z: caught_cm,
             clearance_x: Some(-1.0),
             catch: Some(catch),
@@ -402,7 +417,12 @@ impl Scenario {
     pub fn tuned(mut self, t: &Tuning) -> Scenario {
         let ok = |v: f64, lo: f64, hi: f64, d: f64| if v.is_finite() { v.clamp(lo, hi) } else { d };
         self.density_scale = ok(t.density_scale, 0.0, 3.0, 1.0);
-        self.ship.gimbal_max = ok(t.gimbal_max, 2f64.to_radians(), 20f64.to_radians(), self.ship.gimbal_max);
+        self.ship.gimbal_max = ok(
+            t.gimbal_max,
+            2f64.to_radians(),
+            20f64.to_radians(),
+            self.ship.gimbal_max,
+        );
         self.ship.throttle_min = ok(t.throttle_min, 0.2, 0.8, self.ship.throttle_min);
         self.ship.isp = ok(t.isp, 200.0, 400.0, self.ship.isp);
         self.ship.ignition_time = ok(t.ignition_time, 0.2, 3.0, self.ship.ignition_time);

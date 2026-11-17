@@ -106,7 +106,11 @@ mod tests {
         // +90° about y takes z to x.
         let q = from_axis_angle([0.0, 1.0, 0.0], std::f64::consts::FRAC_PI_2);
         assert!(close(rotate(q, [0.0, 0.0, 1.0]), [1.0, 0.0, 0.0], 1e-12));
-        assert!(close(rotate_inv(q, [1.0, 0.0, 0.0]), [0.0, 0.0, 1.0], 1e-12));
+        assert!(close(
+            rotate_inv(q, [1.0, 0.0, 0.0]),
+            [0.0, 0.0, 1.0],
+            1e-12
+        ));
     }
 
     #[test]

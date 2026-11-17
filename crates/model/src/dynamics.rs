@@ -101,7 +101,12 @@ mod tests {
         let s = Scenario::earth();
         let m = 120e3;
         let x = upright(m, 500.0);
-        let d = f(&s, &x, [0.0, 0.0, m * s.planet.gravity()], &Extra::default());
+        let d = f(
+            &s,
+            &x,
+            [0.0, 0.0, m * s.planet.gravity()],
+            &Extra::default(),
+        );
         assert!(d[V..V + 3].iter().all(|a| a.abs() < 1e-9));
         assert!(d[W..W + 3].iter().all(|a| a.abs() < 1e-12));
         assert!((d[M] + s.ship.alpha() * m * s.planet.gravity()).abs() < 1e-9);
@@ -110,7 +115,12 @@ mod tests {
     #[test]
     fn thrust_through_cm_has_no_torque() {
         let s = Scenario::earth();
-        let d = f(&s, &upright(120e3, 500.0), [0.0, 0.0, 2e6], &Extra::default());
+        let d = f(
+            &s,
+            &upright(120e3, 500.0),
+            [0.0, 0.0, 2e6],
+            &Extra::default(),
+        );
         assert!(d[W..W + 3].iter().all(|a| a.abs() < 1e-12));
     }
 
@@ -119,8 +129,12 @@ mod tests {
         // Thrust pushed toward +x at the base, below the CoM: the base goes
         // +x, so the nose tips toward −x. That is a negative rotation about y.
         let s = Scenario::earth();
-        let d = f(&s, &upright(120e3, 500.0), [1e5, 0.0, 2e6], &Extra::default());
+        let d = f(
+            &s,
+            &upright(120e3, 500.0),
+            [1e5, 0.0, 2e6],
+            &Extra::default(),
+        );
         assert!(d[W + 1] < 0.0, "{:?}", &d[W..]);
     }
-
 }

@@ -4,7 +4,7 @@
 //! Guidance never reads this directly. Simulation only.
 
 use model::aero::{self, FLAPS};
-use model::dynamics::{self, Extra, State, M, Q, V, W};
+use model::dynamics::{self, Extra, M, Q, State, V, W};
 use model::quat::{self, Vec3};
 use model::{Scenario, VehicleKind};
 
@@ -216,7 +216,11 @@ impl ShipSim {
             _ => (FLAP_MIN, 1.0, FLAP_RATE),
         };
         for i in 0..FLAPS {
-            let want = if cmd.flaps[i].is_finite() { cmd.flaps[i].clamp(lo, hi) } else { self.flaps[i] };
+            let want = if cmd.flaps[i].is_finite() {
+                cmd.flaps[i].clamp(lo, hi)
+            } else {
+                self.flaps[i]
+            };
             let d = (want - self.flaps[i]).clamp(-rate * h, rate * h);
             self.flaps[i] += d;
         }
@@ -310,7 +314,10 @@ impl ShipSim {
             let pins = self.axis_point(ship.pin_height);
             let off = (pins[0] * pins[0] + pins[1] * pins[1]).sqrt();
             let above = pins[2] - c.arm_z;
-            if !self.arms_closed && (0.0..=ARMS_CLOSE_ABOVE).contains(&above) && off <= ARMS_CLOSE_RADIUS {
+            if !self.arms_closed
+                && (0.0..=ARMS_CLOSE_ABOVE).contains(&above)
+                && off <= ARMS_CLOSE_RADIUS
+            {
                 self.arms_closed = true;
             }
             if above <= 0.0 && above > -3.0 && off <= ARMS_CLOSE_RADIUS + ship.radius {
@@ -319,7 +326,9 @@ impl ShipSim {
                     Outcome::Crashed(CrashReason::MissedArms)
                 } else if -v[2] > CATCH_DOWN || side > CATCH_SIDE {
                     Outcome::Crashed(CrashReason::TooFast)
-                } else if tilt > CATCH_TILT_DEG.to_radians() || quat::norm(w) > CATCH_RATE_DEG.to_radians() {
+                } else if tilt > CATCH_TILT_DEG.to_radians()
+                    || quat::norm(w) > CATCH_RATE_DEG.to_radians()
+                {
                     Outcome::Crashed(CrashReason::Tipped)
                 } else {
                     Outcome::Caught
@@ -392,7 +401,13 @@ mod tests {
     #[test]
     fn long_spin_keeps_unit_quaternion() {
         let s = Scenario::earth();
-        let x = state(s.start_mass, [0.0, 0.0, 1e6], [0.0; 3], upright(), [0.3, 0.2, 1.0]);
+        let x = state(
+            s.start_mass,
+            [0.0, 0.0, 1e6],
+            [0.0; 3],
+            upright(),
+            [0.3, 0.2, 1.0],
+        );
         let mut sim = ShipSim::new(s, x);
         sim.step(&Command::default(), 300.0);
         let q = dynamics::attitude(&sim.x);
@@ -428,7 +443,13 @@ mod tests {
     #[test]
     fn empty_tanks_shut_engines() {
         let s = Scenario::earth();
-        let x = state(s.dry_mass + 50.0, [0.0, 0.0, 400.0], [0.0; 3], upright(), [0.0; 3]);
+        let x = state(
+            s.dry_mass + 50.0,
+            [0.0, 0.0, 400.0],
+            [0.0; 3],
+            upright(),
+            [0.0; 3],
+        );
         let mut sim = ShipSim::new(s, x);
         sim.cluster.ignite_all();
         let cmd = Command {
@@ -440,7 +461,10 @@ mod tests {
         }
         assert_eq!(sim.cluster.running(), 0);
         assert!(sim.x[M] >= sim.scn.dry_mass - 1e-6);
-        assert_eq!(sim.outcome, Some(Outcome::Crashed(CrashReason::OutOfPropellant)));
+        assert_eq!(
+            sim.outcome,
+            Some(Outcome::Crashed(CrashReason::OutOfPropellant))
+        );
     }
 
     #[test]
@@ -503,7 +527,13 @@ mod tests {
     #[test]
     fn booster_fins_slew_clamp_and_turn_it() {
         let s = Scenario::booster();
-        let x = state(s.start_mass, [0.0, 0.0, 8000.0], [0.0, 0.0, -300.0], upright(), [0.0; 3]);
+        let x = state(
+            s.start_mass,
+            [0.0, 0.0, 8000.0],
+            [0.0, 0.0, -300.0],
+            upright(),
+            [0.0; 3],
+        );
         let mut sim = ShipSim::new(s, x);
         assert_eq!(sim.flaps, [0.0; 4]);
         // δ1 − δ0 > 0 is a + torque about y: the top tips toward +x.
@@ -512,7 +542,11 @@ mod tests {
             ..Command::default()
         };
         sim.step(&cmd, 0.1);
-        assert!((sim.flaps[1] - 0.1).abs() < 1e-9, "slews at 1 rad/s: {:?}", sim.flaps);
+        assert!(
+            (sim.flaps[1] - 0.1).abs() < 1e-9,
+            "slews at 1 rad/s: {:?}",
+            sim.flaps
+        );
         sim.step(&cmd, 1.0);
         let lim = sim.scn.ship.fins.unwrap().max_deflection;
         assert!((sim.flaps[1] - lim).abs() < 1e-9 && (sim.flaps[0] + lim).abs() < 1e-9);
@@ -522,7 +556,13 @@ mod tests {
     #[test]
     fn booster_slow_on_axis_is_caught() {
         let s = Scenario::booster();
-        let x = state(s.dry_mass + 30e3, [0.2, 0.0, s.floor_z + 6.0], [0.0, 0.0, -1.0], upright(), [0.0; 3]);
+        let x = state(
+            s.dry_mass + 30e3,
+            [0.2, 0.0, s.floor_z + 6.0],
+            [0.0, 0.0, -1.0],
+            upright(),
+            [0.0; 3],
+        );
         let mut sim = ShipSim::new(s, x);
         sim.cluster.ignite_all();
         sim.cluster.step([0.0, 0.0, 1.0], 1.5);
@@ -542,9 +582,12 @@ mod tests {
     fn steady_wind_adds_to_gusts() {
         let mut sim = earth_at([0.0, 0.0, 5000.0], [0.0; 3], upright());
         sim.wind = [3.0, -4.0, 0.0];
-        sim.gusts.push(WindGust { start: 0.0, dir: [1.0, 0.0, 0.0], speed: 10.0 });
+        sim.gusts.push(WindGust {
+            start: 0.0,
+            dir: [1.0, 0.0, 0.0],
+            speed: 10.0,
+        });
         assert_eq!(sim.wind_at(2.0), [13.0, -4.0, 0.0]);
         assert_eq!(sim.wind_at(100.0), [3.0, -4.0, 0.0]);
     }
-
 }

@@ -9,12 +9,12 @@
 pub mod discretize;
 mod subproblem;
 
-use model::dynamics::{self, State, M, Q};
+use model::dynamics::{self, M, Q, State};
 use model::quat::{self, Quat, Vec3};
 use model::{Scenario, VehicleKind};
 
 use crate::GuidanceError;
-use discretize::{Units, NX};
+use discretize::{NX, Units};
 
 /// Nodes per plan.
 pub const NODES: usize = 24;
@@ -26,12 +26,20 @@ pub const WARM_ITERATIONS: usize = 6;
 /// A plan is accepted when re-integrating it ends this close to the gate, m
 /// (the terminal controller flies the precise last part).
 pub const GATE_TOLERANCE: f64 = 30.0;
+/// …but at most this share of the distance from the start to the gate,
+/// and never less than GATE_TOLERANCE_NEAR, m.
+pub const GATE_FRACTION: f64 = 0.15;
+pub const GATE_TOLERANCE_NEAR: f64 = 3.0;
 const SUBSTEPS: usize = 6;
 const W_VIRTUAL: f64 = 1e3;
 const W_TRUST: f64 = 0.5;
 /// Trust-region weight on the flight time (kept separate so it can be tuned;
 /// lighter values were tried and converged no faster).
 const W_TRUST_SIGMA: f64 = 0.5;
+/// A solve still needing this much virtual control (non-dimensional,
+/// summed) after this many iterations is given up as infeasible.
+pub const HOPELESS_AFTER: usize = 7;
+pub const HOPELESS_DEFECT: f64 = 1e-2;
 /// Converged when the largest change of any non-dimensional variable is below this.
 const STEP_TOLERANCE: f64 = 5e-3;
 
@@ -51,6 +59,13 @@ pub struct ShipProblem {
     /// Largest planned tilt from vertical, rad (None: free, as the ship's
     /// flip needs). The booster stays near upright through its burn.
     pub max_tilt: Option<f64>,
+    /// `max_tilt` applies from this node on (the ship: once its flip is done).
+    pub tilt_from: usize,
+    /// Approach funnel around the gate: radius at the gate, m, and how
+    /// much wider per metre above it.
+    pub approach: (f64, f64),
+    /// Sideways speed limit: m/s at the gate's height, and more per metre above.
+    pub side_speed: (f64, f64),
     pub nodes: usize,
 }
 
@@ -80,6 +95,9 @@ impl ShipProblem {
             switch_node: NODES,
             upright_from: None,
             max_tilt,
+            tilt_from: 2,
+            approach: (APPROACH_RADIUS, APPROACH_TAN),
+            side_speed: (SIDE_SPEED_0, SIDE_SPEED_SLOPE),
             nodes: NODES,
         }
     }
@@ -220,7 +238,11 @@ fn cold_reference(p: &ShipProblem) -> (Vec<State>, Vec<Vec3>, f64) {
 }
 
 /// Previous plan, re-timed to start `elapsed` seconds in, from `x0`.
-fn warm_reference(p: &ShipProblem, prev: &ShipPlan, elapsed: f64) -> Option<(Vec<State>, Vec<Vec3>, f64)> {
+fn warm_reference(
+    p: &ShipProblem,
+    prev: &ShipPlan,
+    elapsed: f64,
+) -> Option<(Vec<State>, Vec<Vec3>, f64)> {
     let left = prev.final_time - elapsed;
     if left < 2.0 {
         return None;
@@ -241,7 +263,11 @@ fn warm_reference(p: &ShipProblem, prev: &ShipPlan, elapsed: f64) -> Option<(Vec
 /// Plan the flip and landing burn from `p.x0` to the scenario's gate.
 ///
 /// `warm` = (previous plan, seconds since its start) to re-plan from it.
-pub fn plan_ship(p: &ShipProblem, warm: Option<(&ShipPlan, f64)>, max_iter: usize) -> Result<ShipPlan, GuidanceError> {
+pub fn plan_ship(
+    p: &ShipProblem,
+    warm: Option<(&ShipPlan, f64)>,
+    max_iter: usize,
+) -> Result<ShipPlan, GuidanceError> {
     let scn = &p.scn;
     if p.nodes < 3 || !p.x0.iter().all(|c| c.is_finite()) || p.x0[M] <= scn.dry_mass {
         return Err(GuidanceError::InvalidProblem("bad ship start state"));
@@ -285,16 +311,21 @@ pub fn plan_ship(p: &ShipProblem, warm: Option<(&ShipPlan, f64)>, max_iter: usiz
             w_max: OMEGA_MAX * units.t,
             floor_z: scn.floor_z / units.l,
             clearance_x: scn.clearance_x.map(|c| c / units.l),
-            approach: (APPROACH_RADIUS / units.l, APPROACH_TAN),
+            approach: (p.approach.0 / units.l, p.approach.1),
             // Upright before dropping to one engine (the flip is done on all
             // of them), else for the last part of the burn.
             upright_from: p.upright_from.unwrap_or_else(|| {
                 let tail = p.nodes - 1 - ((p.nodes - 1) as f64 * UPRIGHT_FRACTION).round() as usize;
-                if p.late_limits.is_some() { p.switch_node.min(tail) } else { tail }
+                if p.late_limits.is_some() {
+                    p.switch_node.min(tail)
+                } else {
+                    tail
+                }
             }),
             upright_sin_half: (UPRIGHT_TILT / 2.0).sin(),
             tilt_sin_half: p.max_tilt.map(|t| (t / 2.0).sin()),
-            side_speed: (SIDE_SPEED_0 / lv, SIDE_SPEED_SLOPE * units.t),
+            tilt_from: p.tilt_from.max(2),
+            side_speed: (p.side_speed.0 / lv, p.side_speed.1 * units.t),
             sigma_bounds: (1.0 / units.t, 200.0 / units.t),
             w_virtual: W_VIRTUAL,
             w_trust: W_TRUST,
@@ -314,11 +345,23 @@ pub fn plan_ship(p: &ShipProblem, warm: Option<(&ShipPlan, f64)>, max_iter: usiz
         sigma = sub.sigma;
         defect = sub.virtual_l1;
         if std::env::var_os("SCVX_TRACE").is_some() {
-            eprintln!("it {it}: step {step:.2e} defect {defect:.2e} tf {:.2}", sigma * units.t);
+            eprintln!(
+                "it {it}: step {step:.2e} defect {defect:.2e} tf {:.2}",
+                sigma * units.t
+            );
         }
         if defect < 1e-4 && step < STEP_TOLERANCE {
             converged = true;
             break;
+        }
+        // The ship: still needing virtual control this late means there is
+        // no solution from here. Say so now, not after every iteration (a
+        // failed solve took over a second and held up the next option).
+        // Not the booster: at long solve latencies its plans needed more
+        // iterations and did converge (browser sweep 31 of 33 with the
+        // abort, 33 of 33 without).
+        if scn.ship.kind == VehicleKind::Ship && it >= HOPELESS_AFTER && defect > HOPELESS_DEFECT {
+            return Err(GuidanceError::Infeasible);
         }
     }
 
@@ -326,13 +369,19 @@ pub fn plan_ship(p: &ShipProblem, warm: Option<(&ShipPlan, f64)>, max_iter: usiz
     let flown = discretize::propagate(scn, &units, &x0, &us, sigma, 10);
     let end = units.x_si(flown.last().expect("nodes"));
     let gate_error = quat::norm(quat::sub(dynamics::position(&end), scn.gate));
-    if !gate_error.is_finite() || gate_error > GATE_TOLERANCE {
+    // Near the gate a miss of tens of metres is no plan at all: the
+    // tolerance shrinks with the distance still to fly.
+    let to_go = quat::norm(quat::sub(dynamics::position(&p.x0), scn.gate));
+    let tolerance = (GATE_FRACTION * to_go).clamp(GATE_TOLERANCE_NEAR, GATE_TOLERANCE);
+    if !gate_error.is_finite() || gate_error > tolerance {
         return Err(GuidanceError::Infeasible);
     }
     let final_time = sigma * units.t;
     let k = xs.len();
     Ok(ShipPlan {
-        t: (0..k).map(|n| final_time * n as f64 / (k - 1) as f64).collect(),
+        t: (0..k)
+            .map(|n| final_time * n as f64 / (k - 1) as f64)
+            .collect(),
         x: xs.iter().map(|x| units.x_si(x)).collect(),
         u: us.iter().map(|u| units.u_si(*u)).collect(),
         final_time,
@@ -340,7 +389,9 @@ pub fn plan_ship(p: &ShipProblem, warm: Option<(&ShipPlan, f64)>, max_iter: usiz
         defect,
         gate_error,
         converged,
-        switch_time: p.late_limits.map(|_| final_time * p.switch_node.min(k - 1) as f64 / (k - 1) as f64),
+        switch_time: p
+            .late_limits
+            .map(|_| final_time * p.switch_node.min(k - 1) as f64 / (k - 1) as f64),
     })
 }
 

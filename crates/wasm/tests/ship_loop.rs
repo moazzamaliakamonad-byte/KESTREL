@@ -2,10 +2,12 @@
 //! worker's solve latency modelled as one re-plan period. Seeded.
 //! Simulation only.
 
-use kestrel_wasm::ship_flight::{plan, Guide, Kind, Leg, Phase, ShipFlight, ShipFlightConfig, REPLAN_PERIOD};
+use kestrel_wasm::ship_flight::{
+    Guide, Kind, Leg, Phase, REPLAN_PERIOD, ShipFlight, ShipFlightConfig, plan,
+};
 use model::dynamics;
-use sim::ship::Outcome;
 use sim::Noise;
+use sim::ship::Outcome;
 
 const FRAME: f64 = 1.0 / 60.0;
 /// Solve time of the slow-computer test, s.
@@ -23,9 +25,15 @@ struct Report {
     failures: usize,
     t: f64,
     fuel: f64,
+    relights: u32,
 }
 
-type Pending = (f64, f64, Vec<Leg>, Result<(usize, guidance::scvx::ShipPlan), guidance::GuidanceError>);
+type Pending = (
+    f64,
+    f64,
+    Vec<Leg>,
+    Result<(usize, guidance::scvx::ShipPlan), guidance::GuidanceError>,
+);
 
 /// Ask for a re-plan if wanted; solve now, deliver after `REPLAN_PERIOD`.
 fn request(f: &mut ShipFlight, pending: &mut Option<Pending>, last_request: &mut f64) {
@@ -33,7 +41,12 @@ fn request(f: &mut ShipFlight, pending: &mut Option<Pending>, last_request: &mut
 }
 
 /// As `request`, with the solver taking `latency` seconds of sim time.
-fn request_after(f: &mut ShipFlight, pending: &mut Option<Pending>, last_request: &mut f64, latency: f64) {
+fn request_after(
+    f: &mut ShipFlight,
+    pending: &mut Option<Pending>,
+    last_request: &mut f64,
+    latency: f64,
+) {
     let t = f.sim().t;
     if pending.is_none() && f.wants_replan() && t - *last_request >= REPLAN_PERIOD {
         *last_request = t;
@@ -65,8 +78,20 @@ fn deliver(f: &mut ShipFlight, pending: &mut Option<Pending>) -> Option<bool> {
 
 /// Fly to the end. Events fire at sim times; a solve requested at `t` is
 /// applied at `t + REPLAN_PERIOD`, stamped `t`.
-fn fly(kind: Kind, noise: Noise, lag: f64, events: &[(f64, Event)], ignition_events: &[Event]) -> Report {
-    let mut f = ShipFlight::new(ShipFlightConfig { seed: 7, lag, noise, ..ShipFlightConfig::new(kind) }).unwrap();
+fn fly(
+    kind: Kind,
+    noise: Noise,
+    lag: f64,
+    events: &[(f64, Event)],
+    ignition_events: &[Event],
+) -> Report {
+    let mut f = ShipFlight::new(ShipFlightConfig {
+        seed: 7,
+        lag,
+        noise,
+        ..ShipFlightConfig::new(kind)
+    })
+    .unwrap();
     let m0 = f.sim().x[dynamics::M];
     let mut pending: Option<Pending> = None;
     let mut last_request = f64::NEG_INFINITY;
@@ -109,6 +134,7 @@ fn fly(kind: Kind, noise: Noise, lag: f64, events: &[(f64, Event)], ignition_eve
         failures,
         t: s.t,
         fuel: m0 - s.x[dynamics::M],
+        relights: f.relights(),
     };
     let p = dynamics::position(&s.x);
     eprintln!(
@@ -131,9 +157,30 @@ fn earth_engine_out_at_ignition_is_caught() {
     assert_eq!(r.outcome, Some(Outcome::Caught));
 }
 
+/// The one engine flying the landing burn fails: the flight lights a
+/// spare and is still caught (it used to fall).
+#[test]
+fn earth_running_engine_fails_mid_burn_a_spare_relights() {
+    for at in [55.0, 61.0] {
+        let r = fly(Kind::Earth, Noise::LOW, 0.3, &[(at, Event::EngineOut)], &[]);
+        eprintln!(
+            "engine out at {at} s: {:?}, {} relight(s)",
+            r.outcome, r.relights
+        );
+        assert_eq!(r.relights, 1, "at {at} s");
+        assert_eq!(r.outcome, Some(Outcome::Caught), "at {at} s");
+    }
+}
+
 #[test]
 fn earth_gust_in_belly_flop_is_caught() {
-    let r = fly(Kind::Earth, Noise::LOW, 0.3, &[(20.0, Event::Gust(1.0)), (35.0, Event::Gust(-1.0))], &[]);
+    let r = fly(
+        Kind::Earth,
+        Noise::LOW,
+        0.3,
+        &[(20.0, Event::Gust(1.0)), (35.0, Event::Gust(-1.0))],
+        &[],
+    );
     assert_eq!(r.outcome, Some(Outcome::Caught));
 }
 
@@ -152,7 +199,13 @@ fn booster_centre_engine_out_at_ignition_is_caught() {
 
 #[test]
 fn booster_gusts_in_descent_is_caught() {
-    let r = fly(Kind::Booster, Noise::LOW, 0.3, &[(8.0, Event::Gust(1.0)), (20.0, Event::Gust(-1.0))], &[]);
+    let r = fly(
+        Kind::Booster,
+        Noise::LOW,
+        0.3,
+        &[(8.0, Event::Gust(1.0)), (20.0, Event::Gust(-1.0))],
+        &[],
+    );
     assert_eq!(r.outcome, Some(Outcome::Caught));
 }
 
@@ -187,9 +240,27 @@ fn earth_fast_entry_is_caught() {
 #[test]
 #[ignore]
 fn booster_browser_sweep() {
-    for (latency, lead, frame) in [(0.5, 0.0, FRAME), (0.5, 0.5, FRAME), (0.3, 0.3, FRAME), (0.3, 0.3, 1.0 / 15.0), (0.5, 0.55, 1.0 / 15.0), (0.25, 0.3, 0.1), (0.1, 0.15, FRAME), (1.0, 1.0, FRAME), (0.5, 0.55, 0.2), (0.5, 0.55, 0.133), (0.25, 0.3, 0.2)] {
+    for (latency, lead, frame) in [
+        (0.5, 0.0, FRAME),
+        (0.5, 0.5, FRAME),
+        (0.3, 0.3, FRAME),
+        (0.3, 0.3, 1.0 / 15.0),
+        (0.5, 0.55, 1.0 / 15.0),
+        (0.25, 0.3, 0.1),
+        (0.1, 0.15, FRAME),
+        (1.0, 1.0, FRAME),
+        (0.5, 0.55, 0.2),
+        (0.5, 0.55, 0.133),
+        (0.25, 0.3, 0.2),
+    ] {
         for seed in [7u64, 11, 23] {
-            let mut f = ShipFlight::new(ShipFlightConfig { seed, lag: 0.3, noise: Noise::LOW, ..ShipFlightConfig::new(Kind::Booster) }).unwrap();
+            let mut f = ShipFlight::new(ShipFlightConfig {
+                seed,
+                lag: 0.3,
+                noise: Noise::LOW,
+                ..ShipFlightConfig::new(Kind::Booster)
+            })
+            .unwrap();
             f.set_solve_time(lead);
             let mut pending: Option<Pending> = None;
             let mut last_request = f64::NEG_INFINITY;
@@ -203,7 +274,12 @@ fn booster_browser_sweep() {
                 }
                 request_after(&mut f, &mut pending, &mut last_request, latency);
             }
-            eprintln!("latency {latency} lead {lead} frame {frame:.3} seed {seed}: {:?} t {:.0} plans {ok} failed {bad} prop {:.0} t", f.sim().outcome, f.sim().t, f.sim().propellant() / 1e3);
+            eprintln!(
+                "latency {latency} lead {lead} frame {frame:.3} seed {seed}: {:?} t {:.0} plans {ok} failed {bad} prop {:.0} t",
+                f.sim().outcome,
+                f.sim().t,
+                f.sim().propellant() / 1e3
+            );
         }
     }
 }
@@ -213,7 +289,13 @@ fn booster_browser_sweep() {
 /// (At 1.5 s it is not: see LIMITATIONS.md.)
 #[test]
 fn booster_slow_solver_is_caught() {
-    let mut f = ShipFlight::new(ShipFlightConfig { seed: 7, lag: 0.3, noise: Noise::LOW, ..ShipFlightConfig::new(Kind::Booster) }).unwrap();
+    let mut f = ShipFlight::new(ShipFlightConfig {
+        seed: 7,
+        lag: 0.3,
+        noise: Noise::LOW,
+        ..ShipFlightConfig::new(Kind::Booster)
+    })
+    .unwrap();
     f.set_solve_time(SLOW);
     let mut pending: Option<Pending> = None;
     let mut last_request = f64::NEG_INFINITY;
@@ -221,17 +303,39 @@ fn booster_slow_solver_is_caught() {
     while f.phase() != Phase::Done && f.sim().t < 400.0 {
         f.step(FRAME);
         if let Some(ok) = deliver(&mut f, &mut pending) {
-            eprintln!("  plan {} at {:.2} leg {:?}", if ok { "ok" } else { "FAILED" }, f.sim().t, f.leg().map(|l| (l.engines, l.gate[2] as i32)));
+            eprintln!(
+                "  plan {} at {:.2} leg {:?}",
+                if ok { "ok" } else { "FAILED" },
+                f.sim().t,
+                f.leg().map(|l| (l.engines, l.gate[2] as i32))
+            );
         }
         request_after(&mut f, &mut pending, &mut last_request, SLOW);
         if f.sim().t >= next && f.phase() != Phase::BellyFlop {
             next = f.sim().t + 1.0;
             let x = f.sim().x;
             let (r, v) = (dynamics::position(&x), dynamics::velocity(&x));
-            eprintln!("t {:5.1} {:12} r ({:6.1},{:6.1},{:7.1}) v ({:5.1},{:5.1},{:6.1}) tilt {:4.1} lit {}", f.sim().t, f.phase().label(Kind::Booster), r[0], r[1], r[2], v[0], v[1], v[2], model::quat::tilt(dynamics::attitude(&x)).to_degrees(), f.sim().cluster.lit());
+            eprintln!(
+                "t {:5.1} {:12} r ({:6.1},{:6.1},{:7.1}) v ({:5.1},{:5.1},{:6.1}) tilt {:4.1} lit {}",
+                f.sim().t,
+                f.phase().label(Kind::Booster),
+                r[0],
+                r[1],
+                r[2],
+                v[0],
+                v[1],
+                v[2],
+                model::quat::tilt(dynamics::attitude(&x)).to_degrees(),
+                f.sim().cluster.lit()
+            );
         }
     }
-    eprintln!("slow solver: {:?} at t {:.1}, {:.1} t left", f.sim().outcome, f.sim().t, f.sim().propellant() / 1e3);
+    eprintln!(
+        "slow solver: {:?} at t {:.1}, {:.1} t left",
+        f.sim().outcome,
+        f.sim().t,
+        f.sim().propellant() / 1e3
+    );
     assert_eq!(f.sim().outcome, Some(Outcome::Caught));
 }
 
@@ -262,26 +366,51 @@ fn trace(kind: Kind) {
         Ok("high") => Noise::HIGH,
         _ => Noise::OFF,
     };
-    let seed = std::env::var("TRACE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(7);
-    let mut f = ShipFlight::new(ShipFlightConfig { seed, lag: 0.3, noise, ..ShipFlightConfig::new(kind) }).unwrap();
+    let seed = std::env::var("TRACE_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(7);
+    let mut f = ShipFlight::new(ShipFlightConfig {
+        seed,
+        lag: 0.3,
+        noise,
+        ..ShipFlightConfig::new(kind)
+    })
+    .unwrap();
     let mut next_print = 0.0;
     let mut last_request = f64::NEG_INFINITY;
     let mut pending: Option<Pending> = None;
+    // Debug aid: FAIL_AT=63 fails the running engine at that sim time.
+    let mut fail_at: Option<f64> = std::env::var("FAIL_AT").ok().and_then(|s| s.parse().ok());
     while f.phase() != Phase::Done && f.sim().t < 400.0 {
         f.step(FRAME);
         let t = f.sim().t;
+        if fail_at.is_some_and(|a| t >= a) {
+            fail_at = None;
+            f.engine_out();
+            eprintln!("   ENGINE OUT at {t:.2}");
+        }
         if let Some(ok) = deliver(&mut f, &mut pending) {
             match (ok, f.guide(), f.leg()) {
                 (true, Guide::Plan { plan, t0 }, Some(leg)) => eprintln!(
                     "   plan @{t0:.2}: {} eng to z {:.0} tf {:.1} it {} conv {} gate_err {:.1}",
-                    leg.engines, leg.gate[2], plan.final_time, plan.iterations, plan.converged, plan.gate_error
+                    leg.engines,
+                    leg.gate[2],
+                    plan.final_time,
+                    plan.iterations,
+                    plan.converged,
+                    plan.gate_error
                 ),
                 _ => eprintln!("   plan FAILED at {t:.2}"),
             }
         }
         request(&mut f, &mut pending, &mut last_request);
         if t >= next_print || f.phase() == Phase::Done {
-            next_print += if f.phase() == Phase::BellyFlop { 5.0 } else { 0.5 };
+            next_print += if f.phase() == Phase::BellyFlop {
+                5.0
+            } else {
+                0.5
+            };
             let s = f.sim();
             let x = s.x;
             let r = dynamics::position(&x);
@@ -294,9 +423,21 @@ fn trace(kind: Kind) {
             };
             eprintln!(
                 "t {t:6.2} {:12} r ({:7.1},{:6.1},{:7.1}) v ({:6.1},{:6.1},{:6.1}) nose ({:5.2},{:5.2}) w {:?} T {:5.2} MN n {} prop {:5.1} t | ref ({:7.1},{:7.1})",
-                f.phase().label(kind), r[0], r[1], r[2], v[0], v[1], v[2], nose[0], nose[2],
+                f.phase().label(kind),
+                r[0],
+                r[1],
+                r[2],
+                v[0],
+                v[1],
+                v[2],
+                nose[0],
+                nose[2],
                 dynamics::rates(&x).map(|c| (c.to_degrees() * 10.0).round() / 10.0),
-                quat::norm(s.cluster.thrust) / 1e6, s.cluster.lit(), s.propellant() / 1e3, pr[0], pr[2]
+                quat::norm(s.cluster.thrust) / 1e6,
+                s.cluster.lit(),
+                s.propellant() / 1e3,
+                pr[0],
+                pr[2]
             );
         }
     }
@@ -307,8 +448,13 @@ fn trace(kind: Kind) {
 #[test]
 #[ignore]
 fn start_probe() {
-    let kind = Kind::parse(&std::env::var("KIND").unwrap_or_else(|_| "booster".into())).expect("KIND");
-    let s: Vec<f64> = std::env::var("START").expect("START").split(',').map(|v| v.parse().expect("number")).collect();
+    let kind =
+        Kind::parse(&std::env::var("KIND").unwrap_or_else(|_| "booster".into())).expect("KIND");
+    let s: Vec<f64> = std::env::var("START")
+        .expect("START")
+        .split(',')
+        .map(|v| v.parse().expect("number"))
+        .collect();
     let mut f = ShipFlight::new(ShipFlightConfig {
         position: [s[0], 0.0, s[1]],
         velocity: [s[2], 0.0, s[3]],
@@ -331,8 +477,39 @@ fn start_probe() {
         if f.sim().t >= next {
             next += 10.0;
             let r = dynamics::position(&x);
-            eprintln!("t {:5.0} {:12} r ({:8.0},{:7.0}) v ({:6.0},{:6.0}) tilt {:4.0}", f.sim().t, f.phase().label(kind), r[0], r[2], v[0], v[2], model::quat::tilt(dynamics::attitude(&x)).to_degrees());
+            eprintln!(
+                "t {:5.0} {:12} r ({:8.0},{:7.0}) v ({:6.0},{:6.0}) tilt {:4.0}",
+                f.sim().t,
+                f.phase().label(kind),
+                r[0],
+                r[2],
+                v[0],
+                v[2],
+                model::quat::tilt(dynamics::attitude(&x)).to_degrees()
+            );
         }
     }
-    eprintln!("outcome {:?} at t {:.0}, top speed {:.0} m/s, propellant left {:.1} t", f.sim().outcome, f.sim().t, vmax, f.sim().propellant() / 1e3);
+    eprintln!(
+        "outcome {:?} at t {:.0}, top speed {:.0} m/s, propellant left {:.1} t",
+        f.sim().outcome,
+        f.sim().t,
+        vmax,
+        f.sim().propellant() / 1e3
+    );
+}
+
+/// When can the burn's engine fail and the ship still be caught? Sweeps
+/// the failure time (`--ignored --nocapture`).
+#[test]
+#[ignore]
+fn engine_out_window() {
+    for at in [49.0, 51.0, 53.0, 55.0, 57.0, 59.0, 61.0, 63.0, 65.0, 67.0] {
+        for noise in [Noise::OFF, Noise::LOW] {
+            let r = fly(Kind::Earth, noise, 0.3, &[(at, Event::EngineOut)], &[]);
+            eprintln!(
+                "WINDOW fail at {at} s, noise {:.2}: {:?}, {} relight(s)",
+                noise.pos_sigma, r.outcome, r.relights
+            );
+        }
+    }
 }

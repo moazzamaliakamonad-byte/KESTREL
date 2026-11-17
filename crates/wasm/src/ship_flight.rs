@@ -26,8 +26,8 @@ use guidance::ship_control::{self, Actuation};
 use model::dynamics::{self, M, R, State, V};
 use model::quat::{self, Vec3};
 use model::{Scenario, Tuning, VehicleKind};
-use sim::ship::{Command, SUBSTEP, ShipSim, WindGust};
 use sim::sensor::{Measurement, Noise, Sensor};
+use sim::ship::{Command, SUBSTEP, ShipSim, WindGust};
 use sim::{Rng, Truth};
 
 /// Sim time between re-plan requests, s.
@@ -60,6 +60,29 @@ pub const WAIT_THROTTLE: f64 = 0.6;
 /// In the final approach an engine is shut down when the lit engines'
 /// minimum thrust exceeds this share of the weight (too light to hover).
 pub const HOVER_SHARE: f64 = 0.97;
+/// The ship's flip is planned at most at this share of what one engine
+/// fewer could give (an engine may fail mid-flip), and at least this many
+/// times the lit engines' minimum thrust (room to throttle down).
+pub const ENGINE_OUT_SHARE: f64 = 0.95;
+pub const PLAN_MIN_MARGIN: f64 = 1.06;
+/// When no plan fits the usual margin, a plan may use this share of the
+/// engines' full thrust.
+pub const FULL_THRUST: f64 = 0.98;
+/// A planned flip hands over to the burn engines this long after the
+/// engines reach thrust, at the latest, s (it is about 3 s).
+pub const FLIP_TIME: f64 = 3.0;
+/// Below this tilt the flip is as good as done: plan straight on the burn
+/// engines, with no engine switch in the plan, rad (25°).
+pub const FLIP_NEARLY_DONE: f64 = 0.436_332_312_998_582_4;
+/// After the flip the ship's burn stays within this tilt of upright, rad
+/// (30°). The flip may overshoot vertical to brake the speed toward the
+/// tower it builds up; with no cap at all the plans swung the ship hard
+/// near the tower (engine-out recoveries 11 of 20 against 15).
+pub const SHIP_BURN_TILT: f64 = 0.523_598_775_598_298_8;
+/// The ship's approach funnel: radius at the gate, m, and widening per
+/// metre of height (the default 10 m and 1.0 caught fewer: 10 of 12
+/// nominal flights against 11).
+pub const SHIP_FUNNEL: (f64, f64) = (3.0, 0.6);
 /// Default wind gust speed, m/s.
 pub const GUST_SPEED: f64 = 15.0;
 /// Attitude sensor error σ (rad) and rate error σ (rad/s), high noise.
@@ -211,7 +234,10 @@ pub struct Leg {
 pub enum Guide {
     None,
     /// Fly this plan; `t0` = sim time of the measurement it was solved from.
-    Plan { plan: ShipPlan, t0: f64 },
+    Plan {
+        plan: ShipPlan,
+        t0: f64,
+    },
     /// No plan could be found: brake upright toward the axis.
     Brake,
 }
@@ -234,20 +260,36 @@ pub struct ShipFlight {
     gust_speed: f64,
     /// How long a solve is expected to take, s of sim time.
     solve_time: f64,
+    relights: u32,
+    /// A failure made the plan wrong: re-plan without waiting for drift.
+    replan_now: bool,
 }
 
 impl ShipFlight {
     pub fn new(c: ShipFlightConfig) -> Result<ShipFlight, &'static str> {
         let scn = c.scenario();
-        let ok = c.position.iter().chain(&c.velocity).chain(&c.wind).all(|v| v.is_finite());
-        if !ok || c.position[2] < 1500.0 || !(0.0..=5.0).contains(&c.lag) || !c.gust_speed.is_finite() {
+        let ok = c
+            .position
+            .iter()
+            .chain(&c.velocity)
+            .chain(&c.wind)
+            .all(|v| v.is_finite());
+        if !ok
+            || c.position[2] < 1500.0
+            || !(0.0..=5.0).contains(&c.lag)
+            || !c.gust_speed.is_finite()
+        {
             return Err("bad flight configuration");
         }
         let x = start_state(&scn, c.position, c.velocity);
         let trim = scn.ship.surface_trim();
         let mut sim = ShipSim::new(scn, x);
         sim.cluster.lag = c.lag;
-        sim.wind = [c.wind[0].clamp(-40.0, 40.0), c.wind[1].clamp(-40.0, 40.0), 0.0];
+        sim.wind = [
+            c.wind[0].clamp(-40.0, 40.0),
+            c.wind[1].clamp(-40.0, 40.0),
+            0.0,
+        ];
         for i in &c.failed {
             sim.cluster.fail(*i);
         }
@@ -271,6 +313,8 @@ impl ShipFlight {
             ignition_z: 0.0,
             gust_speed: c.gust_speed.clamp(0.0, 60.0),
             solve_time: 0.0,
+            relights: 0,
+            replan_now: false,
         })
     }
 
@@ -341,20 +385,132 @@ impl ShipFlight {
 
     /// Thrust range the controller may command now.
     fn command_limits(&self) -> (f64, f64) {
-        self.sim.scn.ship.thrust_limits(self.sim.cluster.lit().max(1))
+        self.sim
+            .scn
+            .ship
+            .thrust_limits(self.sim.cluster.lit().max(1))
     }
 
     /// Engines flown to the end: the vehicle's final count, or fewer if
     /// fewer are left.
     fn final_engines(&self) -> u8 {
-        self.sim.scn.ship.final_engines.min(self.sim.cluster.healthy()).max(1)
+        self.sim
+            .scn
+            .ship
+            .final_engines
+            .min(self.sim.cluster.healthy())
+            .max(1)
     }
 
     /// Planned thrust range for a leg on `n` engines, N.
     pub fn leg_limits(&self, n: u8) -> (f64, f64) {
-        let (lo, hi) = self.sim.scn.ship.thrust_limits(n);
-        let k = if n <= self.final_engines() { LATE_MARGIN } else { THRUST_MARGIN };
+        let ship = &self.sim.scn.ship;
+        let (lo, hi) = ship.thrust_limits(n);
+        if ship.kind == VehicleKind::Ship && n > 1 {
+            // Never more than one engine fewer could give, and room to
+            // throttle down: an engine can fail and the plan still holds.
+            let out = ship.engine_max * f64::from(n - 1) * ENGINE_OUT_SHARE;
+            let lo = lo * PLAN_MIN_MARGIN;
+            return (lo, (hi * THRUST_MARGIN).min(out).max(lo * 1.05));
+        }
+        let k = if n <= self.final_engines() {
+            LATE_MARGIN
+        } else {
+            THRUST_MARGIN
+        };
         (lo, (hi * k).max(lo * 1.05))
+    }
+
+    /// A ship planning problem for `leg` from `x`, `lit` engines running.
+    fn ship_problem(&self, leg: Leg, x: State, lit: u8) -> ShipProblem {
+        let mut scn = self.sim.scn.clone();
+        scn.gate = leg.gate;
+        scn.gate_velocity = leg.gate_velocity;
+        let mut p = ShipProblem::new(scn, x, self.leg_limits(leg.engines));
+        p.max_tilt = Some(SHIP_BURN_TILT);
+        // A narrow funnel into the arms gate: sideways braking is done high.
+        p.approach = SHIP_FUNNEL;
+        // Into the arms: a narrow funnel, so any sideways braking is done
+        // high up and the hull does not swing toward the mast.
+        if lit > leg.engines
+            && let Some(node) = self.switch_node(&x, &p)
+        {
+            // Mid-flip: every lit engine first, then the leg's engines.
+            p.thrust_limits = self.leg_limits(lit);
+            p.late_limits = Some(self.leg_limits(leg.engines));
+            p.switch_node = node;
+            p.tilt_from = node;
+            // Upright only for the end, as without a switch: the burn
+            // still has to lean to cover the distance to the tower.
+            p.upright_from = Some(
+                p.nodes - 1 - ((p.nodes - 1) as f64 * scvx::UPRIGHT_FRACTION).round() as usize,
+            );
+        }
+        p
+    }
+
+    /// Node at which a plan made mid-flip hands over from every lit engine
+    /// to the burn engines: about when the flip will be done. None when
+    /// the flip is as good as over (plan on the burn engines alone).
+    fn switch_node(&self, x: &State, p: &ShipProblem) -> Option<usize> {
+        let tilt = quat::tilt(dynamics::attitude(x));
+        if tilt < FLIP_NEARLY_DONE {
+            return None;
+        }
+        // Rate-limited at about 35°/s, plus a moment to settle.
+        let left = (tilt / ship_control::RATE_LIMIT + 0.4).min(FLIP_TIME);
+        let tf = scvx::cold_time_guess(p);
+        let k = (left / tf * (p.nodes - 1) as f64).round() as usize;
+        Some(k.clamp(2, p.nodes / 2))
+    }
+
+    /// The fewest engines that must stay lit now: the final engines, once
+    /// the burn has begun (more are never relit: the plan decides those).
+    fn wanted_engines(&self) -> u8 {
+        match self.phase {
+            Phase::Flip | Phase::Burn | Phase::Terminal if self.sim.propellant() > 0.0 => {
+                self.final_engines()
+            }
+            _ => 0,
+        }
+    }
+
+    /// An engine that was running has failed: light a spare (a shut-down
+    /// engine), as the real flight software would, rather than fall. The
+    /// spare gives thrust after its ignition time; guidance re-plans from
+    /// the drift the gap causes.
+    fn relight(&mut self) {
+        let want = self.wanted_engines();
+        let lit = self.sim.cluster.lit();
+        if want > 0 && lit < want && self.sim.cluster.relight_to(want) > 0 {
+            self.relights += 1;
+            // The plan assumed thrust that is now a second away: ask for a
+            // new one at once.
+            if let Guide::Plan { .. } = self.guide {
+                self.replan_now = true;
+            }
+        }
+    }
+
+    /// An engine was lost in the burn and a spare relit: the usual margin
+    /// may no longer be affordable.
+    fn emergency(&self) -> bool {
+        self.relights > 0
+    }
+
+    /// Spare engines lit after a failure, this flight.
+    pub fn relights(&self) -> u32 {
+        self.relights
+    }
+
+    /// The engine switch a plan calls for, once its time has come.
+    fn follow_switch(&mut self, t: f64) {
+        if let (Guide::Plan { plan, t0 }, Some(leg)) = (&self.guide, self.leg)
+            && plan.switch_time.is_some_and(|s| t - t0 >= s)
+            && self.sim.cluster.lit() > leg.engines
+        {
+            self.sim.cluster.shutdown_to(leg.engines);
+        }
     }
 
     /// The last leg: the final engines to the approach gate.
@@ -424,7 +580,18 @@ impl ShipFlight {
                     let mut a = ship_control::unpowered(&scn, &est, self.ignition_z);
                     a.thrust_body = [0.0, 0.0, limits.0];
                     a
+                } else if let Guide::Plan { plan, t0 } = &self.guide {
+                    // Guidance flies the flip: track the plan, and hand over
+                    // to the burn when its engine switch comes.
+                    let tau = t - t0;
+                    let (xr, ur) = plan.sample(tau);
+                    if plan.switch_time.is_none_or(|s| tau >= s) {
+                        self.phase = Phase::Burn;
+                    }
+                    self.follow_switch(t);
+                    ship_control::powered(&scn, &est, (&xr, ur), self.command_limits())
                 } else {
+                    // No plan yet (or it failed): the scripted flip.
                     let done = quat::tilt(dynamics::attitude(&est)) < FLIP_DONE_TILT
                         && quat::norm(dynamics::rates(&est)) < FLIP_DONE_RATE;
                     if done {
@@ -447,6 +614,7 @@ impl ShipFlight {
             }
             Phase::Done => self.last,
         };
+        self.relight();
         self.last = act;
         let cmd = Command {
             thrust_body: act.thrust_body,
@@ -479,6 +647,7 @@ impl ShipFlight {
                     return ship_control::terminal(scn, est, self.command_limits());
                 }
                 let (xr, ur) = plan.sample(tau);
+                self.follow_switch(t);
                 ship_control::powered(scn, est, (&xr, ur), self.command_limits())
             }
             _ => {
@@ -512,8 +681,12 @@ impl ShipFlight {
     /// Re-planning is useful now: no plan yet, or the ship has drifted off
     /// it, or it is old, and it is not about to end.
     pub fn wants_replan(&self) -> bool {
-        if self.phase != Phase::Burn {
+        let flipping = self.phase == Phase::Flip && self.sim.cluster.running() > 0;
+        if self.phase != Phase::Burn && !flipping {
             return false;
+        }
+        if self.replan_now {
+            return true;
         }
         match &self.guide {
             Guide::None | Guide::Brake => true,
@@ -523,8 +696,14 @@ impl ShipFlight {
                     return false;
                 }
                 let (xr, _) = plan.sample(age);
-                let dr = quat::norm(quat::sub(dynamics::position(&xr), dynamics::position(&self.est)));
-                let dv = quat::norm(quat::sub(dynamics::velocity(&xr), dynamics::velocity(&self.est)));
+                let dr = quat::norm(quat::sub(
+                    dynamics::position(&xr),
+                    dynamics::position(&self.est),
+                ));
+                let dv = quat::norm(quat::sub(
+                    dynamics::velocity(&xr),
+                    dynamics::velocity(&self.est),
+                ));
                 age >= REPLAN_MAX_AGE || dr > REPLAN_POSITION_ERROR || dv > REPLAN_VELOCITY_ERROR
             }
         }
@@ -534,6 +713,7 @@ impl ShipFlight {
     /// `(t, [(leg, problem)])`. Without a leg yet: one engine to the approach
     /// gate first, else every lit engine to an intermediate gate.
     pub fn problem(&mut self) -> (f64, Vec<(Leg, ShipProblem)>) {
+        self.replan_now = false;
         let measured = self.measure();
         // The booster's first plan: it is braking at 4 g with no plan to
         // follow, so by the time the plan comes back it is somewhere else
@@ -543,9 +723,14 @@ impl ShipFlight {
         // Later re-plans start from the measurement: the booster is on a
         // plan and near it, and predicting along that plan was tried and
         // made every re-plan fight the last (it hit the tower).
-        let first = self.sim.scn.ship.kind == VehicleKind::Booster && !matches!(self.guide, Guide::Plan { .. });
+        let first = self.sim.scn.ship.kind == VehicleKind::Booster
+            && !matches!(self.guide, Guide::Plan { .. });
         let lead = if first { self.solve_time } else { 0.0 };
-        let x = if lead > 0.0 { predict(&self.sim.scn, &measured, self.last.thrust_body, lead) } else { measured };
+        let x = if lead > 0.0 {
+            predict(&self.sim.scn, &measured, self.last.thrust_body, lead)
+        } else {
+            measured
+        };
         let t = self.sim.t + lead;
         let lit = self.sim.cluster.lit().max(1);
         // Could the final engines alone stop it before the gate? If they
@@ -554,7 +739,36 @@ impl ShipFlight {
         let height = (x[R + 2] - scn.gate[2]).max(1.0);
         let needed = x[V + 2] * x[V + 2] / (2.0 * height);
         let spare = self.leg_limits(self.final_engines()).1 / x[M] - scn.planet.gravity();
-        let hopeless = scn.ship.kind == VehicleKind::Booster && x[V + 2] < 0.0 && needed > 2.0 * spare.max(0.1);
+        let hopeless = scn.ship.kind == VehicleKind::Booster
+            && x[V + 2] < 0.0
+            && needed > 2.0 * spare.max(0.1);
+        if scn.ship.kind == VehicleKind::Ship {
+            // One plan from engine start: the flip on every lit engine, the
+            // switch to one, and straight down onto the arms.
+            let leg = self.final_leg();
+            // A spare still spinning up: plan from where the ship will be
+            // when it gives thrust (it falls meanwhile).
+            let spin_up = self.sim.cluster.spin_up_left();
+            let (t, x) = if spin_up > 0.0 && self.sim.cluster.running() == 0 {
+                (t + spin_up, predict(&self.sim.scn, &x, [0.0; 3], spin_up))
+            } else {
+                (t, x)
+            };
+            let normal = self.ship_problem(leg, x, lit);
+            let mut options = vec![(leg, normal.clone())];
+            // In an emergency (an engine lost, or no plan to follow) and
+            // nothing fits the usual margin: use everything the engine has.
+            if self.emergency() {
+                let mut all_out = normal;
+                let (lo, hi) = self.sim.scn.ship.thrust_limits(leg.engines);
+                match &mut all_out.late_limits {
+                    Some(late) => *late = (late.0, hi * FULL_THRUST),
+                    None => all_out.thrust_limits = (lo, hi * FULL_THRUST),
+                }
+                options.push((leg, all_out));
+            }
+            return (t, options);
+        }
         let legs = match self.leg.filter(|l| l.engines <= lit) {
             Some(leg) => vec![leg],
             None if lit > self.final_engines() && hopeless => vec![self.mid_leg(&x, lit)],
@@ -575,10 +789,13 @@ impl ShipFlight {
 
     /// Install a plan for `leg`, solved from the measurement at sim time `t0`.
     pub fn set_plan(&mut self, plan: ShipPlan, t0: f64, leg: Leg) {
-        if self.phase != Phase::Burn {
+        if self.phase != Phase::Burn && self.phase != Phase::Flip {
             return;
         }
-        self.sim.cluster.shutdown_to(leg.engines);
+        // A plan with an engine switch keeps every engine until then.
+        if plan.switch_time.is_none() {
+            self.sim.cluster.shutdown_to(leg.engines);
+        }
         self.leg = Some(leg);
         self.guide = Guide::Plan { plan, t0 };
     }
@@ -586,19 +803,30 @@ impl ShipFlight {
     /// A re-plan failed: keep the current plan if the ship is still near it;
     /// with none, or far off it (a stale plan leads astray), brake.
     pub fn plan_failed(&mut self, _e: &GuidanceError) {
-        if self.phase != Phase::Burn {
+        if self.phase != Phase::Burn && self.phase != Phase::Flip {
             return;
         }
         let stale = match &self.guide {
             Guide::Plan { plan, t0 } => {
                 let (xr, _) = plan.sample(self.sim.t - t0);
-                quat::norm(quat::sub(dynamics::position(&xr), dynamics::position(&self.est))) > STALE_POSITION
-                    || quat::norm(quat::sub(dynamics::velocity(&xr), dynamics::velocity(&self.est))) > STALE_VELOCITY
+                quat::norm(quat::sub(
+                    dynamics::position(&xr),
+                    dynamics::position(&self.est),
+                )) > STALE_POSITION
+                    || quat::norm(quat::sub(
+                        dynamics::velocity(&xr),
+                        dynamics::velocity(&self.est),
+                    )) > STALE_VELOCITY
             }
             _ => true,
         };
         if stale {
-            self.guide = Guide::Brake;
+            // Mid-flip the scripted flip takes over; later, brake.
+            self.guide = if self.phase == Phase::Flip {
+                Guide::None
+            } else {
+                Guide::Brake
+            };
         }
     }
 
@@ -679,7 +907,12 @@ impl ShipFlight {
 
     /// Engine states as text, for the panels.
     pub fn engine_states(&self) -> Vec<&'static str> {
-        self.sim.cluster.engines.iter().map(|e| e.as_str()).collect()
+        self.sim
+            .cluster
+            .engines
+            .iter()
+            .map(|e| e.as_str())
+            .collect()
     }
 }
 

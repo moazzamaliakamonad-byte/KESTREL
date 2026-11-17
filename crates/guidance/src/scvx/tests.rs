@@ -23,7 +23,10 @@ fn check_limits(p: &ShipProblem, plan: &ShipPlan) {
         let (tmin, tmax) = p.bounds(k);
         let t = quat::norm(*u);
         assert!(t <= tmax * 1.01 && t >= tmin * 0.99, "node {k}: thrust {t}");
-        assert!(u[0].hypot(u[1]) <= tan * u[2] * 1.01 + 1.0, "node {k}: gimbal");
+        assert!(
+            u[0].hypot(u[1]) <= tan * u[2] * 1.01 + 1.0,
+            "node {k}: gimbal"
+        );
         if k > 1 {
             let w = quat::norm([x[W], x[W + 1], x[W + 2]]);
             assert!(w <= OMEGA_MAX * 1.01, "node {k}: rate {w}");
@@ -52,7 +55,11 @@ fn earth_flip_converges() {
         plan.gate_error,
         p.x0[M] - plan.x.last().unwrap()[M]
     );
-    assert!(plan.converged, "not converged in {} iterations", plan.iterations);
+    assert!(
+        plan.converged,
+        "not converged in {} iterations",
+        plan.iterations
+    );
     assert!(plan.defect < 1e-3);
     assert!(plan.gate_error < 1.0);
     assert!(ends_upright(&plan) < 3.0);
@@ -92,13 +99,25 @@ fn upright_like_keeps_heading() {
 #[ignore]
 fn trace_one_engine_from_midflight() {
     let scn = Scenario::earth();
-    let y: f64 = std::env::var("TY").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let y: f64 = std::env::var("TY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
     let q = quat::normalize([1.0, 0.002 * y, 0.01, 0.0]);
-    let x0 = dynamics::state(128e3, [285.0, 0.8 * y, 560.0], [-22.7, 2.1 * y, -28.2], q, [0.01 * y, 0.02, 0.0]);
+    let x0 = dynamics::state(
+        128e3,
+        [285.0, 0.8 * y, 560.0],
+        [-22.7, 2.1 * y, -28.2],
+        q,
+        [0.01 * y, 0.02, 0.0],
+    );
     let one = scn.ship.thrust_limits(1);
     let p = ShipProblem::new(scn, x0, (one.0, one.1 * 0.75));
     match plan_ship(&p, None, 30) {
-        Ok(plan) => eprintln!("tf {:.1} it {} conv {} gate {:.2}", plan.final_time, plan.iterations, plan.converged, plan.gate_error),
+        Ok(plan) => eprintln!(
+            "tf {:.1} it {} conv {} gate {:.2}",
+            plan.final_time, plan.iterations, plan.converged, plan.gate_error
+        ),
         Err(e) => eprintln!("err {e:?}"),
     }
 }
@@ -107,7 +126,10 @@ fn booster_burn_problem(x: f64, vx: f64, lean: f64) -> ShipProblem {
     let mut scn = Scenario::booster();
     let m = 381e3;
     let v = [vx, 0.0, -412.0];
-    let q = quat::mul(crate::ship_control::descent_attitude(v), quat::from_axis_angle([0.0, 1.0, 0.0], lean));
+    let q = quat::mul(
+        crate::ship_control::descent_attitude(v),
+        quat::from_axis_angle([0.0, 1.0, 0.0], lean),
+    );
     let x0 = dynamics::state(m, [x, 0.0, 2578.0], v, q, [0.0; 3]);
     scn.gate = [20.0, 0.0, 540.0];
     scn.gate_velocity = [0.0, 0.0, -50.0];
@@ -119,10 +141,21 @@ fn booster_burn_problem(x: f64, vx: f64, lean: f64) -> ShipProblem {
 fn booster_thirteen_engine_burn_plans_from_either_side() {
     // The 13-engine leg from the ignition point to the intermediate gate,
     // out from the tower and (after an overshoot) on its other side.
-    for p in [booster_burn_problem(180.0, -25.0, 0.03), booster_burn_problem(60.0, 25.0, -0.03)] {
+    for p in [
+        booster_burn_problem(180.0, -25.0, 0.03),
+        booster_burn_problem(60.0, 25.0, -0.03),
+    ] {
         let plan = plan_ship(&p, None, COLD_ITERATIONS).expect("plan");
-        assert!(plan.converged && plan.gate_error < 1.0, "gate {}", plan.gate_error);
-        assert!((6.0..14.0).contains(&plan.final_time), "tf {}", plan.final_time);
+        assert!(
+            plan.converged && plan.gate_error < 1.0,
+            "gate {}",
+            plan.gate_error
+        );
+        assert!(
+            (6.0..14.0).contains(&plan.final_time),
+            "tf {}",
+            plan.final_time
+        );
         check_limits(&p, &plan);
         // Never broadside: within the tilt limit (plus the soft slack).
         for x in &plan.x[2..] {

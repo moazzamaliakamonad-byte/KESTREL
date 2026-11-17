@@ -22,8 +22,8 @@ pub(crate) fn norm(v: Vec3) -> f64 {
 }
 
 pub use engine::Engine;
+pub use raptors::{Cluster, EngineState};
 pub use rng::Rng;
 pub use sensor::{Measurement, Noise, Sensor};
-pub use sim::{Gust, Params, Sim, Truth};
-pub use raptors::{Cluster, EngineState};
 pub use ship::{Command, CrashReason, Outcome, ShipSim, WindGust};
+pub use sim::{Gust, Params, Sim, Truth};

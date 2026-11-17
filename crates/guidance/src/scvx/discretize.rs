@@ -13,7 +13,7 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use model::dynamics::{self, Extra, State, STATE};
+use model::dynamics::{self, Extra, STATE, State};
 use model::{Scenario, Vec3};
 
 pub const NX: usize = STATE;
@@ -71,7 +71,12 @@ pub fn f_nd(scn: &Scenario, units: &Units, x: &State, u: Vec3) -> State {
 }
 
 /// Jacobians `∂f/∂x` (14×14) and `∂f/∂u` (14×3) by central differences.
-fn jacobians(scn: &Scenario, units: &Units, x: &State, u: Vec3) -> ([[f64; NX]; NX], [[f64; NU]; NX]) {
+fn jacobians(
+    scn: &Scenario,
+    units: &Units,
+    x: &State,
+    u: Vec3,
+) -> ([[f64; NX]; NX], [[f64; NU]; NX]) {
     const H: f64 = 1e-6;
     let mut a = [[0.0; NX]; NX];
     let mut b = [[0.0; NU]; NX];
@@ -111,7 +116,15 @@ pub struct Interval {
 /// Augmented state: x, Φ, P⁻, P⁺, Pσ.
 const NAUG: usize = NX + NX * NX + 2 * NX * NU + NX;
 
-fn aug_deriv(scn: &Scenario, units: &Units, y: &[f64; NAUG], u: Vec3, lm: f64, lp: f64, sigma: f64) -> [f64; NAUG] {
+fn aug_deriv(
+    scn: &Scenario,
+    units: &Units,
+    y: &[f64; NAUG],
+    u: Vec3,
+    lm: f64,
+    lp: f64,
+    sigma: f64,
+) -> [f64; NAUG] {
     let x: State = std::array::from_fn(|i| y[i]);
     let fx = f_nd(scn, units, &x, u);
     let (a, b) = jacobians(scn, units, &x, u);
@@ -157,7 +170,14 @@ fn lerp(a: Vec3, b: Vec3, lm: f64, lp: f64) -> Vec3 {
 }
 
 /// Discretize around the reference `(xs, us, sigma)` (non-dimensional).
-pub fn discretize(scn: &Scenario, units: &Units, xs: &[State], us: &[Vec3], sigma: f64, substeps: usize) -> Vec<Interval> {
+pub fn discretize(
+    scn: &Scenario,
+    units: &Units,
+    xs: &[State],
+    us: &[Vec3],
+    sigma: f64,
+    substeps: usize,
+) -> Vec<Interval> {
     let k = xs.len();
     let dtau = 1.0 / (k - 1) as f64;
     let h = dtau / substeps as f64;
@@ -227,7 +247,16 @@ fn add<const N: usize>(y: &[f64; N], d: &[f64; N], s: f64) -> [f64; N] {
 
 /// Integrate one interval of length `dtau` from `x0`, control linear from
 /// `u0` to `u1`.
-pub fn propagate_interval(scn: &Scenario, units: &Units, x0: &State, u0: Vec3, u1: Vec3, sigma: f64, dtau: f64, substeps: usize) -> State {
+pub fn propagate_interval(
+    scn: &Scenario,
+    units: &Units,
+    x0: &State,
+    u0: Vec3,
+    u1: Vec3,
+    sigma: f64,
+    dtau: f64,
+    substeps: usize,
+) -> State {
     let h = dtau / substeps as f64;
     let mut x = *x0;
     for s in 0..substeps {
@@ -250,11 +279,27 @@ pub fn propagate_interval(scn: &Scenario, units: &Units, x0: &State, u0: Vec3, u
 
 /// Integrate the nonlinear dynamics through all intervals from `x0` with
 /// first-order-hold controls (single shooting). Returns every node.
-pub fn propagate(scn: &Scenario, units: &Units, x0: &State, us: &[Vec3], sigma: f64, substeps: usize) -> Vec<State> {
+pub fn propagate(
+    scn: &Scenario,
+    units: &Units,
+    x0: &State,
+    us: &[Vec3],
+    sigma: f64,
+    substeps: usize,
+) -> Vec<State> {
     let dtau = 1.0 / (us.len() - 1) as f64;
     let mut out = vec![*x0];
     for n in 0..us.len() - 1 {
-        let next = propagate_interval(scn, units, out.last().expect("node"), us[n], us[n + 1], sigma, dtau, substeps);
+        let next = propagate_interval(
+            scn,
+            units,
+            out.last().expect("node"),
+            us[n],
+            us[n + 1],
+            sigma,
+            dtau,
+            substeps,
+        );
         out.push(next);
     }
     out
@@ -268,7 +313,13 @@ mod tests {
     /// A short powered reference: belly down, starting to flip.
     fn reference(scn: &Scenario, units: &Units) -> (Vec<State>, Vec<Vec3>, f64) {
         let q0 = quat::from_axis_angle([0.0, 1.0, 0.0], std::f64::consts::FRAC_PI_2);
-        let x0 = dynamics::state(scn.start_mass, [0.0, 0.0, 600.0], [10.0, 0.0, -85.0], q0, [0.0, -0.2, 0.0]);
+        let x0 = dynamics::state(
+            scn.start_mass,
+            [0.0, 0.0, 600.0],
+            [10.0, 0.0, -85.0],
+            q0,
+            [0.0, -0.2, 0.0],
+        );
         let us = vec![units.u_nd([2e5, 0.0, 5e6]); 5];
         let sigma = 4.0 / units.t;
         let xs = propagate(scn, units, &units.x_nd(&x0), &us, sigma, 10);
@@ -292,7 +343,8 @@ mod tests {
             let u0: Vec3 = std::array::from_fn(|i| us[n][i] + du[i]);
             let u1: Vec3 = std::array::from_fn(|i| us[n + 1][i] - du[i]);
             let s = sigma + eps;
-            let truth = propagate_interval(&scn, &units, &x, u0, u1, s, 1.0 / (xs.len() - 1) as f64, 40);
+            let truth =
+                propagate_interval(&scn, &units, &x, u0, u1, s, 1.0 / (xs.len() - 1) as f64, 40);
             for i in 0..NX {
                 let mut lin = iv.z[i] + iv.s[i] * s;
                 for j in 0..NX {
@@ -301,7 +353,11 @@ mod tests {
                 for j in 0..NU {
                     lin += iv.bm[i][j] * u0[j] + iv.bp[i][j] * u1[j];
                 }
-                assert!((lin - truth[i]).abs() < 1e-6, "interval {n} comp {i}: {lin} vs {}", truth[i]);
+                assert!(
+                    (lin - truth[i]).abs() < 1e-6,
+                    "interval {n} comp {i}: {lin} vs {}",
+                    truth[i]
+                );
             }
         }
     }
@@ -310,7 +366,13 @@ mod tests {
     fn units_round_trip() {
         let scn = Scenario::earth();
         let u = Units::new(&scn, scn.start_mass);
-        let x = dynamics::state(3e5, [1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [1.0, 0.0, 0.0, 0.0], [0.1, 0.2, 0.3]);
+        let x = dynamics::state(
+            3e5,
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.1, 0.2, 0.3],
+        );
         let back = u.x_si(&u.x_nd(&x));
         assert!((0..NX).all(|i| (back[i] - x[i]).abs() < 1e-9));
     }
