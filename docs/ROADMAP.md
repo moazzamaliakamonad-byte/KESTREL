@@ -85,7 +85,11 @@ simulation can be, on one page with a mission-control interface.
       (ship 2.3x per iteration); events re-plan at once
 - [x] Flight record: every decision with its reason, replay any instant;
       units and number sources on hover
-- [ ] Ship engine-out in the last seconds before the gate (lost today)
+- [x] Ship engine-out in the last seconds before the gate: an emergency
+      lower gate (17 of 20 engine-out flights caught, was 15); an
+      engine-out envelope says when a loss can no longer be recovered,
+      on screen and in the sweep (D-039)
+
 - [ ] Sensor noise "high": occasional tower strikes
 - [x] Commentary (rendered clips) and camera-aware procedural sound
 - [ ] Simulated ascent, hot staging and boostback (the full mission)

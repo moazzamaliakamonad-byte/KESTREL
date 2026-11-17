@@ -60,9 +60,24 @@ What is simulated, and what is only shown:
   relit: it gives thrust after 1 s, during which the ship falls. Real
   Raptors relight in flight; whether a real ship would, and how fast, is
   not published.
-- **Engine-out is survived 15 times in 20** (failure times 49-67 s, noise
-  off and low, measured below). Failures at 65 s and 67 s, the last
-  seconds before the gate, were all lost.
+- **Engine-out is survived 17 times in 20** (failure times 49-67 s, noise
+  off and low, measured below; 15 before the emergency gate, D-039).
+  Failures at 65 s and 67 s, the last seconds before the gate, are now
+  caught with no noise; the one at 67 s with low noise is lost, and it was
+  outside the engine-out envelope when the engine failed. The other two
+  losses (49 s low noise, 61 s no noise) were well inside it: those are
+  guidance's fault (the ship swings sideways into the mast after an
+  unconverged plan), not physics.
+- **The engine-out envelope** (`guidance::envelope`, shown as
+  "Engine-out" in the telemetry) is a point-mass estimate: if the running
+  engine failed now, could a spare lit 1.3 s later (ignition plus throttle
+  lag) at full thrust still stop the ship above the arms? It ignores
+  attitude, sideways motion and sensing errors. In the sweep every catch
+  but one began inside it or on its edge (+0.0 m/s); the arms accept
+  2 m/s, so a ship a little outside can still be caught. Below about 17 m
+  above the arms nothing is survivable, not even hovering: the fall during
+  the gap alone takes more height than is left.
+
 - **The plan ends 10 m out and 20 m above the arms**; the last 20 m are
   flown by a simple terminal controller (4-10 s). Plans ending on the arms
   hit the mast under sensor noise (D-033).
@@ -321,10 +336,11 @@ as 0.5 s of sim time). Read on 2026-11-17 after the guidance redesign
 **Robustness board** (`score.py`-style runs of `trace_earth` and
 `engine_out_window`, `--ignored`): 12 nominal ship flights (seeds 7-10,
 noise off, low, high) and 20 engine-out flights (the running engine failed
-at 49, 51, … 67 s, noise off and low). Current configuration: 10 of 12 and
-15 of 20 (median flight 83 s). The one or two nominal losses are under high
-noise (tower strikes). The decision log (D-032, D-033, D-034) lists the
-configurations compared. Single seeds per cell: not a statistical claim.
+at 49, 51, … 67 s, noise off and low). Current configuration (2026-11-17,
+after D-039): 10 of 12 and 17 of 20. The two nominal losses are under high
+noise (tower strikes). The decision log (D-032, D-033, D-034, D-039) lists
+the configurations compared. Single seeds per cell: not a statistical claim.
+
 
 **Planner timing** (2026-11-17, i7-1185G7 laptop on AC power, about 30 %
 background load). Ship flip problem, native, per SCvx iteration:

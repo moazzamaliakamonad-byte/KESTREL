@@ -50,7 +50,14 @@ export interface ShipSnapshot {
   outcome: Outcome | null;
   reason: string | null;
   end_velocity: Vec3 | null;
+  /**
+   * Engine-out envelope: how much slower than the survivable limit the ship
+   * is sinking, m/s (negative: losing the running engine now could not be
+   * recovered by relighting a spare). Null when it does not apply.
+   */
+  engine_out_margin: number | null;
 }
+
 
 /** Physics options; a missing field keeps the scenario's value. */
 export interface Tuning {

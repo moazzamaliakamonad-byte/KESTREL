@@ -198,11 +198,15 @@ crates/guidance
                cold/warm references, acceptance by re-integration)
   ship_control.rs  belly_flop (ship) / descent (booster) -> unpowered(); flip; steady_burn;
                powered (plan tracking); terminal; ignition_altitude; fall_time
+  envelope.rs  engine-out envelope: the largest sink speed from which a relit spare can
+               still stop the ship above the arms (point-mass bound, D-039)
 crates/wasm
   ship_flight.rs  ShipFlight: phases (unpowered -> flip/start-up -> burn legs -> terminal);
                the ship plans from engine start (flip on every engine, planned switch
                to one), relights a spare after a failure, request_replan() on events,
-               emergency full-thrust option after an engine loss;
+               emergency full-thrust option and a lower emergency gate after an engine
+               loss; engine_out_margin() for the page;
+
                legs (full engine set to a mid gate, final engines to the approach gate),
                when to re-plan, prediction of the booster's first plan, options
   ship_js.rs   JS class ShipFlight; plan_ship / preview_ship (worker); ship_scenario

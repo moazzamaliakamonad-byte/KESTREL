@@ -502,3 +502,29 @@ Template:
   "illustrative" tag gives its source or reason. Dry masses are now marked
   illustrative: SpaceX has not published them (they were marked published).
 
+
+## D-039 — Late engine-out: an emergency gate and an envelope
+- Date: 2026-11-17
+- Status: accepted
+- Context: failures of the running engine in the last seconds before the
+  approach gate were all lost (D-031). Traced: after the 1 s relight gap
+  the ship is too low and fast for a plan to the usual gate (20 m above
+  the arms), every plan fails, and the braking fallback stops it too low
+  or beside the mast.
+- Decision: after an engine loss the planner tries, last, a gate 12 m
+  lower (8 m above the caught position) at full thrust. Engine-out sweep:
+  17 of 20 caught (15 before); nominal flights unchanged (10 of 12).
+- Also added: `guidance::envelope`, the point-mass bound on the sink speed
+  from which a relight can still stop the ship above the arms; shown on
+  the page and printed by the sweep at each failure. It separates losses
+  physics allows from losses it does not.
+- Tried and rejected:
+  - The envelope as a constraint in the planner (descend no faster than an
+    engine loss can be survived, written exactly as tangent half-planes of
+    a concave bound, soft): plans stopped converging and swung near the
+    tower. 3 of 12 nominal, 5-12 of 20 engine-out, with shared or separate
+    slack and three penalty weights. The idea is sound; the slow descent
+    it demands next to the tower costs more than it saves with this
+    controller.
+  - Preferring a converged plan from any option over an unconverged one
+    after a failure: 15 of 20.

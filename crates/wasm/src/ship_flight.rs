@@ -83,6 +83,17 @@ pub const SHIP_BURN_TILT: f64 = 0.523_598_775_598_298_8;
 /// metre of height (the default 10 m and 1.0 caught fewer: 10 of 12
 /// nominal flights against 11).
 pub const SHIP_FUNNEL: (f64, f64) = (3.0, 0.6);
+/// After an engine loss, when no plan reaches the usual approach gate: a
+/// last option ending this much lower (8 m above the caught position
+/// instead of 20 m), m. Engine-out sweep: 17 of 20 caught with it, 15
+/// without (D-039).
+pub const EMERGENCY_GATE_DROP: f64 = 12.0;
+/// The engine-out envelope (`guidance::envelope`) counts on this share of
+/// the spare's full thrust (the plans' emergency limit), and on the ship
+/// stopping by this height above the caught position, m.
+pub const ENVELOPE_SHARE: f64 = 1.0;
+pub const ENVELOPE_FLOOR: f64 = 0.0;
+
 /// Default wind gust speed, m/s.
 pub const GUST_SPEED: f64 = 15.0;
 /// Attitude sensor error σ (rad) and rate error σ (rad/s), high noise.
@@ -504,7 +515,38 @@ impl ShipFlight {
         self.replan_now = true;
     }
 
+    /// The engine-out envelope of the moment: how much slower than the
+    /// survivable limit the ship is sinking, m/s (negative: losing the
+    /// running engine now could not be recovered by a relight). None when
+    /// it does not apply: not on its last engine, or no spare left.
+    pub fn engine_out_margin(&self) -> Option<f64> {
+        let x = &self.est;
+        self.envelope().map(|e| {
+            let h = x[R + 2] - self.sim.scn.floor_z - ENVELOPE_FLOOR;
+            e.margin(h, -x[V + 2])
+        })
+    }
+
+    /// The envelope's numbers now (None when it does not apply).
+    pub fn envelope(&self) -> Option<guidance::envelope::Envelope> {
+        let c = &self.sim.cluster;
+        let on_burn = matches!(self.phase, Phase::Burn | Phase::Terminal);
+        let lit = c.lit();
+        if self.sim.scn.ship.kind != VehicleKind::Ship || !on_burn || lit != 1 || c.healthy() <= lit
+        {
+            return None;
+        }
+        let ship = &self.sim.scn.ship;
+        let g = self.sim.scn.planet.gravity();
+        Some(guidance::envelope::Envelope {
+            gap: ship.ignition_time + c.lag,
+            decel: ENVELOPE_SHARE * FULL_THRUST * ship.engine_max / self.est[M] - g,
+            g,
+        })
+    }
+
     /// Spare engines lit after a failure, this flight.
+
     pub fn relights(&self) -> u32 {
         self.relights
     }
@@ -771,7 +813,14 @@ impl ShipFlight {
                     Some(late) => *late = (late.0, hi * FULL_THRUST),
                     None => all_out.thrust_limits = (lo, hi * FULL_THRUST),
                 }
-                options.push((leg, all_out));
+                options.push((leg, all_out.clone()));
+                // Too low and fast for the usual gate: a lower one.
+                let mut low = leg;
+                low.gate[2] -= EMERGENCY_GATE_DROP;
+                let mut p = all_out;
+                p.scn.gate = low.gate;
+                p.scn.gate_velocity = low.gate_velocity;
+                options.push((low, p));
             }
             return (t, options);
         }

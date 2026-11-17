@@ -680,6 +680,7 @@ impl ShipFlightJs {
             "outcome": outcome,
             "reason": reason,
             "end_velocity": s.end_velocity,
+            "engine_out_margin": f.engine_out_margin(),
         })
         .to_string()
     }

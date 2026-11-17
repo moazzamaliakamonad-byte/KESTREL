@@ -39,6 +39,7 @@ function snap(patch: Partial<ShipSnapshot>): ShipSnapshot {
     outcome: null,
     reason: null,
     end_velocity: null,
+    engine_out_margin: null,
     ...patch,
   };
 }

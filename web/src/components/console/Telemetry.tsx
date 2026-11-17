@@ -227,6 +227,19 @@ export function Telemetry() {
         <b>{guide}</b>
         <span>Last solve</span>
         <b>{solve !== undefined ? `${fmt(solve)} ms · ${shipLive.replans} plans` : "—"}</b>
+        {s.engine_out_margin !== null && s.engine_out_margin !== undefined && (
+          <>
+            <span title="If the running engine failed now, could a spare (lit 1 s later) still stop the ship above the arms? A point-mass estimate.">Engine-out</span>
+            <b data-tone={s.engine_out_margin < 0 ? "warm" : undefined}>
+              {s.engine_out_margin >= 0 ? (
+                <Units text={`survivable · ${fmt(s.engine_out_margin, 1)} m/s spare`} />
+              ) : (
+                <Units text={`not survivable · ${fmt(-s.engine_out_margin, 1)} m/s too fast`} />
+              )}
+            </b>
+          </>
+        )}
+
         <Spark values={shipLive.solveMs} />
       </div>
     </Panel>

@@ -26,6 +26,8 @@ struct Report {
     t: f64,
     fuel: f64,
     relights: u32,
+    /// Engine-out envelope margin when the last engine-out event fired, m/s.
+    margin_at_fail: Option<f64>,
 }
 
 type Pending = (
@@ -98,6 +100,7 @@ fn fly(
     let mut fired = vec![false; events.len()];
     let mut ignition_fired = false;
     let (mut replans, mut failures) = (0, 0);
+    let mut margin_at_fail = None;
     while f.phase() != Phase::Done && f.sim().t < 400.0 {
         f.step(FRAME);
         let t = f.sim().t;
@@ -107,6 +110,7 @@ fn fly(
                 match e {
                     Event::Gust(d) => f.gust(*d),
                     Event::EngineOut => {
+                        margin_at_fail = f.engine_out_margin();
                         f.engine_out();
                     }
                 }
@@ -135,6 +139,7 @@ fn fly(
         t: s.t,
         fuel: m0 - s.x[dynamics::M],
         relights: f.relights(),
+        margin_at_fail,
     };
     let p = dynamics::position(&s.x);
     eprintln!(
@@ -507,8 +512,12 @@ fn engine_out_window() {
         for noise in [Noise::OFF, Noise::LOW] {
             let r = fly(Kind::Earth, noise, 0.3, &[(at, Event::EngineOut)], &[]);
             eprintln!(
-                "WINDOW fail at {at} s, noise {:.2}: {:?}, {} relight(s)",
-                noise.pos_sigma, r.outcome, r.relights
+                "WINDOW fail at {at} s, noise {:.2}: {:?}, {} relight(s), envelope margin {}",
+                noise.pos_sigma,
+                r.outcome,
+                r.relights,
+                r.margin_at_fail
+                    .map_or("n/a".to_string(), |m| format!("{m:+.1} m/s"))
             );
         }
     }
