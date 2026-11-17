@@ -114,7 +114,9 @@ export const DEFAULT_VIEW: ViewOptions = {
   preview: true,
 };
 
-export const SPEEDS = [0.25, 0.5, 1, 2, 4, 8] as const;
+export const SPEEDS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
+/** Simulation speed during an entry from orbit (it takes about ten minutes); ×1 again at the hand-over. */
+export const ENTRY_SPEED = 16;
 
 type Range = [number, number];
 interface Limits {
@@ -136,7 +138,19 @@ export interface Preset {
   name: string;
   note: string;
   start: Start;
+  /** Start from orbit instead (the ship only). */
+  orbit?: Orbit;
 }
+
+/** An entry from orbit: distance from the entry interface to the tower and its angle. */
+export interface Orbit {
+  rangeKm: number;
+  gammaDeg: number;
+}
+
+/** What the page lets a visitor choose for an entry (the corridor was swept over these, D-042). */
+export const ORBIT_LIMITS = { rangeKm: [3000, 3600] as [number, number], gammaDeg: [-1.5, -0.8] as [number, number] };
+export const DEFAULT_ORBIT: Orbit = { rangeKm: 3300, gammaDeg: -1.0 };
 
 /** Named starts; the first is the default. All were flown in the Rust tests or probes. */
 export const PRESETS: Record<ScenarioKind, Preset[]> = {
@@ -144,6 +158,7 @@ export const PRESETS: Record<ScenarioKind, Preset[]> = {
     { name: "Belly flop", note: "5 km, subsonic", start: { position: [700, 0, 5000], velocity: [-25, 0, -75] } },
     { name: "High drop", note: "25 km", start: { position: [2500, 0, 25_000], velocity: [-60, 0, -250] } },
     { name: "Entry", note: "80 km, Mach 7", start: { position: [3000, 0, 80_000], velocity: [-100, 0, -2500] } },
+    { name: "From orbit", note: "120 km, 7.5 km/s, 3 300 km out", start: { position: [700, 0, 5000], velocity: [-25, 0, -75] }, orbit: DEFAULT_ORBIT },
   ],
   booster: [
     { name: "Return", note: "14 km, Mach 1.4", start: { position: [900, 0, 14_000], velocity: [-30, 0, -420] } },
@@ -171,7 +186,7 @@ export function kindOf(vehicle: Vehicle): ScenarioKind {
 const deg = Math.PI / 180;
 
 /** The config Rust takes, from the page's state. */
-export function configOf(s: Pick<ShipState, "scenario" | "start" | "options">): FlightConfig {
+export function configOf(s: Pick<ShipState, "scenario" | "start" | "options"> & { orbit?: Orbit | null }): FlightConfig {
   const o = s.options;
   const tuning: Tuning = { density_scale: o.density };
   if (o.gimbal !== null) tuning.gimbal_max_deg = o.gimbal;
@@ -190,6 +205,7 @@ export function configOf(s: Pick<ShipState, "scenario" | "start" | "options">): 
     failed: o.failed,
     solver: o.solver,
   };
+  if (s.orbit && s.scenario === "earth") config.entry = { range_km: s.orbit.rangeKm, gamma_deg: s.orbit.gammaDeg };
   if (o.propellant !== null) config.propellant = o.propellant * 1000;
   return config;
 }
@@ -201,6 +217,8 @@ export interface ShipState {
   info: Partial<Record<ScenarioKind, ScenarioInfo>>;
   start: Start;
   preset: number;
+  /** The flight starts from orbit (the ship only), else from `start`. */
+  orbit: Orbit | null;
   options: Options;
   view: ViewOptions;
   mode: Mode;
@@ -217,6 +235,7 @@ export interface ShipState {
   setVehicle(v: Vehicle): void;
   setStart(start: Start): void;
   setPreset(i: number): void;
+  setOrbit(patch: Partial<Orbit>): void;
   setOptions(patch: Partial<Options>): void;
   toggleFailed(engine: number): void;
   resetOptions(): void;
@@ -233,11 +252,12 @@ export interface ShipState {
   setError(message: string | null): void;
 }
 
-function fresh(kind: ScenarioKind): Pick<ShipState, "scenario" | "start" | "preset" | "mode" | "preview" | "flight" | "options"> {
+function fresh(kind: ScenarioKind): Pick<ShipState, "scenario" | "start" | "preset" | "orbit" | "mode" | "preview" | "flight" | "options"> {
   return {
     scenario: kind,
     start: clampStart(kind, PRESETS[kind][0].start),
     preset: 0,
+    orbit: null,
     mode: "editing",
     preview: null,
     flight: null,
@@ -266,13 +286,20 @@ export const useShip = create<ShipState>((set, get) => ({
   },
   setStart(start) {
     if (get().mode !== "editing") return;
-    set({ start: clampStart(get().scenario, start), preset: -1 });
+    set({ start: clampStart(get().scenario, start), preset: -1, orbit: null });
   },
   setPreset(i) {
     const s = get();
     const p = PRESETS[s.scenario][i];
     if (!p || s.mode !== "editing") return;
-    set({ start: clampStart(s.scenario, p.start), preset: i });
+    set({ start: clampStart(s.scenario, p.start), preset: i, orbit: p.orbit ? { ...p.orbit } : null });
+  },
+  setOrbit(patch) {
+    const s = get();
+    if (s.mode !== "editing" || !s.orbit) return;
+    const o = { ...s.orbit, ...patch };
+    const c = (v: number, [lo, hi]: [number, number]) => Math.min(hi, Math.max(lo, v));
+    set({ orbit: { rangeKm: c(o.rangeKm, ORBIT_LIMITS.rangeKm), gammaDeg: c(o.gammaDeg, ORBIT_LIMITS.gammaDeg) } });
   },
   setOptions(patch) {
     set({ options: { ...get().options, ...patch } });
@@ -308,7 +335,17 @@ export const useShip = create<ShipState>((set, get) => ({
   fly() {
     const s = get();
     if (s.mode !== "editing") return;
-    set({ mode: "launch", intro: "stack", launchAt: now(), parked: false, flight: null, view: { ...s.view, paused: false } });
+    // From orbit there is no launch to show: the title card only, and the
+    // entry flies sped up (it takes about ten minutes).
+    const orbit = s.orbit !== null;
+    set({
+      mode: "launch",
+      intro: orbit ? "card" : "stack",
+      launchAt: now(),
+      parked: false,
+      flight: null,
+      view: { ...s.view, paused: false, speed: orbit ? ENTRY_SPEED : s.view.speed },
+    });
   },
   beginFlight() {
     if (get().mode === "launch") set({ mode: "flying", flight: null });
@@ -369,6 +406,7 @@ function carried(o: Options): Partial<Options> {
 
 /** Labels for the phase banner and timeline. */
 export const PHASE_LABEL: Record<ShipPhase, string> = {
+  entry: "Entry",
   "belly-flop": "Belly flop",
   flip: "Flip",
   descent: "Grid-fin descent",
@@ -379,10 +417,10 @@ export const PHASE_LABEL: Record<ShipPhase, string> = {
 };
 
 /** The phases a kind goes through, in order (for the timeline). */
-export function phasesOf(kind: ScenarioKind): ShipPhase[] {
-  return kind === "booster"
-    ? ["descent", "startup", "landing-burn", "terminal", "done"]
-    : ["belly-flop", "flip", "landing-burn", "terminal", "done"];
+export function phasesOf(kind: ScenarioKind, orbit = false): ShipPhase[] {
+  if (kind === "booster") return ["descent", "startup", "landing-burn", "terminal", "done"];
+  const ship: ShipPhase[] = ["belly-flop", "flip", "landing-burn", "terminal", "done"];
+  return orbit ? ["entry", ...ship] : ship;
 }
 
 export const VEHICLE_NAME: Record<Vehicle, string> = { ship: "Ship", booster: "Booster" };

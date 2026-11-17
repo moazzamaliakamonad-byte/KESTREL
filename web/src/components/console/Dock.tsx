@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { engineLayout } from "@/lib/ship/engines";
 import { LINES } from "@/lib/ship/phrases";
 import { commentator, failEngine, throwGust } from "@/lib/ship/runtime";
-import { PRESETS, SPEEDS, START_LIMITS, useShip, verdict, type CameraMode, type Noise } from "@/lib/ship/store";
+import { ORBIT_LIMITS, PRESETS, SPEEDS, START_LIMITS, useShip, verdict, type CameraMode, type Noise } from "@/lib/ship/store";
 import type { EngineState, PlannerSolver, Preview, Vehicle } from "@/lib/ship/types";
 import { Field, Panel, Seg, Slider, Toggle, fmt } from "./controls";
 import css from "./console.module.css";
@@ -71,7 +71,7 @@ function PathMap({ preview }: { preview: Preview | null }) {
 }
 
 function Mission() {
-  const { vehicle, scenario, start, setStart, setVehicle, preset, setPreset, preview, previewing, mode } = useShip();
+  const { vehicle, scenario, start, setStart, setVehicle, preset, setPreset, preview, previewing, mode, orbit, setOrbit } = useShip();
   const l = START_LIMITS[scenario];
   const locked = mode !== "editing";
   const [p, v] = [start.position, start.velocity];
@@ -91,19 +91,47 @@ function Mission() {
           ))}
         </div>
       </Field>
-      <Slider label="Altitude" value={p[2]} range={l.z} step={100} disabled={locked} format={km} onChange={(z) => put([p[0], p[1], z], v)} />
-      <Slider label="Downrange" value={p[0]} range={l.x} step={25} disabled={locked} format={(x) => `${fmt(x)} m`} onChange={(x) => put([x, p[1], p[2]], v)} />
-      {l.y[1] > l.y[0] && <Slider label="Crossrange" value={p[1]} range={l.y} step={25} disabled={locked} format={(y) => `${fmt(y)} m`} onChange={(y) => put([p[0], y, p[2]], v)} />}
-      <Slider label="Descent speed" value={-v[2]} range={[-l.vz[1], -l.vz[0]]} step={5} disabled={locked} format={ms} onChange={(s) => put(p, [v[0], v[1], -s])} />
-      <Slider label="Downrange speed" value={v[0]} range={l.vx} step={1} disabled={locked} format={ms} onChange={(s) => put(p, [s, v[1], v[2]])} />
-      {l.vy[1] > l.vy[0] && <Slider label="Crossrange speed" value={v[1]} range={l.vy} step={1} disabled={locked} format={ms} onChange={(s) => put(p, [v[0], s, v[2]])} />}
+      {orbit ? (
+        <>
+          <Slider
+            label="Distance to the tower at 120 km"
+            value={orbit.rangeKm}
+            range={ORBIT_LIMITS.rangeKm}
+            step={25}
+            disabled={locked}
+            format={(x) => `${fmt(x)} km`}
+            onChange={(x) => setOrbit({ rangeKm: x })}
+          />
+          <Slider
+            label="Entry angle"
+            value={orbit.gammaDeg}
+            range={ORBIT_LIMITS.gammaDeg}
+            step={0.05}
+            disabled={locked}
+            format={(x) => `${fmt(x, 2)}°`}
+            onChange={(x) => setOrbit({ gammaDeg: x })}
+          />
+          <p className={css.hint}>
+            Too shallow and close, or too steep and far, and the ship leaves the entry corridor: it falls short, overheats or overshoots. The prediction flies it to find out.
+          </p>
+        </>
+      ) : (
+        <>
+          <Slider label="Altitude" value={p[2]} range={l.z} step={100} disabled={locked} format={km} onChange={(z) => put([p[0], p[1], z], v)} />
+          <Slider label="Downrange" value={p[0]} range={l.x} step={25} disabled={locked} format={(x) => `${fmt(x)} m`} onChange={(x) => put([x, p[1], p[2]], v)} />
+          {l.y[1] > l.y[0] && <Slider label="Crossrange" value={p[1]} range={l.y} step={25} disabled={locked} format={(y) => `${fmt(y)} m`} onChange={(y) => put([p[0], y, p[2]], v)} />}
+          <Slider label="Descent speed" value={-v[2]} range={[-l.vz[1], -l.vz[0]]} step={5} disabled={locked} format={ms} onChange={(s) => put(p, [v[0], v[1], -s])} />
+          <Slider label="Downrange speed" value={v[0]} range={l.vx} step={1} disabled={locked} format={ms} onChange={(s) => put(p, [s, v[1], v[2]])} />
+          {l.vy[1] > l.vy[0] && <Slider label="Crossrange speed" value={v[1]} range={l.vy} step={1} disabled={locked} format={ms} onChange={(s) => put(p, [v[0], s, v[2]])} />}
+        </>
+      )}
       <Field label="Prediction">
         <PathMap preview={preview} />
         <p className={css.hint} data-testid="prediction">
           {previewing
             ? "Flying it ahead of time…"
             : preview?.ok
-              ? `${verdict(scenario, preview.outcome, preview.reason) || "No outcome"} after ${fmt(preview.t)} s${preview.propellant !== undefined && preview.outcome !== "crashed" ? `, ${fmt(preview.propellant / 1000, 1)} t of propellant left` : ""}.`
+              ? `${verdict(scenario, preview.outcome, preview.reason) || "No outcome"} after ${fmt(preview.t)} s${preview.propellant !== undefined && preview.outcome !== "crashed" ? `, ${fmt(preview.propellant / 1000, 1)} t of propellant left` : ""}.${preview.entry ? ` Entry: tiles peak at ${fmt(preview.entry.peak_tile)} K, ${fmt(preview.entry.peak_g, 1)} g.` : ""}`
               : "Prediction unavailable."}
         </p>
       </Field>

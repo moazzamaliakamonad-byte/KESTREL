@@ -60,6 +60,10 @@ export const shipLive: {
 export const HISTORY_MAX = 1200;
 
 export function sampleOf(s: ShipSnapshot): Sample {
+  const e = s.entry;
+  if (e) {
+    return { t: s.t, altitude: e.altitude, speed: e.speed, thrust: 0, tilt: 0, q: e.q_dyn, propellant: s.propellant, mach: e.mach, heat: e.heat_flux, g: e.g };
+  }
   return {
     t: s.t,
     altitude: s.position[2],

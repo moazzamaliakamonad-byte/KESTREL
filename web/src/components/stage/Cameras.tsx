@@ -3,6 +3,7 @@
 import { shown } from "@/lib/ship/shown";
 import { OrbitControls } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
+import { entryNow } from "./Entry";
 import { useRef } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
@@ -65,6 +66,13 @@ export function Cameras() {
   const flying = useRef(0);
 
   useFrame(({ camera, clock }, dt) => {
+    // The entry from orbit has its own camera (Entry.tsx); cut back after it.
+    if (entryNow() !== null) {
+      if (controls.current) controls.current.enabled = false;
+      last.current = "";
+      shaken.current = false;
+      return;
+    }
     const cam = camera as THREE.PerspectiveCamera;
     const st = useShip.getState();
     const editing = st.mode === "editing";

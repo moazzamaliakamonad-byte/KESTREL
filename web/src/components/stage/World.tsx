@@ -3,6 +3,7 @@
 import { shown as shownState } from "@/lib/ship/shown";
 import { Environment } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
+import { entryNow } from "./Entry";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useShip } from "@/lib/ship/store";
@@ -444,7 +445,7 @@ function Haze() {
   useFrame(({ camera, scene }) => {
     if (!(scene.fog instanceof THREE.FogExp2)) scene.fog = new THREE.FogExp2(SKY.fog, 0.00003);
     // (No haze over the blueprint.)
-    scene.fog.density = skin.on ? 0 : 0.000024 * Math.exp(-Math.max(0, camera.position.y) / 9000) + 0.0000012;
+    scene.fog.density = skin.on || entryNow() !== null ? 0 : 0.000024 * Math.exp(-Math.max(0, camera.position.y) / 9000) + 0.0000012;
   });
   return null;
 }
@@ -455,7 +456,8 @@ export function World() {
   const scenery = useRef<THREE.Group>(null);
   // The blueprint view shows the vehicle alone: the world steps aside.
   useFrame(() => {
-    if (scenery.current) scenery.current.visible = !skin.on;
+    // ...and so does it for the entry from orbit (a globe is drawn instead).
+    if (scenery.current) scenery.current.visible = !skin.on && entryNow() === null;
   });
   return (
     <group>

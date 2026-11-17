@@ -3,7 +3,61 @@ import type { PQuat, Vec3 } from "./frames";
 /** A flight kind as Rust names it: the ship's return ("earth") or the booster's. Both end on the tower. */
 export type ScenarioKind = "earth" | "booster";
 export type Vehicle = "ship" | "booster";
-export type ShipPhase = "belly-flop" | "flip" | "descent" | "startup" | "landing-burn" | "terminal" | "done";
+export type ShipPhase = "entry" | "belly-flop" | "flip" | "descent" | "startup" | "landing-burn" | "terminal" | "done";
+
+/** The entry from orbit now (`entry` in the snapshot; Rust `entry_json`). SI units, angles in degrees. */
+export interface EntrySnapshot {
+  t: number;
+  altitude: number;
+  speed: number;
+  mach: number;
+  q_dyn: number;
+  density: number;
+  gamma_deg: number;
+  /** Stagnation-point heating, W/m². */
+  heat_flux: number;
+  /** Tile temperature (radiative equilibrium), K, and its limit. */
+  tile: number;
+  tile_limit: number;
+  /** Seconds above the limit so far, and how many the shield survives. */
+  overheat: number;
+  overheat_limit: number;
+  /** J/m². */
+  heat_load: number;
+  g: number;
+  lift_to_drag: number;
+  bank_deg: number;
+  bank_cmd_deg: number;
+  reversals: number;
+  heat_limited: boolean;
+  heading_error_deg: number;
+  /** Where guidance predicts the entry ends, past (+) or short of (−) its aim, m. */
+  predicted_overshoot: number;
+  predicted_time: number;
+  /** Along the surface, m. */
+  to_site: number;
+  to_aim: number;
+  lat: number;
+  lon: number;
+  site: [number, number];
+  handover_altitude: number;
+  /** Earth-centred, m and m/s. */
+  position: Vec3;
+  velocity: Vec3;
+  peak_tile: number;
+  peak_g: number;
+}
+
+/** What the entry did (after the hand-over). */
+export interface EntrySummary {
+  duration: number;
+  peak_heat_flux: number;
+  peak_tile: number;
+  heat_load: number;
+  peak_g: number;
+  reversals: number;
+  miss: number;
+}
 export type EngineState = "off" | "igniting" | "running" | "shutdown" | "failed";
 export type Outcome = "caught" | "crashed";
 
@@ -50,6 +104,9 @@ export interface ShipSnapshot {
   outcome: Outcome | null;
   reason: string | null;
   end_velocity: Vec3 | null;
+  /** The entry from orbit while it lasts, else null. */
+  entry: EntrySnapshot | null;
+  entry_summary: EntrySummary | null;
   /**
    * Engine-out envelope: how much slower than the survivable limit the ship
    * is sinking, m/s (negative: losing the running engine now could not be
@@ -139,6 +196,8 @@ export interface FlightConfig {
   failed?: number[];
   /** Which convex solver the planner uses (read by the worker, not by the flight). */
   solver?: PlannerSolver;
+  /** Start from orbit (the ship only). */
+  entry?: { range_km: number; gamma_deg: number };
 }
 
 /** Clarabel (the default) or Kestrel's own allocation-free solver (D-041). */
@@ -162,4 +221,7 @@ export interface Preview {
   reason: string | null;
   t: number;
   propellant?: number;
+  /** From orbit: what the entry did, and its ground track every 10 s ([lat, lon, altitude]). */
+  entry?: EntrySummary | null;
+  entry_track?: [number, number, number][];
 }

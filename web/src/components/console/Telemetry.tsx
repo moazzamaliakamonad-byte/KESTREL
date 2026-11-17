@@ -6,7 +6,7 @@ import { rotate } from "@/lib/ship/frames";
 import { shipLive, type Sample } from "@/lib/ship/live";
 import { failEngine } from "@/lib/ship/runtime";
 import { PHASE_LABEL, useShip } from "@/lib/ship/store";
-import type { ShipSnapshot } from "@/lib/ship/types";
+import type { EntrySnapshot, ShipSnapshot } from "@/lib/ship/types";
 import { EngineMap } from "./Dock";
 import { Panel, fmt, useTick } from "./controls";
 import { Units } from "./Units";
@@ -149,6 +149,67 @@ function Readout({ label, value, unit, sub }: { label: string; value: string; un
   );
 }
 
+/** The entry from orbit: heating against the tiles' limit, the bank guidance flies, the way left. */
+function EntryTelemetry({ e }: { e: EntrySnapshot }) {
+  const km = (m: number) => (m >= 100_000 ? fmt(m / 1000) : fmt(m / 1000, 1));
+  const hot = e.tile > 0.97 * e.tile_limit;
+  return (
+    <Panel className={css.telemetry}>
+      <header className={css.phase}>
+        <span>Ship · from orbit</span>
+        <h2 data-testid="phase">{PHASE_LABEL.entry}</h2>
+      </header>
+      <div className={css.big}>
+        <Readout label="Altitude" value={km(e.altitude)} unit="km" />
+        <Readout label="Speed" value={fmt(e.speed / 1000, 2)} unit="km/s" sub={`Mach ${fmt(e.mach, 1)} · ${fmt(e.gamma_deg, 1)}° flight path`} />
+      </div>
+      <Bar
+        label="Tile temperature"
+        value={e.tile / (e.tile_limit * 1.15)}
+        text={`${fmt(e.tile)} K of ${fmt(e.tile_limit)}`}
+        marks={[1 / 1.15]}
+        tone={hot ? "warm" : undefined}
+      />
+      <div className={css.grid}>
+        <span>Heating</span>
+        <b>
+          <Units text={`${fmt(e.heat_flux / 1e6, 2)} MW/m²`} />
+        </b>
+        <span>Heat load</span>
+        <b>
+          <Units text={`${fmt(e.heat_load / 1e6)} MJ/m²`} />
+        </b>
+        <span>Dynamic pressure</span>
+        <b>
+          <Units text={`${fmt(e.q_dyn / 1000, 1)} kPa`} />
+        </b>
+        <span>Deceleration</span>
+        <b>{fmt(e.g, 2)} g</b>
+        <span>Lift / drag</span>
+        <b>{fmt(e.lift_to_drag, 2)}</b>
+        <span>To the tower</span>
+        <b>
+          <Units text={`${km(e.to_site)} km`} />
+        </b>
+      </div>
+      <div className={css.guidance}>
+        <span>Guidance</span>
+        <b>{e.heat_limited ? "Bank limited by heating" : "Predictor-corrector · bank"}</b>
+        <span>Bank angle</span>
+        <b>
+          {fmt(e.bank_deg)}° {e.bank_deg >= 0 ? "right" : "left"} · {e.reversals} reversal{e.reversals === 1 ? "" : "s"}
+        </b>
+        <span>Predicted end</span>
+        <b>
+          <Units text={`${fmt(Math.abs(e.predicted_overshoot) / 1000, 1)} km ${e.predicted_overshoot >= 0 ? "long" : "short"} · in ${fmt(e.predicted_time)} s`} />
+        </b>
+        <span>Heading error</span>
+        <b>{fmt(e.heading_error_deg, 1)}°</b>
+      </div>
+    </Panel>
+  );
+}
+
 /** Live numbers, refreshed about 10 times a second from `shipLive`. */
 export function Telemetry() {
   useTick(100);
@@ -157,6 +218,7 @@ export function Telemetry() {
   const info = useShip((s) => s.info[s.scenario]);
   const s = shown();
   if (!s || !info) return null;
+  if (s.entry) return <EntryTelemetry e={s.entry} />;
   const speed = Math.hypot(...s.velocity);
   const z = s.position[2];
   const full = info.propellant;

@@ -138,7 +138,13 @@ function publish(snap: ShipSnapshot, prev: ShipSnapshot | null) {
   commentator.say(callouts(st.scenario, prev, snap), st.view.speed);
   shipLive.caption = commentator.caption;
   shipLive.snapshot = snap;
-  if (snap.t - lastTrail >= TRAIL_EVERY || snap.outcome) {
+  // The entry hands over to the landing: back to real time, and the trail
+  // starts where the 6-DoF flight does.
+  if (prev?.phase === "entry" && snap.phase !== "entry") {
+    if (st.view.speed > 1) st.setView({ speed: 1 });
+    shipLive.trail = [];
+  }
+  if (snap.phase !== "entry" && (snap.t - lastTrail >= TRAIL_EVERY || snap.outcome)) {
     shipLive.trail.push(snap.position);
     lastTrail = snap.t;
   }

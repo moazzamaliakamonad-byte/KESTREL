@@ -10,7 +10,8 @@ import type { ShipPhase } from "@/lib/ship/types";
 import css from "./console.module.css";
 
 /** What the title card says for the flight about to be simulated. */
-function cardText(scenario: string, parked: boolean, altitude: number): { kicker: string; title: string; line: string } {
+function cardText(scenario: string, parked: boolean, altitude: number, orbit: { rangeKm: number } | null): { kicker: string; title: string; line: string } {
+  if (orbit) return { kicker: "From orbit", title: "Ship entry and return", line: `120 km up at 7.5 km/s, ${orbit.rangeKm.toLocaleString("en-GB")} km from the tower` };
   const km = `${(altitude / 1000).toFixed(altitude < 10_000 ? 1 : 0)} km`;
   if (scenario === "booster") return { kicker: "After stage separation", title: "Booster return", line: `${km} above the launch site, falling engines first` };
   return { kicker: parked ? "The booster is down · next" : "After its flight", title: "Ship return", line: `${km} above the launch site, belly to the wind` };
@@ -41,6 +42,7 @@ export function LaunchOverlay() {
   const scenario = useShip((s) => s.scenario);
   const parked = useShip((s) => s.parked);
   const altitude = useShip((s) => s.start.position[2]);
+  const orbit = useShip((s) => s.orbit);
   const [ls, setLs] = useState<LaunchState | null>(null);
 
   useEffect(() => {
@@ -95,7 +97,7 @@ export function LaunchOverlay() {
   }, [launchAt]);
 
   if (!ls) return null;
-  const card = cardText(scenario, parked, altitude);
+  const card = cardText(scenario, parked, altitude, orbit);
   const staging = ls.phase === "staging";
   const cardOpacity = ls.phase === "card" ? Math.min(clamp01(ls.t / 1.2), clamp01((LAUNCH.card - ls.t) / 1.4)) : 0;
   const counting = ls.phase === "countdown" && ls.count > 0;
@@ -151,6 +153,7 @@ export function LaunchOverlay() {
 }
 
 const PHASE_LINE: Record<ShipPhase, string> = {
+  entry: "Belly first into the air at 7.5 km/s; guidance rolls the lift to steer",
   descent: "Three grid fins steer it toward the tower",
   startup: "The inner thirteen engines light",
   "belly-flop": "Four flaps hold it belly to the wind",
@@ -166,7 +169,7 @@ const PHASE_LINE: Record<ShipPhase, string> = {
  */
 export function PhaseBanner() {
   const phase = useShip((s) => (s.mode === "flying" && !s.view.analysis ? s.flight?.phase : undefined));
-  const first = useShip((s) => phasesOf(s.scenario)[0]);
+  const first = useShip((s) => phasesOf(s.scenario, s.orbit !== null)[0]);
   // The opening phase is announced by the title card.
   if (!phase || phase === "done" || phase === first) return null;
   return (

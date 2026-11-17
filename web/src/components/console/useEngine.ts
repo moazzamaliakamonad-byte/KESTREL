@@ -65,7 +65,7 @@ export function useEngine() {
       .catch((e: unknown) => fail(`Could not load the simulator: ${String(e)}`));
 
     const unsubscribe = useShip.subscribe((s, prev) => {
-      const edited = s.start !== prev.start || s.scenario !== prev.scenario || s.options !== prev.options;
+      const edited = s.start !== prev.start || s.scenario !== prev.scenario || s.options !== prev.options || s.orbit !== prev.orbit;
       if (s.mode === "editing" && (edited || prev.mode !== "editing")) preview();
       if (s.mode === "flying" && prev.mode !== "flying") {
         void loading.then(() => {

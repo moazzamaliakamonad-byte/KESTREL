@@ -761,8 +761,10 @@ impl ShipFlightJs {
             (Guide::Brake, _) => ("brake", 0),
             _ => ("none", 0),
         };
+        // During the entry the clock is the entry's (the 6-DoF flight has not begun).
+        let t = f.entry().map_or(s.t, |e| e.sim.t);
         json!({
-            "t": s.t,
+            "t": t,
             "vehicle": vehicle_str(s.scn.ship.kind),
             "phase": f.phase().label(f.kind),
             "thrust_limits": [t_min, t_max],

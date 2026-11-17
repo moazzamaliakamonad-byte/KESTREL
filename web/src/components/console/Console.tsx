@@ -36,8 +36,8 @@ function Mark() {
 
 function TopBar({ onControls, controls }: { onControls: () => void; controls: boolean }) {
   useTick(100);
-  const { scenario, flight, mode, view, setView } = useShip();
-  const phases = phasesOf(scenario);
+  const { scenario, flight, mode, view, setView, orbit } = useShip();
+  const phases = phasesOf(scenario, orbit !== null);
   const now = mode === "editing" || mode === "launch" ? -1 : phases.indexOf(flight?.phase ?? phases[0]);
   // During the opening sequence the clock is the sequence's own (T− on the
   // pad, T+ after liftoff); in flight it is the simulation's time.
@@ -95,6 +95,8 @@ function go() {
 function toggleAnalysis() {
   const s = useShip.getState();
   if (s.mode !== "flying" && s.mode !== "done") return;
+  // The blueprint and its part sheets describe the landing vehicle: not during the entry.
+  if (!s.view.analysis && shipLive.snapshot?.entry) return;
   s.setView({ analysis: !s.view.analysis, paused: !s.view.analysis && s.mode === "flying" ? true : s.view.paused });
 }
 

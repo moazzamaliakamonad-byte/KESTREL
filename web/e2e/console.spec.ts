@@ -118,3 +118,19 @@ test("reset mid-flight goes back to the pad; a second flight starts cleanly", as
   await expect.poll(() => state(page, (k) => k.live.snapshot?.t ?? 0), { timeout: 30_000 }).toBeGreaterThan(2);
   expect(errors).toEqual([]);
 });
+
+test("ship from orbit: entry sped up, hand-over at real time, caught", async ({ page }) => {
+  const errors = collectErrors(page);
+  await open(page);
+  await page.evaluate(() => (window as unknown as { __kestrel: Probe }).__kestrel.getState().setVehicle("ship"));
+  await page.getByRole("button", { name: /From orbit/ }).click();
+  await expect(page.getByTestId("prediction")).toContainText("Entry: tiles peak", { timeout: 120_000 });
+  await fly(page);
+  await expect.poll(() => state(page, (k) => k.live.snapshot?.phase)).toBe("entry");
+  await expect(page.getByTestId("phase")).toHaveText("Entry");
+  // The entry ends, and the flight continues in real time.
+  await expect.poll(() => state(page, (k) => k.live.snapshot?.phase), { timeout: 150_000, intervals: [500] }).not.toBe("entry");
+  await expect.poll(() => state(page, (k) => (k.getState().view as unknown as { speed: number }).speed)).toBe(1);
+  await expect(page.getByTestId("verdict")).toHaveText("Ship caught by the tower", { timeout: 300_000 });
+  expect(errors).toEqual([]);
+});
