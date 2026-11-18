@@ -697,7 +697,8 @@ fn wind_sweep() {
     const SPEEDS: [f64; 6] = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0];
     // Where the wind blows from: +x (from the sea side the vehicles come
     // in from), -x (from behind the tower), +y (across).
-    const FROM: [(&str, [f64; 2]); 3] = [("+x", [1.0, 0.0]), ("-x", [-1.0, 0.0]), ("+y", [0.0, 1.0])];
+    const FROM: [(&str, [f64; 2]); 3] =
+        [("+x", [1.0, 0.0]), ("-x", [-1.0, 0.0]), ("+y", [0.0, 1.0])];
     let cells: Vec<(Kind, &str, Noise)> = [Kind::Booster, Kind::Earth]
         .into_iter()
         .flat_map(|k| [(k, "low", Noise::LOW), (k, "high", Noise::HIGH)])
@@ -734,7 +735,10 @@ fn wind_sweep() {
                 })
             })
             .collect();
-        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect()
     });
     lines.sort_by(|a, b| a.0.cmp(&b.0));
     for l in &lines {
@@ -743,11 +747,17 @@ fn wind_sweep() {
     eprintln!("\nkind     wind  caught  mean gate error (m)");
     for kind in [Kind::Booster, Kind::Earth] {
         for speed in SPEEDS {
-            let cell: Vec<_> = lines.iter().filter(|l| l.1 == kind && l.2 == speed).collect();
+            let cell: Vec<_> = lines
+                .iter()
+                .filter(|l| l.1 == kind && l.2 == speed)
+                .collect();
             let caught = cell.iter().filter(|l| l.3).count();
             let errs: Vec<f64> = cell.iter().filter_map(|l| l.4).collect();
             let mean = errs.iter().sum::<f64>() / errs.len().max(1) as f64;
-            eprintln!("{kind:?}  {speed:4.0}   {caught:2}/{}   {mean:5.1}", cell.len());
+            eprintln!(
+                "{kind:?}  {speed:4.0}   {caught:2}/{}   {mean:5.1}",
+                cell.len()
+            );
         }
     }
 }
