@@ -1,19 +1,29 @@
 # Kestrel
 
-**Rocket landing you can break.** The real class of algorithm used for
-propulsive rocket landing, running live in a browser tab. Drag the booster
-anywhere and watch it compute a new fuel-optimal trajectory in real time.
-Then press Land and break it: gusts, engine failures, thrust lag, sensor noise,
-or grab the booster mid-flight. Guidance re-plans several times a second from
-noisy sensor readings, and when no pinpoint landing exists any more it says so
-and lands as close as it can.
+**A Starship-class flight simulator in a browser tab.** A Super Heavy-class
+booster falls back from the edge of space engines first, steers with three
+grid fins, lights thirteen engines, drops to three and is caught by the
+tower's arms. The ship belly-flops in, flips under guidance and is caught too;
+if its engine fails in the landing burn, a spare relights. The landing burns are planned live by the class of algorithm
+used for real propulsive landings (successive convexification, a sequence of
+convex optimizations), in Rust compiled to WebAssembly. Change anything,
+fail any engine, throw gusts at it, pause it mid-air and switch to the
+analysis view: the vehicle becomes a blueprint, every part can be clicked,
+and its calculations (the simulator's own formulas with this instant's
+numbers) open beside it. Step the paused flight a tenth of a second at a time,
+and after the flight replay any instant with every decision guidance made and
+why.
 
-![Kestrel demo: dragging the booster re-plans the landing live, then it flies the plan to touchdown](docs/img/m1-demo.gif)
+This is a **simulation**, built from public figures: published numbers are
+cited and marked, unpublished ones are marked *illustrative*. It is not
+flight software and not any company's data. See
+[LIMITATIONS.md](LIMITATIONS.md).
 
-<sub>Recorded with a frame-capture script, which slows the solver; the solve
-times shown in the GIF (1–2 s) are inflated by it. Measured in Chromium on a
-laptop GPU: **244 ms median** per full plan when plugged in, ~700 ms on battery
-(see [LIMITATIONS.md](LIMITATIONS.md)).</sub>
+![Kestrel: the opening sequence, the booster's landing burn, the blueprint analysis view, the catch, and the ship's entry from orbit](docs/img/m3-demo.gif)
+
+<sub>Recorded from the page (`web/scripts/record-demo.mjs`), frames taken
+at moments of the flights, so it runs faster than real time; the ascent
+and staging at the start are an illustration, the rest is simulated.</sub>
 
 Named after the kestrel, the small falcon that hovers motionless in a headwind
 before it drops onto a precise spot.
@@ -27,50 +37,60 @@ Needs Node 22+, Rust with the `wasm32-unknown-unknown` target and
 cd web && npm install && npm run dev      # → http://localhost:3000
 ```
 
-`npm run dev` compiles the Rust solver to WebAssembly first, then serves the
-page. Drag the ring to move the booster, drag the orange dot to set its
-velocity, press **Space** to land. During the flight use the **Break it**
-panel (left), or drag the ring on the booster; the **Guidance** panel (right)
-shows the constraint margins and how long each re-plan took.
+`npm run dev` compiles the Rust simulator and guidance to WebAssembly first,
+then serves the page. Press **Fly** (or Space): a countdown, liftoff and
+stage separation play (an illustration; the ascent is not simulated), then
+the simulated return begins. **Space** pauses, **A** opens the analysis
+view, **1–6** change camera, **,** and **.** change the speed. The left dock
+holds every setting (mission, vehicle, environment, view); click an engine
+on the engine map to fail it. After a booster catch you can fly the ship's
+return to the same tower.
 
 ## Status
 
-- **M0 done:** fuel-optimal 3-DoF landing guidance in Rust (lossless
-  convexification, Clarabel), checked against a published example.
-- **M1 done:** the browser page. The solver runs as WebAssembly in a Web
-  Worker, re-plans continuously while you drag (one solve at a time, always
-  for the newest position), and the landing plays back in a
-  procedural 3D Mars scene with live telemetry.
-- **M2 done:** closed loop. A simulator (Rust, separate from guidance) flies
-  the vehicle; guidance sees only noisy sensor readings and re-plans every
-  0.25 s of sim time (**30–43 ms median per re-plan** in Chromium, measured);
-  a tracking controller flies the latest plan between solves. Disturbances
-  from the "Break it" panel; a closest-landing fallback when the pad is out
-  of reach.
+- **M0–M2 done:** fuel-optimal 3-DoF landing guidance (lossless
+  convexification, Clarabel), in the browser, in a closed loop with a
+  separate simulator, noisy sensing and "break it" controls.
+- **M3 in progress:** 6-DoF vehicles and successive convexification.
+  Built: the ship (belly flop, flip, tower catch),
+  the booster (grid-fin descent, 13 → 3 engine landing burn, tower catch),
+  one page with full customization, cinematic cameras, the blueprint
+  analysis view with per-part calculations, commentary and sound, a
+  navigation filter, an engine-out envelope, and Kestrel's own convex
+  solver (no memory allocation while solving, a fixed iteration cap;
+  Clarabel stays the default) with a published benchmark, and a guided
+  entry from orbit (120 km, 7.5 km/s, a round Earth, tiles that can burn
+  through) that hands over to the landing. Not built: a simulated ascent,
+  hot staging and boostback (the opening sequence is an illustration).
 
 Measured numbers and every known approximation:
 [LIMITATIONS.md](LIMITATIONS.md). Plan: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## How it works (short version)
 
-1. **Guidance problem.** Find the thrust profile that lands at the target with
-   zero velocity using the least fuel, within thrust limits, a glide-slope cone
-   and a thrust-tilt limit.
-2. **Lossless convexification.** A change of variables turns the non-convex
-   problem into a convex second-order cone program (SOCP) with the same
-   optimum when the theory's conditions hold, so it solves fast and
-   reliably. Kestrel checks this on every solve and refuses plans where it
-   failed (see [LIMITATIONS.md](LIMITATIONS.md)).
-3. **Solver.** A pure-Rust conic solver (Clarabel), compiled to WebAssembly
-   and run in a Web Worker so the page never freezes.
-4. **Closed loop.** A simulator owns the true state; guidance only gets
-   sensor readings. Every 0.25 s of sim time it re-plans from the latest
-   reading (model predictive control), warm-started from the previous plan's
-   landing time (3 small solves instead of ~25). Between re-plans a tracking
-   controller flies the plan. If no pinpoint landing exists, guidance solves
-   a second problem: land at rest as close to the pad as possible.
-5. **Front end.** Next.js (static export) + React Three Fiber. The simulator
-   runs on the page's main thread (WebAssembly), guidance in a Web Worker.
+1. **Truth.** A 6-DoF rigid-body simulator (Rust) owns the vehicle's real
+   state: engines with ignition delay, throttle lag, gimbal limits and
+   failures; flaps or grid fins; cold-gas thrusters; an exponential
+   atmosphere, wind and gusts; the tower, its arms and the ground.
+2. **Sensing.** Guidance never reads the truth, only a noisy, slowly
+   drifting estimate of it.
+3. **Unpowered flight.** The booster leans a few degrees to fly on body
+   lift, the ship changes its pitch in the belly flop; both steer to the
+   point where the engines must light, found by integrating the fall.
+4. **Landing burn.** Successive convexification (Szmuk & Açıkmeşe 2018):
+   linearize the 6-DoF dynamics around the last trajectory, solve one
+   convex second-order cone program for a better one, repeat. Re-planned
+   in a Web Worker whenever the vehicle drifts off its plan; a tracking
+   controller flies the plan in between.
+5. **Final approach.** A slow, simple controller slides the vehicle over
+   the catch axis and lowers it onto the arms (or its legs).
+6. **Front end.** Next.js (static export) + React Three Fiber. Everything
+   on screen is procedural: no image, model or sound files except the
+   commentary clips, which are rendered from the phrase list by an open
+   text-to-speech model (see `web/scripts/make-voice.mjs`).
+
+The first milestones' 3-DoF guidance (lossless convexification) is still in
+the repository and tested; the page no longer uses it.
 
 Longer version: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

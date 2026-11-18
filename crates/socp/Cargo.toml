@@ -1,0 +1,16 @@
+[package]
+name = "kestrel-socp"
+version = "0.1.0"
+description = "A small interior-point solver for second-order cone programs: all memory allocated at setup, a fixed iteration cap"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "socp"
+
+[dependencies]
+
+[dev-dependencies]
+# Reference solver for the comparison tests only.
+clarabel = "0.11.1"

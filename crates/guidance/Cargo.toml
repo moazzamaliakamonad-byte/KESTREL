@@ -12,3 +12,6 @@ name = "guidance"
 [dependencies]
 # Default features kept on: 0.11.1 fails to compile with them off (references serde_json).
 clarabel = "0.11.1"
+model = { path = "../model", package = "kestrel-model" }
+socp = { path = "../socp", package = "kestrel-socp" }
+

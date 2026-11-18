@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Kestrel — rocket landing you can break",
-  description: "Real fuel-optimal rocket landing guidance, running live in your browser.",
+  title: "Kestrel — Starship-class flight simulator",
+  description: "A Starship-class ship and booster flown back to the tower by real convex-optimization guidance, live in your browser. A simulation.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -1,90 +1,89 @@
-// Record the README demo: drag the booster (the plan re-bends live), then
-// Land and fly to touchdown. Writes PNG frames; scripts/make-gif.py turns
+// Record the README demo of the one-page console: the opening sequence,
+// the booster's landing burn and catch, the blueprint analysis view, and
+// the ship's entry from orbit. Writes PNG frames; scripts/make-gif.py turns
 // them into a GIF.
 //
-//   npm run build && PW_GPU=1 node scripts/record-demo.mjs <framesDir>
+//   PW_GPU=1 node scripts/record-demo.mjs <framesDir> [url]
+//
+// `url` defaults to a running dev server (http://localhost:3000). Frames
+// are taken at moments in the flight, so the GIF runs faster than real
+// time (it says so).
 
-import { spawn } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "@playwright/test";
 
 const outDir = process.argv[2] ?? "demo-frames";
-const port = 4175;
+const url = process.argv[3] ?? "http://localhost:3000";
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
-const server = spawn("npx", ["--no-install", "serve", "out", "-l", String(port)], {
-  shell: process.platform === "win32",
-  stdio: "ignore",
-});
-
 let frame = 0;
-const shot = (page) =>
-  page.screenshot({ path: join(outDir, `f${String(frame++).padStart(4, "0")}.png`) });
+const shot = (page) => page.screenshot({ path: join(outDir, `f${String(frame++).padStart(4, "0")}.png`) });
+const k = (page, js) => page.evaluate(js);
+const until = (page, js, timeout = 300_000) => page.waitForFunction(js, null, { timeout, polling: 100 });
+/** `n` frames `ms` apart. */
+async function take(page, n, ms) {
+  for (let i = 0; i < n; i++) {
+    await shot(page);
+    await page.waitForTimeout(ms);
+  }
+}
 
+const browser = await chromium.launch({
+  args: process.env.PW_GPU
+    ? ["--use-angle=d3d11", "--enable-gpu", "--ignore-gpu-blocklist", "--autoplay-policy=no-user-gesture-required"]
+    : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+});
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 try {
-  for (let i = 0; i < 60; i++) {
-    try {
-      if ((await fetch(`http://localhost:${port}/`)).ok) break;
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  const browser = await chromium.launch({
-    args: process.env.PW_GPU
-      ? ["--use-angle=d3d11", "--enable-gpu", "--ignore-gpu-blocklist"]
-      : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
-  });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  await page.goto(`http://localhost:${port}/`);
-  await page.getByTestId("status").filter({ hasText: "Ready: press Land" }).waitFor({ timeout: 60_000 });
-  await page.waitForTimeout(800);
-  for (let i = 0; i < 6; i++) await shot(page);
+  await page.goto(url);
+  await until(page, "window.__kestrel !== undefined");
+  // Voice off (the GIF is silent; clips would only cost time).
+  await k(page, "window.__kestrel.getState().setView({ voice: false, sound: false })");
+  await until(page, "(document.querySelector('[data-testid=prediction]')?.textContent ?? '').includes(' after ')");
+  await take(page, 4, 400);
 
-  // Drag the booster in an arc; the plan re-solves as it moves.
-  const k = () => page.evaluate(() => window.__kestrel.getState().start.position);
-  const screenOf = (p) => page.evaluate((p) => window.__kestrel.screenOf(p), p);
-  const start = await screenOf(await k());
-  await page.mouse.move(start.x, start.y);
-  await page.mouse.down();
-  const path = [
-    [-80, -60],
-    [-180, -90],
-    [-300, -60],
-    [-380, 20],
-    [-300, 90],
-    [-160, 60],
-    [-60, 10],
-  ];
-  for (const [dx, dy] of path) {
-    await page.mouse.move(start.x + dx, start.y + dy, { steps: 6 });
-    for (let i = 0; i < 4; i++) {
-      await page.waitForTimeout(140);
-      await shot(page);
-    }
-  }
-  await page.mouse.up();
-  await page.getByTestId("status").filter({ hasText: "Ready: press Land" }).waitFor({ timeout: 30_000 });
-  for (let i = 0; i < 4; i++) await shot(page);
-
-  // Land at ×4 and follow the flight to touchdown.
-  await page.getByRole("button", { name: "×4" }).click();
+  // The opening sequence: countdown, liftoff, staging (an illustration).
   await page.keyboard.press("Space");
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    await page.waitForTimeout(110);
-    await shot(page);
-    if ((await page.getByTestId("status").textContent()) === "Touchdown") break;
-  }
-  for (let i = 0; i < 14; i++) {
-    await page.waitForTimeout(150);
-    await shot(page);
-  }
-  console.log(`recorded ${frame} frames in ${outDir}`);
-  await browser.close();
+  await page.waitForTimeout(7_000);
+  await take(page, 10, 700); // the last seconds of the count and liftoff
+  await take(page, 12, 1_400); // climb and staging
+  await until(page, "window.__kestrel.getState().mode === 'flying'", 120_000);
+
+  // The booster's return at ×2: the burn and the catch.
+  await k(page, "window.__kestrel.getState().setView({ speed: 2 })");
+  await until(page, "window.__kestrel.live.snapshot?.phase === 'landing-burn'", 200_000);
+  await take(page, 8, 600);
+
+  // Paused mid-burn: the analysis view, the vehicle as a blueprint, one part open.
+  await page.keyboard.press("Space");
+  await page.keyboard.press("a");
+  await page.waitForTimeout(1_800);
+  await take(page, 3, 400);
+  await page.getByRole("navigation", { name: "Parts" }).getByRole("button").nth(2).click();
+  await page.waitForTimeout(1_500);
+  await take(page, 5, 400);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Space");
+
+  // On to the catch.
+  await take(page, 10, 600);
+  await until(page, "window.__kestrel.getState().mode === 'done'", 200_000);
+  await take(page, 3, 500);
+
+  // The ship from orbit: the entry (sped up).
+  await page.keyboard.press("r");
+  await k(page, "window.__kestrel.getState().setVehicle('ship')");
+  await page.getByRole("button", { name: /From orbit/ }).click();
+  await until(page, "(document.querySelector('[data-testid=prediction]')?.textContent ?? '').includes('Entry:')", 120_000);
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(500);
+  await page.keyboard.press("Space");
+  await until(page, "(window.__kestrel.live.snapshot?.entry?.altitude ?? 1e9) < 80000", 200_000);
+  await take(page, 16, 900);
+  console.log(`${frame} frames in ${outDir}`);
 } finally {
-  server.kill();
-  if (process.platform === "win32") spawn("taskkill", ["/pid", String(server.pid), "/T", "/F"], { stdio: "ignore" });
+  await browser.close();
 }

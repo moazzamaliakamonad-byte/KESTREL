@@ -4,10 +4,14 @@
 //!
 //! Simulation only. Not flight software.
 
+pub mod entry;
+pub mod envelope;
 pub mod params;
 pub mod problem;
 pub mod replan;
 pub mod scaling;
+pub mod scvx;
+pub mod ship_control;
 mod socp;
 mod solve;
 pub mod track;

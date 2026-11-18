@@ -1,4 +1,4 @@
-import type { PageToWorker, WorkerToPage } from "./solverProtocol";
+import type { CallKind, PageToWorker, WorkerToPage } from "./solverProtocol";
 import type { PlanRequest, PlanResponse } from "./types";
 
 /** Hands out increasing ids and accepts only the newest one, once. */
@@ -33,6 +33,8 @@ export interface SolverClient {
   /** A closed-loop re-plan (`Flight.measure_request().request`). Every
    * answer is delivered; staleness is the caller's call (see `mpc.ts`). */
   replan(request: unknown): Promise<{ response: unknown; ms: number }>;
+  /** Any id-answered worker call (ship plans and previews). */
+  call(kind: CallKind, request: unknown): Promise<{ response: unknown; ms: number }>;
 }
 
 export function createSolverClient(
@@ -71,11 +73,14 @@ export function createSolverClient(
       return id;
     },
     replan(request) {
+      return this.call("replan", request);
+    },
+    call(kind, request) {
       const id = nextReplan++;
       const answer = new Promise<{ response: unknown; ms: number }>((resolve) =>
         replanWaiters.set(id, resolve),
       );
-      post({ id, kind: "replan", request });
+      post({ id, kind, request });
       return answer;
     },
   };

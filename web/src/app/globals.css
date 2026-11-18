@@ -39,3 +39,103 @@ body {
   text-transform: uppercase;
   font-size: 12px;
 }
+
+/* Labels the analysis view pins to the vehicle (rendered by the 3D scene). */
+.an-label {
+  white-space: nowrap;
+  padding: 3px 8px;
+  border: 1px solid rgba(150, 225, 255, 0.55);
+  border-radius: 4px;
+  background: rgba(2, 14, 34, 0.78);
+  color: #d9f6ff;
+  font: 500 11.5px/1.3 var(--font-geist-mono), ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  box-shadow: 0 0 14px rgba(60, 170, 255, 0.35);
+  animation: an-in 0.5s 0.5s both;
+}
+.an-label b {
+  color: #7ff0ff;
+  font-weight: 600;
+  margin-right: 4px;
+}
+.an-label[data-kind="thrust"] b {
+  color: #ffb35c;
+}
+.an-label[data-kind="aero"] b {
+  color: #ff7ad9;
+}
+.an-label[data-kind="weight"] b {
+  color: #ffffff;
+}
+@keyframes an-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* A marker on each part of the blueprint that can be opened (analysis view). */
+.an-part {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #cdefff;
+  font: 500 10.5px/1 var(--font-geist-mono), ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  /* The dot sits on the part; the name hangs to its right. */
+  transform: translateX(calc(50% - 7px));
+  animation: an-in 0.5s both;
+  transition: opacity 0.3s;
+}
+.an-part[data-left] {
+  flex-direction: row-reverse;
+  transform: translateX(calc(-50% + 7px));
+}
+.an-part i {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid #9fe9ff;
+  background: rgba(4, 30, 70, 0.7);
+  box-shadow: 0 0 0 0 rgba(159, 233, 255, 0.6);
+  animation: an-ping 2.4s infinite;
+}
+.an-part span {
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: rgba(2, 14, 34, 0.72);
+  border: 1px solid rgba(150, 225, 255, 0.3);
+}
+.an-part:hover span,
+.an-part[data-open] span {
+  color: #06121f;
+  background: #ffd27a;
+  border-color: #ffd27a;
+}
+.an-part:hover i,
+.an-part[data-open] i {
+  border-color: #ffd27a;
+  background: #ffd27a;
+}
+.an-part[data-dim] {
+  opacity: 0.4;
+}
+.an-part[data-dim]:hover {
+  opacity: 1;
+}
+@keyframes an-ping {
+  0% {
+    box-shadow: 0 0 0 0 rgba(159, 233, 255, 0.55);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 9px rgba(159, 233, 255, 0);
+  }
+}

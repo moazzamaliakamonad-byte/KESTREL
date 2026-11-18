@@ -5,6 +5,8 @@
 mod dto;
 pub mod flight;
 mod flight_js;
+pub mod ship_flight;
+pub mod ship_js;
 
 use dto::{RequestDto, TrajectoryDto, VehicleDto};
 use guidance::{GuidanceError, LandingProblem, Vehicle, solve};

@@ -171,8 +171,155 @@ Per re-plan (worker, `guidance::replan` via `flight::plan`): margined problem
 else the full search; else (or if outside the glide cone) the closest landing;
 retried at full thrust if that is what it takes.
 
+## The 6-DoF vehicles and the console (built, M3)
+
+Specs: `docs/superpowers/specs/2026-11-15-m3-ship-design.md` (ship) and
+`2026-11-15-m3-booster-and-console-design.md` (booster, page).
+The page no longer uses the 3-DoF pieces above (`Flight`, `replan`,
+`components/scene`, `components/hud` except the error fallback); they remain, tested, as the earlier milestones' code.
+
+```text
+crates/model      what truth and guidance must agree on (no dependencies)
+  vehicle.rs   Ship (one struct, two vehicles: VehicleKind::Ship / Booster), GridFins,
+               Planet (Earth), Catch, Scenario::{earth, booster}, Tuning (physics options)
+  aero.rs      body force: crossflow drag + linear lift slope; flap_force (ship);
+               fin_gain / fin_force / fin_allocate (booster's three grid fins)
+  dynamics.rs  x' = f(x, T): state [m, r, v, q, w] (14), thrust at the gimbal point
+  quat.rs      quaternion algebra
+  entry.rs     entry from orbit: round Earth, 1976 atmosphere (table), entry aerodynamics,
+               Sutton-Graves heating and tile temperature, 3-DoF dynamics in Earth-centred
+               coordinates steered by bank angle (D-042)
+crates/socp       Kestrel's own interior-point SOCP solver (D-041): Solver::new analyses the
+                  pattern (minimum-degree ordering, elimination tree) and allocates
+                  everything; update() + solve() allocate nothing; at most 40 iterations.
+  csc.rs       sparse matrices          ldl.rs   QDLDL-style LDLᵀ and the ordering
+  cones.rs     NT scaling, Jordan algebra, step to the cone boundary
+  solver.rs    Ruiz equilibration, Mehrotra predictor-corrector, KKT assembly/refinement
+  tests/       known answers, 40 random problems against Clarabel, a counting allocator
+crates/sim
+  entry.rs     EntrySim: the entry's truth (RK4, 0.1 s), bank rate limit, heat load,
+               burn-through, hand-over altitude
+  ship.rs      ShipSim: RK4 in 10 ms substeps; flaps or fins (slew, clamp); RCS; steady
+               wind + gusts; contact with mast, arms, ground; Outcome (caught/crashed)
+  raptors.rs   Cluster: N landing engines (ship 3; booster 13, centre three first),
+               ignition delay, shared gimbal with slew, lag, shutdown, fail(i)
+crates/guidance
+  scvx/        successive convexification: discretize.rs (first-order hold, sensitivities
+               by RK4, finite-difference Jacobians), subproblem.rs (the SOCP with
+               virtual control, trust region, soft comfort constraints, answered by
+               Clarabel or by kestrel-socp, set_backend(); kept set-up solvers per
+               thread), mod.rs (iteration, cold/warm references, acceptance by
+               re-integration)
+  ship_control.rs  belly_flop (ship) / descent (booster) -> unpowered(); flip; steady_burn;
+               powered (plan tracking); terminal; ignition_altitude; fall_time
+  entry.rs     entry guidance: predictor-corrector on the bank angle (bisection), bank
+               reversals on a heading deadband, heating override; entry_start geometry
+  envelope.rs  engine-out envelope: the largest sink speed from which a relit spare can
+               still stop the ship above the arms (point-mass bound, D-039)
+crates/wasm
+  ship_flight.rs  ShipFlight: phases ([entry from orbit ->] unpowered -> flip/start-up -> burn
+               legs -> terminal); the entry hands over at 25 km by rebuilding the flight from
+               its state in the tower's frame;
+               the ship plans from engine start (flip on every engine, planned switch
+               to one), relights a spare after a failure, request_replan() on events,
+               emergency full-thrust option and a lower emergency gate after an engine
+               loss; engine_out_margin() for the page; navigate(): the navigation
+               filter (complementary: accelerometers + readings, D-040) that every
+               controller and plan request reads;
+
+               legs (full engine set to a mid gate, final engines to the approach gate),
+               when to re-plan, prediction of the booster's first plan, options
+  ship_js.rs   JS class ShipFlight; plan_ship / preview_ship (worker); ship_scenario
+               (incl. the model's coefficients and the catch limits, for the page's formulas);
+               warmup_ship; snapshot (state, forces, heating estimate, engines)
+  tests/ship_loop.rs  the page's loop natively: nominal, engine out, gusts, slow solver,
+               and an ignored sweep over browser timing conditions
+web/src/lib/ship
+  parts.ts     the parts a visitor can open in the analysis view and, for each, the
+               model's formulas with the snapshot's numbers (pure, tested)
+  launch.ts    the opening sequence's one clock: count, mission time, cues to speak
+  store.ts     zustand: vehicle -> flight kind, start, options, view (incl. open part), mode
+               (editing -> launch -> flying -> done), presets, configOf() for Rust
+  record.ts    the flight record: decisions (with reasons and numbers) from the state
+               stream and from guidance's answers, and the state every 0.1 s
+  shown.ts     the state the page shows: live, or the replayed instant (view.scrubT)
+  runtime.ts   owns the ShipFlight; steps it per frame (not while paused or held);
+               records decisions; events (gust, failure, setting) re-plan at once;
+               stepShip() advances a paused flight for the analysis view;
+               schedules plans; publishes to live.ts; reports solve times to the flight
+  live.ts      per-frame snapshot, trail, plan, history samples, caption, hold flag
+  commentary.ts callouts(prev, next) -> lines; Commentator plays clips (fallback: speech)
+  phrases.ts   the finite list of lines and their clip ids
+  audio.ts     mix(hearing) -> gains, cutoff, delay; FlightAudio (Web Audio graph)
+  launch.ts    timing of the opening sequence (illustration)
+  engines.ts, frames.ts, types.ts
+web/src/components/stage    R3F scene
+  Stage, World (sky by camera altitude, clouds, painted coast, tower, haze), Site (launch
+  site), Vehicles (ship and booster models, plumes, heat shell), Vehicle (flown vehicle,
+  full stack and its launch/staging animation, parked booster), Fx (smoke, paths),
+  Cameras (director, chase, tracking, onboard, tower, free, launch), Analysis (vectors,
+  cone, plan nodes, labels), Post (bloom, tone mapping, blueprint transition), Sound
+web/src/components/console  DOM overlay
+  Console (top bar, timeline, action bar, caption, verdict, keys), Dock (Mission, Vehicle,
+  Environment, View), Telemetry (rail, attitude ball, engine map, graphs), AnalysisPanel,
+  Launch (opening overlay, phase banner, analysis intro), useEngine (workers, preview)
+web/src/components/stage/Entry.tsx  a flight from orbit in the landing's own world (D-043): the round
+                            Earth placed under the tower frame (procedural globe, a regional
+                            ground continuing the painted coast, atmosphere rim) and the plasma
+                            wake; the ship, trail and cameras are the landing's own, fed the
+                            entry's state in the tower frame
+web/scripts/make-voice.mjs  renders phrases.ts to public/voice/*.mp3 (dev tool)
+web/e2e/console.spec.ts     opt-in Playwright tests of the page (catch, engine out, analysis, reset);
+                            E2E_BASE_URL=http://localhost:3000 runs them against a dev server
+```
+
+Per frame while flying (`Stage` -> `runtime.shipFrame`): step the flight
+(`min(dt, 0.1 s) x speed`; each 10 ms substep reads the sensors, runs the
+phase's controller, steps the truth); if the flight wants a plan and none is
+being solved, `measure_request()` -> flight worker `plan_ship` ->
+`apply_replan(answer, t)`; snapshot -> `live`, callouts, history, store
+patches when something discrete changed.
+
+Two workers: one answers the flight's plan requests, the other flies whole
+flights ahead of time for the prediction shown while editing, so a slow
+prediction never delays a plan. Each solves one throw-away plan when it
+starts (`warmup_ship`): the first solve in a fresh instance is several times
+slower than the rest.
+
+Modes: `editing` (stack on the mount, prediction) -> `launch` (opening
+sequence; the flight starts 1.6 s into the title card and is held until the
+card clears) -> `flying` -> `done` (after a booster catch: continue with the
+ship, the booster parked beside the pad, or end).
+
 ## Open questions
 
 - Firefox solve time (Chromium measured: ~244 ms with a GPU).
+- M3: Kestrel's own solver needs more interior-point iterations than
+  Clarabel (benchmark in LIMITATIONS.md); a better starting point or
+  centring might close the gap.
 - Lossless convexification is not guaranteed when the ground constraint is
   active (closest landings near the ground); such landing times are skipped.
+
+### Analysis view (blueprint)
+
+`components/stage/Blueprint.tsx` holds one switch, `skin.on`. `Post.tsx`
+sweeps a blue shockwave over the film picture and sets the switch when it
+has covered the screen; from then on `World` hides the scenery, `Backdrop`
+draws the blue, `BlueprintSkin` swaps every opaque mesh of the vehicle for
+a translucent shell with station rings, stringers and edge lines, and the
+effects (plumes, heating, smoke) hide. `Part` wraps the named regions of
+the models (`Vehicles.tsx`) so a click opens them (`view.part`);
+`Analysis.tsx` draws the force vectors and a marker per part; `Cameras.tsx`
+flies the free camera to the open part; `console/AnalysisPanel.tsx` shows
+`partSheet()` for it.
+
+### Guidance on the page, end to end
+
+`ShipFlight.wants_replan()` (drift, age, or an event) → `measure_request()`
+(the problem as JSON: options, engine switch, tilt cap, funnel, side-speed
+limit) → the worker's `plan_ship` (SCvx: ship 16 nodes, 1e-6 tolerance, up
+to 15 iterations, abandoned after 7 if still infeasible; booster 24 nodes,
+up to 8) → `apply_replan()`. Each answer is also written to the flight
+record with the reason it was asked for. `Stage.GiveWay` lowers the
+picture's cost when recent solves are slow (D-037).
+

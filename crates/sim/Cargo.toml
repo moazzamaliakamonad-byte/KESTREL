@@ -10,3 +10,4 @@ authors.workspace = true
 name = "sim"
 
 [dependencies]
+model = { path = "../model", package = "kestrel-model" }

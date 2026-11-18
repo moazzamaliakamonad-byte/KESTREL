@@ -19,7 +19,8 @@ export function clampDt(dt: number, speed: number): number {
 }
 
 export interface Mpc {
-  shouldRequest(simT: number, flightWants: boolean): boolean;
+  /** `urgent`: something happened; skip the minimum gap since the last request. */
+  shouldRequest(simT: number, flightWants: boolean, urgent?: boolean): boolean;
   /** Record a request sent at sim time `simT`; returns its epoch. */
   sent(simT: number): number;
   /** An answer arrived; false if it belongs to an old flight (ignore it). */
@@ -29,15 +30,15 @@ export interface Mpc {
   readonly solveMs: readonly number[];
 }
 
-export function createMpc(): Mpc {
+export function createMpc(period: number = REPLAN_PERIOD): Mpc {
   let epoch = 0;
   let inFlight = false;
   let lastSent = Number.NEGATIVE_INFINITY;
   let replans = 0;
   const solveMs: number[] = [];
   return {
-    shouldRequest(simT, flightWants) {
-      return flightWants && !inFlight && simT - lastSent >= REPLAN_PERIOD;
+    shouldRequest(simT, flightWants, urgent = false) {
+      return flightWants && !inFlight && (urgent || simT - lastSent >= period);
     },
     sent(simT) {
       inFlight = true;

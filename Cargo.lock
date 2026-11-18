@@ -200,17 +200,34 @@ name = "kestrel-guidance"
 version = "0.1.0"
 dependencies = [
  "clarabel",
+ "kestrel-model",
+ "kestrel-socp",
 ]
+
+[[package]]
+name = "kestrel-model"
+version = "0.1.0"
 
 [[package]]
 name = "kestrel-sim"
 version = "0.1.0"
+dependencies = [
+ "kestrel-model",
+]
+
+[[package]]
+name = "kestrel-socp"
+version = "0.1.0"
+dependencies = [
+ "clarabel",
+]
 
 [[package]]
 name = "kestrel-wasm"
 version = "0.1.0"
 dependencies = [
  "kestrel-guidance",
+ "kestrel-model",
  "kestrel-sim",
  "serde",
  "serde_json",

@@ -7,7 +7,12 @@ import type { PlanRequest, PlanResponse } from "./types";
 export type PageToWorker =
   | { id: number; request: PlanRequest }
   | { id: 0; kind: "example" }
-  | { id: number; kind: "replan"; request: unknown };
+  | { id: number; kind: "replan"; request: unknown }
+  | { id: number; kind: "plan_ship"; request: unknown }
+  | { id: number; kind: "preview_ship"; request: unknown };
+
+/** Worker calls answered by id, in their own sequence (see `solverClient`). */
+export type CallKind = "replan" | "plan_ship" | "preview_ship";
 
 /** Messages from the solver worker to the page. Id 0 = example, −1 = fatal. */
 export type WorkerToPage =
