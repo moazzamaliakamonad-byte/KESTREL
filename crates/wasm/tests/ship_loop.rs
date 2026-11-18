@@ -677,7 +677,7 @@ fn wind_run(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64) -> WindRun {
 }
 
 fn wind_run_with(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64, aware: bool) -> WindRun {
-    wind_run_cfg(kind, wind, noise, seed, aware, true)
+    wind_run_cfg(kind, wind, noise, seed, aware, false, true)
 }
 
 fn wind_run_cfg(
@@ -687,6 +687,7 @@ fn wind_run_cfg(
     seed: u64,
     aware: bool,
     planned_approach: bool,
+    glide_terminal: bool,
 ) -> WindRun {
     let mut f = ShipFlight::new(ShipFlightConfig {
         seed,
@@ -695,6 +696,7 @@ fn wind_run_cfg(
         wind,
         wind_aware: aware,
         planned_approach,
+        glide_terminal,
         ..ShipFlightConfig::new(kind)
     })
     .unwrap();
@@ -801,8 +803,9 @@ fn wind_sweep() {
     }
 }
 
-/// With wind awareness and the planned approach off, guidance flies exactly
-/// the flight it flew before M4 (numbers read from that code, 2026-11-18).
+/// With wind awareness, the planned approach and the glide off, guidance
+/// flies exactly the flight it flew before M4 (numbers read from that code,
+/// 2026-11-18).
 #[test]
 fn unaware_flight_matches_today() {
     for (kind, wind, t, left) in [
@@ -819,7 +822,7 @@ fn unaware_flight_matches_today() {
             25.712377419400028,
         ),
     ] {
-        let r = wind_run_cfg(kind, wind, Noise::LOW, 7, false, false);
+        let r = wind_run_cfg(kind, wind, Noise::LOW, 7, false, false, false);
         assert_eq!(r.outcome, Some(Outcome::Caught), "{kind:?}");
         assert_eq!(r.t, t, "{kind:?}");
         assert!((r.left - left).abs() < 1e-9, "{kind:?}: {} t left", r.left);
@@ -1055,10 +1058,11 @@ fn nav_error_by_noise() {
     }
 }
 
-/// The planned final approach (M4.2) against the scripted terminal
-/// controller, same build, wind awareness on: the boards of
-/// `wind_aware_board` plus, per flight, the time from the gate to the catch
-/// and the speeds at contact. `--ignored --nocapture`.
+/// The terminal controller's glide (M4.2) against its stop-and-wait, same
+/// build, wind awareness on: the boards of `wind_aware_board` plus, per
+/// flight, the time from the gate to the catch and the speeds at contact.
+/// (It measured the planned approach the same way: see D-047.)
+/// `--ignored --nocapture`.
 #[test]
 #[ignore]
 fn approach_board() {
@@ -1082,7 +1086,7 @@ fn approach_board() {
             seed,
             lag: 0.3,
             noise,
-            planned_approach: planned,
+            glide_terminal: planned,
             ..ShipFlightConfig::new(kind)
         })
         .unwrap();
@@ -1181,7 +1185,7 @@ fn approach_board() {
             eprintln!("LOST planned {planned}: {group}: {}", o.line);
         }
     }
-    eprintln!("\nboard                     scripted                         planned");
+    eprintln!("\nboard                     stop-and-wait                    glide");
     for group in [
         "ship nominal 7-10",
         "ship seeds 11-30",

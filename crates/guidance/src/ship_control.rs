@@ -93,6 +93,20 @@ pub const APPROACH_GAIN: f64 = 0.5;
 pub const SETTLE_GAIN: f64 = 0.3;
 /// Terminal sink rate, m/s.
 pub const SINK: f64 = 1.3;
+/// The glide's funnel: the height above the rest position it may come down
+/// to while still off the axis is GLIDE_SLOPE · (offset − GLIDE_FREE), m
+/// (at most FINAL_HEIGHT).
+pub const GLIDE_SLOPE: f64 = 1.5;
+pub const GLIDE_FREE: f64 = 1.0;
+/// Gliding, the final settle slides toward the axis at most this fast,
+/// m/s (it can begin while still moving in; one high-noise flight touched
+/// down at 1.1 m/s sideways. Settling only within 1.5 m of the axis was
+/// tried: a booster in a 20 m/s crosswind could not hold that and hovered
+/// until its tanks ran dry).
+pub const GLIDE_SETTLE_SLIDE: f64 = 0.4;
+/// Gliding, the contact sink rate, m/s: it arrives at the settle already
+/// coming down, and at high noise touched down at 2.02 m/s with SINK.
+pub const GLIDE_SINK: f64 = 1.0;
 
 /// Largest lean of the booster's axis from the airflow in the descent,
 /// rad (8°): the single yaw fin can still hold it there.
@@ -501,6 +515,22 @@ pub fn steady_burn(
 
 /// Upright; over the catch axis / pad (x = y = 0), then sinking at [`SINK`].
 pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64), air: &Air) -> Actuation {
+    terminal_shaped(scn, x, limits, air, false)
+}
+
+/// As [`terminal`]; with `glide`, it does not stop at [`FINAL_HEIGHT`] to
+/// wait until centred: the height it may come down to falls with its
+/// distance from the axis ([`GLIDE_SLOPE`] metres per metre beyond
+/// [`GLIDE_FREE`]), so it slides in and comes down in one movement, over
+/// the axis by the time it is low (M4.2: the owner found the stop-and-wait
+/// robotic).
+pub fn terminal_shaped(
+    scn: &Scenario,
+    x: &State,
+    limits: (f64, f64),
+    air: &Air,
+    glide: bool,
+) -> Actuation {
     let m = x[M];
     let g = scn.planet.gravity();
     let r = dynamics::position(x);
@@ -512,6 +542,7 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64), air: &Air) -> Act
     let off = r[0].hypot(r[1]);
     let h = r[2] - scn.rest_cm_z();
     let side = v[0].hypot(v[1]);
+    let settling = off < scn.centring && side <= scn.settle_side_speed;
     let sink = if h > HIGH && scn.ship.kind == VehicleKind::Booster {
         // The booster far above the rest position (guidance had no plan
         // and braked high up; the ship's flights were tuned without this
@@ -521,10 +552,28 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64), air: &Air) -> Act
         (2.0 * 0.33 * spare * (h - HIGH))
             .sqrt()
             .clamp(FAST_SINK, HIGH_SINK)
-    } else if off < scn.centring && side <= scn.settle_side_speed {
+    } else if settling {
         // Centred and steady: straight down onto the arms, slowing to
         // SINK at contact (the catch allows 2 m/s).
-        (SETTLE_GAIN * h + SINK).clamp(SINK, FAST_SINK)
+        let sink = if glide { GLIDE_SINK } else { SINK };
+        (SETTLE_GAIN * h + sink).clamp(sink, FAST_SINK)
+    } else if glide {
+        // Still sliding in: down a funnel over the axis, never waiting.
+        // Never faster than the final settle allows at this height (gliding
+        // low and quick touched down too fast at high noise: seen).
+        let floor = FINAL_HEIGHT.min(GLIDE_SLOPE * (off - GLIDE_FREE).max(0.0));
+        // (Below the rest height h < 0 and this could go negative: clamp
+        // would panic; a glide that low only holds.)
+        let settle = (SETTLE_GAIN * h + SINK).clamp(0.0, FAST_SINK);
+        // Held a few metres off the axis but steady (a strong crosswind):
+        // creep down as the stop-and-wait does, or it hovers over its floor
+        // until the tanks run dry (25 m/s crosswinds: seen).
+        let creep = if off < 2.0 * scn.centring && side <= scn.settle_side_speed {
+            0.3 * SINK
+        } else {
+            0.0
+        };
+        (APPROACH_GAIN * (h - floor)).clamp(creep, settle.max(creep))
     } else {
         // Still sliding in: come down to FINAL_HEIGHT meanwhile and wait
         // there (hovering high until centred took half a minute). Nearly
@@ -556,9 +605,17 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64), air: &Air) -> Act
     if off < 0.5 * scn.centring {
         want = [0.0, 0.0];
     }
+    // Gliding, the final settle slides in no faster than GLIDE_SETTLE_SLIDE:
+    // it starts while still moving in, and kept sliding at up to 1 m/s into
+    // contact at high noise (seen).
+    let cap = if glide && settling {
+        GLIDE_SETTLE_SLIDE
+    } else {
+        SLIDE
+    };
     let n = want[0].hypot(want[1]);
-    if n > SLIDE {
-        want = [want[0] * SLIDE / n, want[1] * SLIDE / n];
+    if n > cap {
+        want = [want[0] * cap / n, want[1] * cap / n];
     }
     let a = [
         kd * (want[0] - v[0]),
@@ -1137,6 +1194,23 @@ mod tests {
         assert!(-v[2] < 2.0 && v[0].hypot(v[1]) < 1.0, "too fast: {v:?}");
         assert!(tilt < 5.0, "tilt {tilt}");
         assert_eq!(planner.setups(), 1);
+    }
+
+    /// Gliding while well below the rest height (blown off and down past
+    /// the arms in a strong wind) must still command something finite: the
+    /// sink cap went negative there and `clamp` panicked (wind sweep).
+    #[test]
+    fn glide_below_the_rest_height_does_not_panic() {
+        let scn = Scenario::booster();
+        let x = dynamics::state(
+            scn.dry_mass + 20e3,
+            [8.0, 3.0, scn.rest_cm_z() - 6.0],
+            [0.5, -0.5, -1.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 3],
+        );
+        let a = terminal_shaped(&scn, &x, scn.ship.thrust_limits(3), &Air::STILL, true);
+        assert!(a.thrust_body.iter().all(|c| c.is_finite()), "{a:?}");
     }
 
     #[test]

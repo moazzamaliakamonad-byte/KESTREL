@@ -217,6 +217,10 @@ pub struct ShipFlightConfig {
     /// experimental: off by default; on the boards it caught fewer flights
     /// than the terminal controller).
     pub planned_approach: bool,
+    /// The terminal controller glides down a funnel onto the arms instead of
+    /// stopping 5 m above them until centred (M4.2, D-047; on: same catches
+    /// on every board, 1-2.5 s quicker, a quarter softer at contact).
+    pub glide_terminal: bool,
 }
 
 /// An entry from orbit (*illustrative* numbers, chosen so guidance has
@@ -301,6 +305,7 @@ impl ShipFlightConfig {
             attitude: None,
             wind_aware: true,
             planned_approach: false,
+            glide_terminal: true,
         }
     }
 
@@ -968,7 +973,13 @@ impl ShipFlight {
                 {
                     a
                 } else {
-                    ship_control::terminal(&scn, &est, limits, &air)
+                    ship_control::terminal_shaped(
+                        &scn,
+                        &est,
+                        limits,
+                        &air,
+                        self.config.glide_terminal,
+                    )
                 }
             }
             Phase::Entry | Phase::Done => self.last,
