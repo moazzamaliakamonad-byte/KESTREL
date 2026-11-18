@@ -449,8 +449,10 @@ impl ApproachPlanner {
         }
         let solver = self.solver.as_mut().expect("set up");
         match solver.solve() {
-            Status::Solved => {}
-            Status::MaxIterations | Status::Diverged => return Err(GuidanceError::Infeasible),
+            Status::Solved | Status::AlmostSolved => {}
+            Status::MaxIterations | Status::Diverged | Status::PrimalInfeasible => {
+                return Err(GuidanceError::Infeasible);
+            }
             other => return Err(GuidanceError::SolverFailed(format!("{other:?}"))),
         }
         let x = solver.x();

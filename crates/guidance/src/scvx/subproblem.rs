@@ -213,8 +213,12 @@ fn solve_kestrel(
             );
         }
         match st {
-            socp::Status::Solved => Ok(s.x().to_vec()),
-            socp::Status::Diverged => Err(GuidanceError::Infeasible),
+            // As with Clarabel's AlmostSolved: the best iterate within the
+            // reduced tolerances (precision ran out near the optimum).
+            socp::Status::Solved | socp::Status::AlmostSolved => Ok(s.x().to_vec()),
+            socp::Status::Diverged | socp::Status::PrimalInfeasible => {
+                Err(GuidanceError::Infeasible)
+            }
             other => Err(GuidanceError::SolverFailed(format!("{other:?}"))),
         }
     })
