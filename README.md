@@ -49,7 +49,7 @@ return to the same tower.
 ## Status
 
 - **M0–M2 done:** fuel-optimal 3-DoF landing guidance (lossless
-  convexification, Clarabel), in the browser, in a closed loop with a
+  convexification), in the browser, in a closed loop with a
   separate simulator, noisy sensing and "break it" controls.
 - **M3 done:** 6-DoF vehicles and successive convexification.
   Built: the ship (belly flop, flip, tower catch),
@@ -57,15 +57,16 @@ return to the same tower.
   one page with full customization, cinematic cameras, the blueprint
   analysis view with per-part calculations, commentary and sound, a
   navigation filter, an engine-out envelope, and Kestrel's own convex
-  solver (no memory allocation while solving, a fixed iteration cap;
-  Clarabel stays the default) with a published benchmark, and a guided
+  solver (no memory allocation while solving, a fixed iteration cap)
+  with a published benchmark, and a guided
   entry from orbit (120 km, 7.5 km/s, a round Earth, tiles that can burn
   through) that hands over to the landing.
-- **M4 in progress, smarter guidance:** guidance now estimates the wind
-  in flight and plans and steers with it (in the wind sweep 144 of 216
-  flights caught, 110 before). Next: a planned final approach, a chosen
-  approach direction, and Kestrel's own solver as the only one that
-  flies.
+- **M4 in progress, smarter guidance:** guidance estimates the wind in
+  flight and plans and steers with it; the ship glides onto the arms in
+  one movement and, in a crosswind, turns its whole approach toward
+  where the wind carries it; and every plan is solved by Kestrel's own
+  solver (Clarabel only in tests). In the wind sweep 150 of 216 flights
+  are caught (110 before M4). Open: a booster engine-out mid-burn.
 - **Scope:** the landing guidance. The launch, ascent, hot staging and
   boostback are not simulated and not planned; the opening sequence is an
   illustration.

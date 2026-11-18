@@ -100,8 +100,8 @@ simulation can be, on one page with a mission-control interface.
       entry from 120 km and 7.5 km/s on a round Earth, tiles that can
       burn through, hand-over to the landing (D-042)
 - [x] Custom solver: no heap allocation in the loop, bounded iterations
-      (`crates/socp`; a choice on the page; Clarabel stays the default,
-      D-041)
+      (`crates/socp`; a choice on the page; Clarabel stayed the default,
+      D-041; since M4.4 the only solver that flies, D-049)
 - [x] Published benchmark of solve times, both solvers, native and in
       the browser (LIMITATIONS.md, method stated)
 - [x] Update the end-to-end tests and the demo recording for the new page
@@ -135,9 +135,11 @@ Four sub-projects, each with its own spec, plan and measurement.
       approach (gate, aim, belly heading, keep-out) toward where a
       crosswind carries it, within 60° of the arms' open side; 15 m/s
       crosswinds caught 11 of 18 (5 before); still air unchanged
-- [ ] **4.4 Kestrel's own solver flies**: `crates/socp` faster (warm
-      starts, centring) and the default; the 3-DoF guidance ported to it;
-      Clarabel kept only as a test-time reference
+- [x] **4.4 Kestrel's own solver flies** (D-049): the only solver in the
+      page (Clarabel only in tests and the benchmark); infeasibility
+      certificate and best-iterate fallback; the 3-DoF guidance ported;
+      boards measured the same (glide board flight for flight, sweep 150
+      against Clarabel's 152)
 - [ ] Booster engine-out mid-burn: two outer engines lost at 30 s hit the
       tower (found 2026-11-18 on the page; one is caught); measure, then
       fix in 4.2 or 4.3
@@ -190,3 +192,5 @@ Not a milestone: getting the finished project public (D-045).
   approach measured worse and kept as an option.
 - 2026-11-19 — 4.3 done: the ship chooses its approach bearing (D-048);
   wind sweep 152 of 216.
+- 2026-11-19 — 4.4 done: Kestrel's own solver is the only one that flies
+  (D-049).

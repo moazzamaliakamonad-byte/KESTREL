@@ -863,3 +863,44 @@ Template:
   before). Still air is unchanged (the bearing stays +x). The ship at 20
   m/s (4 of 18) and 25 m/s (0) is still mostly lost: at ±60° the bearing
   is clamped and the drift is more than it absorbs.
+
+## D-049 — Kestrel's own solver is the only one that flies (M4.4)
+- Date: 2026-11-19
+- Status: accepted
+- Context: the owner: the own solver "was the whole point of this
+  project", and "why we even have another solver in there?". Since D-041
+  Clarabel flew by default and the 3-DoF guidance called it directly.
+  Flying the boards on Kestrel's solver as it was found two gaps:
+  infeasible 3-DoF problems ran to the iteration cap instead of being
+  reported infeasible, and booster plans at 1e-8 lost precision near the
+  optimum (an iterate at 2e-8 relative gap, then a 5e-6 step, the
+  residual from 1e-10 to 1e-5, then NaN), so one booster flight got no
+  plan at all and ran dry.
+- Decision: `crates/socp` gains (1) a primal infeasibility certificate
+  (Farkas: `‖Aᵀy + Gᵀz‖ ≤ 1e-6 (−bᵀy − hᵀz)`, sound unless every
+  feasible point has a scaled norm of 1e6 or more; measured: feasible
+  landing problems kept the ratio above 1, infeasible ones stalled at
+  1e-7..1e-8) and (2) `AlmostSolved`, the best iterate within Clarabel's
+  default reduced tolerances when the iteration stops short. The 3-DoF
+  guidance is built in the solver's own types and solved by it; its
+  propellant limit is decided from the landing-time search (the only
+  constraint the search leaves out is final mass ≥ dry mass), since a
+  marginally short propellant load left no certificate strong enough.
+  Clarabel becomes optional (`reference-solver` feature), enabled only by
+  kestrel-wasm's dev-dependencies: the benchmark, `SOCP_COMPARE`, and the
+  test that the switches-off flight equals the pre-M4 code (flown on
+  Clarabel). The solver choice is per thread. The page's solver switch
+  is removed.
+- Also found on the way: the glide could settle into the arms while
+  sliding back across the axis (a prediction, 1.02 m/s sideways); below
+  its funnel floor and still sliding it now climbs back (GLIDE_RISE).
+- Consequences: the page's WebAssembly is 0.80 MB (1.13 MB with
+  Clarabel). Glide board unchanged flight for flight (12/12, 38/40,
+  40/40, 20/20); wind sweep 150 of 216 (152 on Clarabel the same day;
+  4 flights caught only on Clarabel, 2 only on Kestrel: not significant).
+  Native plan times: booster median 53.6 ms (Clarabel 49.5), ship 31.5 ms
+  (35.6). On the page both vehicles were caught. Open: some booster
+  subproblems stall with the primal residual at 1e-4..1e-6 at the
+  40-iteration cap, where Clarabel reports infeasible; telling marginal
+  infeasibility from near-optimality reliably needs a homogeneous
+  embedding (Clarabel's method), not looser tolerances.

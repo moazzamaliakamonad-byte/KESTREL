@@ -14,7 +14,7 @@ browser page with the closed loop. M3 (6-DoF) is _(planned)_.
  │        │ margins, solve time                  Sensor model          │
  │        │                                            │ noisy state   │
  │        └───────────── Guidance (Rust → WASM) ◀──────┘               │
- │                       formulate SOCP → Clarabel → plan              │
+ │                  formulate SOCP → Kestrel's solver → plan           │
  │                              │                                      │
  │                              ▼                                      │
  │                     Tracking controller ──▶ thrust command ──▶ Sim  │
@@ -70,8 +70,8 @@ Internals, one responsibility per file:
 | `params.rs` | vehicle constants and validation |
 | `scaling.rs` | reference units so the solver sees numbers near 1 (gravity = 1) |
 | `problem.rs` | problem/trajectory types, input validation, CSV |
-| `socp.rs` | variable layout and the convexified problem as Clarabel's `A, b, cones` |
-| `solve.rs` | Clarabel call, status mapping, back to SI, landing-time search |
+| `socp.rs` | variable layout and the convexified problem as the solver's `A, b, cones` (`crates/socp` types) |
+| `solve.rs` | solver call (`crates/socp`), status mapping, back to SI, landing-time search |
 
 Data flow for one fixed-time solve:
 
@@ -80,7 +80,9 @@ Data flow for one fixed-time solve:
 3. Build the SOCP: variables `r, v, z = ln(m/m_wet)` per node and `u, σ` per
    interval; exact constant-acceleration dynamics per interval; lossless
    convexification with Taylor-approximated thrust bounds.
-4. Solve with Clarabel; map status to `Ok` / `Infeasible` / `SolverFailed`.
+4. Solve with Kestrel's own solver (`crates/socp`); map status to `Ok` /
+   `Infeasible` / `SolverFailed`. The propellant limit is decided from the
+   landing-time search, not by the solver (D-049).
 5. Check the relaxation is tight on every interval, else `NotLossless`.
 6. Convert back to SI.
 
@@ -190,13 +192,17 @@ crates/model      what truth and guidance must agree on (no dependencies)
   entry.rs     entry from orbit: round Earth, 1976 atmosphere (table), entry aerodynamics,
                Sutton-Graves heating and tile temperature, 3-DoF dynamics in Earth-centred
                coordinates steered by bank angle (D-042)
-crates/socp       Kestrel's own interior-point SOCP solver (D-041): Solver::new analyses the
+crates/socp       Kestrel's own interior-point SOCP solver (D-041), the only one that flies
+                  (D-049): Solver::new analyses the
                   pattern (minimum-degree ordering, elimination tree) and allocates
                   everything; update() + solve() allocate nothing; at most 40 iterations.
   csc.rs       sparse matrices          ldl.rs   QDLDL-style LDLᵀ and the ordering
   cones.rs     NT scaling, Jordan algebra, step to the cone boundary
-  solver.rs    Ruiz equilibration, Mehrotra predictor-corrector, KKT assembly/refinement
-  tests/       known answers, 40 random problems against Clarabel, a counting allocator
+  solver.rs    Ruiz equilibration, Mehrotra predictor-corrector, KKT assembly/refinement,
+               a Farkas certificate (PrimalInfeasible), the best iterate when cut
+               short (AlmostSolved, D-049)
+  tests/       known answers, infeasible problems, 40 random problems against Clarabel,
+               a counting allocator
 crates/sim
   entry.rs     EntrySim: the entry's truth (RK4, 0.1 s), bank rate limit, heat load,
                burn-through, hand-over altitude
@@ -208,8 +214,9 @@ crates/guidance
   scvx/        successive convexification: discretize.rs (first-order hold, sensitivities
                by RK4, finite-difference Jacobians), subproblem.rs (the SOCP with
                virtual control, trust region, soft comfort constraints, answered by
-               Clarabel or by kestrel-socp, set_backend(); kept set-up solvers per
-               thread), mod.rs (iteration, cold/warm references, acceptance by
+               kestrel-socp; Clarabel only with the reference-solver feature, in
+               tests and the benchmark, set_backend() per thread; kept set-up
+               solvers per thread), mod.rs (iteration, cold/warm references, acceptance by
                re-integration)
   ship_control.rs  belly_flop (ship) / descent (booster) -> unpowered(); flip; steady_burn;
                powered (plan tracking); terminal (glides onto the arms, D-047); approach
@@ -306,9 +313,9 @@ ship, the booster parked beside the pad, or end).
 ## Open questions
 
 - Firefox solve time (Chromium measured: ~244 ms with a GPU).
-- M3: Kestrel's own solver needs more interior-point iterations than
-  Clarabel (benchmark in LIMITATIONS.md); a better starting point or
-  centring might close the gap.
+- Kestrel's own solver needs more interior-point iterations than
+  Clarabel on the booster's plans (benchmark in LIMITATIONS.md); a better
+  starting point or a homogeneous embedding might close the gap.
 - Lossless convexification is not guaranteed when the ground constraint is
   active (closest landings near the ground); such landing times are skipped.
 

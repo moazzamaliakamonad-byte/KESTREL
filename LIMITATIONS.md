@@ -498,7 +498,16 @@ sideways distance from the approach gate when the final approach began:
 
 After M4.2 and M4.3 (the glide, the chosen bearing; `wind_sweep`,
 2026-11-19): 152 of 216 (booster 18, 17, 16, 15, 15, 5; ship 18, 17, 16,
-11, 4, 0 at 0-25 m/s).
+11, 4, 0 at 0-25 m/s), on Clarabel.
+
+On Kestrel's own solver, which flies since M4.4 (D-049; same day, same
+build otherwise): 150 of 216 (booster 18, 17, 16, 14, 16, 5; ship 18, 16,
+17, 9, 4, 0). Paired flight by flight: 4 caught only on Clarabel, 2 only
+on Kestrel. The ship losses traced had the same plans and failures on
+both solvers and parted only in the last seconds (small numerical
+differences grow); one booster loss (15 m/s from +x, low noise, seed 9)
+had subproblems stopped at the 40-iteration cap with the primal residual
+stalled at 1e-4..1e-6, where Clarabel reports them infeasible.
 
 110 of 216 caught before, 144 after (final guidance, 2026-11-19; a first
 version that flew the raw estimate caught 149 but lost still-air flights,
@@ -557,6 +566,29 @@ tower before the final approach). Wind sweep with the glide: 146 of 216
 (144 without), no fewer at any wind speed. The navigation filter's
 horizontal error in the final approach (`nav_error_by_noise`): ship 0.22
 / 0.94 m RMS, booster 0.28 / 1.07 m, at low / high noise (seeds 7-9).
+
+### Solve-time benchmark (M4.4, Kestrel's solver flying)
+
+Same method as the M3 benchmark below (native: `bench_solvers`, the
+requests of one recorded flight per vehicle, each solved 5 times per
+solver, median kept), 2026-11-19, same laptop, one run; Kestrel's solver
+with the infeasibility certificate and best-iterate fallback (D-049):
+
+| Requests | Solver | Median | p90 | Max |
+| --- | --- | --- | --- | --- |
+| Booster, 13 | Clarabel | 49.5 ms | 69.3 ms | 70.4 ms |
+| Booster, 13 | Kestrel | 53.6 ms | 75.1 ms | 76.4 ms |
+| Ship, 17 | Clarabel | 35.6 ms | 56.9 ms | 57.9 ms |
+| Ship, 17 | Kestrel | 31.5 ms | 49.6 ms | 53.4 ms |
+
+All solved by both. In the browser (`E2E_BASE_URL=http://localhost:3000
+PW_GPU=1 npx playwright test e2e/measure.spec.ts`, dev build, headless
+Chromium 158, integrated GPU, one flight each): booster caught, 14 plans,
+median 217 ms, p90 432 ms, max 601 ms; ship caught, 14 plans, median
+173 ms, p90 452 ms, max 729 ms. Single runs on a different day from the
+M3 table: not a statistical claim, and not a like-for-like comparison
+with it. The 3-DoF closed-loop tests (`closed_loop`) took 53 s on
+Kestrel's solver against 85-90 s on Clarabel the same day.
 
 ### Solve-time benchmark (M3, both solvers)
 
