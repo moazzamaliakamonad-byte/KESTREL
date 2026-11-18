@@ -116,8 +116,8 @@ Not a milestone: getting the finished project public (D-045).
 - [x] Publish `main` to GitHub Pages under the repository's base path
       (built and flown locally under `/Kestrel/` before the first push)
 - [x] Clippy clean; `CLAUDE.md` no longer tracked
-- [ ] History: `CLAUDE.md` out of its two old commits; commit email
-      (waiting on the owner)
+- [x] History kept as it is (owner's call: the commit email and the
+      two early commits that hold `CLAUDE.md` may be public)
 - [ ] Repository created and pushed; Pages source set to "GitHub Actions"
 - [ ] Live link and CI badge at the top of the README; `repository` in
       `Cargo.toml`
