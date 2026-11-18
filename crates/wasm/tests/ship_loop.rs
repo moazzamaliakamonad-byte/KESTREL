@@ -677,9 +677,10 @@ fn wind_run(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64) -> WindRun {
 }
 
 fn wind_run_with(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64, aware: bool) -> WindRun {
-    wind_run_cfg(kind, wind, noise, seed, aware, false, true)
+    wind_run_cfg(kind, wind, noise, seed, aware, false, true, true)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn wind_run_cfg(
     kind: Kind,
     wind: [f64; 2],
@@ -688,6 +689,7 @@ fn wind_run_cfg(
     aware: bool,
     planned_approach: bool,
     glide_terminal: bool,
+    chosen_bearing: bool,
 ) -> WindRun {
     let mut f = ShipFlight::new(ShipFlightConfig {
         seed,
@@ -697,6 +699,7 @@ fn wind_run_cfg(
         wind_aware: aware,
         planned_approach,
         glide_terminal,
+        chosen_bearing,
         ..ShipFlightConfig::new(kind)
     })
     .unwrap();
@@ -803,9 +806,9 @@ fn wind_sweep() {
     }
 }
 
-/// With wind awareness, the planned approach and the glide off, guidance
-/// flies exactly the flight it flew before M4 (numbers read from that code,
-/// 2026-11-18).
+/// With every M4 switch off (wind awareness, the planned approach, the
+/// glide, the chosen bearing), guidance flies exactly the flight it flew
+/// before M4 (numbers read from that code, 2026-11-18).
 #[test]
 fn unaware_flight_matches_today() {
     for (kind, wind, t, left) in [
@@ -822,7 +825,7 @@ fn unaware_flight_matches_today() {
             25.712377419400028,
         ),
     ] {
-        let r = wind_run_cfg(kind, wind, Noise::LOW, 7, false, false, false);
+        let r = wind_run_cfg(kind, wind, Noise::LOW, 7, false, false, false, false);
         assert_eq!(r.outcome, Some(Outcome::Caught), "{kind:?}");
         assert_eq!(r.t, t, "{kind:?}");
         assert!((r.left - left).abs() < 1e-9, "{kind:?}: {} t left", r.left);
@@ -1210,5 +1213,70 @@ fn approach_board() {
             )
         };
         eprintln!("{group:24}  {}   {}", stats(false), stats(true));
+    }
+}
+
+/// Still air, the default start: the approach stays on the +x side, exactly
+/// (the old geometry). In a 15 m/s crosswind from +y it turns toward where
+/// the wind carries the fall (M4.3).
+#[test]
+fn the_approach_bearing_follows_the_fall() {
+    let bearing = |wind: [f64; 2]| {
+        let mut f = ShipFlight::new(ShipFlightConfig {
+            seed: 7,
+            noise: Noise::LOW,
+            wind,
+            ..ShipFlightConfig::new(Kind::Earth)
+        })
+        .unwrap();
+        while f.phase() == Phase::BellyFlop && f.sim().t < 300.0 && !f.bearing_chosen() {
+            f.step(FRAME);
+        }
+        f.bearing()
+    };
+    assert_eq!(bearing([0.0, 0.0]), 0.0);
+    let turned = bearing([0.0, -15.0]).to_degrees();
+    eprintln!("bearing in a 15 m/s crosswind from +y: {turned:.1} deg");
+    assert!(turned < -10.0, "{turned}");
+}
+
+/// The ship in a 15 m/s crosswind from +y: lost in every version before
+/// M4.3 (it drifted ~500 m across its approach in the belly flop).
+#[test]
+fn earth_crosswind_is_caught() {
+    let r = wind_run(Kind::Earth, [0.0, -15.0], Noise::LOW, 7);
+    eprintln!(
+        "ship, 15 m/s from +y: {:?} t {:.1} left {:.1} t",
+        r.outcome, r.t, r.left
+    );
+    assert_eq!(r.outcome, Some(Outcome::Caught));
+}
+
+#[test]
+#[ignore]
+fn tmp_preview_like() {
+    for chosen in [false, true] {
+        let mut f = ShipFlight::new(ShipFlightConfig {
+            lag: 0.3,
+            chosen_bearing: chosen,
+            ..ShipFlightConfig::new(Kind::Earth)
+        })
+        .unwrap();
+        let mut pending: Option<Pending> = None;
+        let mut last_request = f64::NEG_INFINITY;
+        while f.phase() != Phase::Done && f.sim().t < 400.0 {
+            f.step(FRAME);
+            deliver(&mut f, &mut pending);
+            request_after(&mut f, &mut pending, &mut last_request, 0.0);
+        }
+        let x = f.sim().x;
+        eprintln!(
+            "chosen {chosen}: bearing {:.6} rad, {:?} at {:.1}, end ({:.2},{:.2})",
+            f.bearing(),
+            f.sim().outcome,
+            f.sim().t,
+            x[dynamics::R],
+            x[dynamics::R + 1]
+        );
     }
 }

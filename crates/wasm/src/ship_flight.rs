@@ -107,6 +107,14 @@ pub const NAV_SHIP: (f64, f64) = (1.0, 0.5);
 /// 1.07 at low / high noise); the approach's mast margin is 1 m plus twice it.
 pub const NAV_ERROR_LOW: f64 = 0.3;
 pub const NAV_ERROR_HIGH: f64 = 1.1;
+/// The approach's bearing stays within this of the arms' open side (+x),
+/// rad (60°)...
+pub const BEARING_MAX: f64 = 1.047_197_551_196_597_6;
+/// ...and stays +x unless the predicted drift across the track is at least
+/// this, m (the burn takes up less).
+pub const ACROSS_MIN: f64 = 250.0;
+/// The bearing is chosen below this height, m (or 70 % of the way down).
+pub const BEARING_BELOW: f64 = 6000.0;
 
 pub const NAV_BOOSTER: (f64, f64) = (4.0, 2.0);
 
@@ -221,6 +229,9 @@ pub struct ShipFlightConfig {
     /// stopping 5 m above them until centred (M4.2, D-047; on: same catches
     /// on every board, 1-2.5 s quicker, a quarter softer at contact).
     pub glide_terminal: bool,
+    /// Choose the bearing the approach comes from, toward where the fall is
+    /// taking the vehicle (M4.3, D-048).
+    pub chosen_bearing: bool,
 }
 
 /// An entry from orbit (*illustrative* numbers, chosen so guidance has
@@ -306,6 +317,7 @@ impl ShipFlightConfig {
             wind_aware: true,
             planned_approach: false,
             glide_terminal: true,
+            chosen_bearing: true,
         }
     }
 
@@ -404,6 +416,9 @@ pub struct ShipFlight {
     approach: Option<(ApproachPlan, f64)>,
     approach_given_up: bool,
     approach_plans: u32,
+    /// The approach's bearing (rad, 0 = +x) and whether it was chosen yet.
+    bearing: f64,
+    bearing_chosen: bool,
 }
 
 impl ShipFlight {
@@ -483,6 +498,8 @@ impl ShipFlight {
             approach: None,
             approach_given_up: false,
             approach_plans: 0,
+            bearing: 0.0,
+            bearing_chosen: false,
         })
     }
 
@@ -923,6 +940,8 @@ impl ShipFlight {
             Phase::BellyFlop => {
                 let healthy = f64::from(self.sim.cluster.healthy()) * scn.ship.engine_max;
                 self.ignition_z = ship_control::ignition_altitude(&scn, &est, healthy);
+                self.choose_bearing(&est);
+                let scn = self.sim.scn.clone();
                 let lead = -est[V + 2].min(0.0) * scn.ship.ignition_time;
                 if est[R + 2] <= self.ignition_z + lead {
                     self.sim.cluster.ignite_all();
@@ -1370,6 +1389,80 @@ impl ShipFlight {
             },
         };
         self.wind.update(&inputs);
+    }
+
+    /// Choose, once, the bearing the ship's approach comes from. The belly
+    /// flop steers along its nose (the along-track miss) but cannot cross
+    /// it, so the approach turns until its aim point lies where the drift
+    /// across the track will carry the ship by the ignition height (its
+    /// sideways speed and the estimated wind's drift): `atan2(across,
+    /// |aim|)`, within ±BEARING_MAX of the arms' open side (+x), and the +x
+    /// side itself for a drift under ACROSS_MIN (a still-air flight keeps the
+    /// old geometry). Chosen when the wind estimate settles, or 70 % of the way
+    /// down to the ignition height, whichever is first. The booster steers
+    /// across its fall with its lean and keeps +x. M4.3, D-048.
+    fn choose_bearing(&mut self, est: &State) {
+        if self.bearing_chosen
+            || !self.config.chosen_bearing
+            || self.sim.scn.catch.is_none()
+            || self.sim.scn.ship.kind != VehicleKind::Ship
+        {
+            return;
+        }
+        let e = self.wind.estimate();
+        let settled = e.sigma[0].max(e.sigma[1]) < 2.0;
+        let z = est[R + 2];
+        let start = self.config.position[2];
+        let late = z < self.ignition_z + 0.3 * (start - self.ignition_z).max(0.0);
+        // Not from high up: the drift is predicted with the drag of the air
+        // here, and from orbit's 25 km hand-over the thin air made a
+        // sideways 8 m/s look like 700 m of drift (it bleeds off lower down).
+        if !((settled && z < BEARING_BELOW) || late) {
+            return;
+        }
+        self.bearing_chosen = true;
+        let scn = &self.sim.scn;
+        let (r, v) = (dynamics::position(est), dynamics::velocity(est));
+        let t = ((z - self.ignition_z) / (-v[2]).max(10.0)).max(2.0);
+        // The vehicle's sideways speed relaxes toward the wind's with the
+        // drag time constant across the hull.
+        let rho = scn.density(z);
+        let q = dynamics::attitude(est);
+        let f0 = model::aero::body_force(&scn.ship, rho, q, v).0;
+        let f1 = model::aero::body_force(&scn.ship, rho, q, quat::add(v, [0.0, 1.0, 0.0])).0;
+        let k = (f0[1] - f1[1]).max(1.0);
+        let tau = (est[M] / k).clamp(1.0, t.max(1.0));
+        let drift = t - tau * (1.0 - (-t / tau).exp());
+        let w = self.air().wind;
+        // Across the +x track (y): where the ship will be by ignition. Its
+        // sideways speed relaxes toward the wind's: y0 + v τ (1 − e^(−t/τ))
+        // + w (t − τ (1 − e^(−t/τ))).
+        let relax = tau * (1.0 - (-t / tau).exp());
+        let across = r[1] + v[1] * relax + w[1] * drift;
+        let reach = scn.aim[0].hypot(scn.aim[1]).max(1.0);
+        // A few hundred metres across the track the landing burn takes up
+        // as it always has (turning for them only cost propellant: a flight
+        // from orbit 193 m across ran dry); the approach turns for a drift
+        // it cannot (a crosswind: ~500 m).
+        let psi = if across.abs() < ACROSS_MIN {
+            0.0
+        } else {
+            across.atan2(reach).clamp(-BEARING_MAX, BEARING_MAX)
+        };
+        if psi != 0.0 {
+            self.sim.scn = self.sim.scn.turned(psi);
+        }
+        self.bearing = psi;
+    }
+
+    /// The approach's bearing, rad (0: the +x side).
+    pub fn bearing(&self) -> f64 {
+        self.bearing
+    }
+
+    /// Whether the approach's bearing has been chosen yet.
+    pub fn bearing_chosen(&self) -> bool {
+        self.bearing_chosen
     }
 
     /// The approach problem from the estimate `x`: final time `t_f` (0 for a

@@ -202,6 +202,29 @@ fn zero_wind_plan_is_unchanged() {
     assert_eq!(plan.iterations, 4);
 }
 
+/// Approaching from a turned bearing (the gate, its velocity and the
+/// tower-side keep-out turned 40°), the flip plan converges onto the turned
+/// gate (M4.3).
+#[test]
+fn turned_approach_plans() {
+    let psi = 0.7f64;
+    let mut p = earth_flip_problem(650.0, -90.0);
+    p.scn = p.scn.turned(psi);
+    let (c, s) = (psi.cos(), psi.sin());
+    let r = [200.0 * c, 200.0 * s, 650.0];
+    p.x0[R..R + 3].copy_from_slice(&r);
+    p.x0[V..V + 3].copy_from_slice(&[4.0 * c, 4.0 * s, -90.0]);
+    let plan = plan_ship(&p, None, COLD_ITERATIONS).expect("plan");
+    assert!(
+        plan.converged && plan.gate_error < 1.0,
+        "gate error {}",
+        plan.gate_error
+    );
+    for x in &plan.x {
+        assert!(x[R] * c + x[R + 1] * s >= p.scn.clearance_x.unwrap() - 0.5);
+    }
+}
+
 /// A crosswind plan still converges and meets its limits.
 #[test]
 fn crosswind_plan_converges() {

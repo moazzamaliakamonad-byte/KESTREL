@@ -32,6 +32,9 @@ pub struct Sub<'a> {
     pub w_max: f64,
     pub floor_z: f64,
     pub clearance_x: Option<f64>,
+    /// Direction the approach comes from (the keep-out is `dir · r ≥
+    /// clearance_x`; (1, 0) for the +x approach, M4.3).
+    pub clearance_dir: [f64; 2],
     /// Approach cone around the gate axis: horizontal distance
     /// `≤ r0 + tan_gamma · (z − gate_z)` at every node after the first.
     pub approach: (f64, f64),
@@ -277,7 +280,15 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
             nonneg.push(vec![(l.x(m, R + 2), 1.0)], -p.floor_z);
         }
         if let Some(cx) = p.clearance_x {
-            nonneg.push(vec![(l.x(m, R), 1.0)], -cx);
+            // (At bearing 0 exactly the old row, so the old plans are
+            // unchanged bit for bit.)
+            let d = p.clearance_dir;
+            let row = if d[1] == 0.0 {
+                vec![(l.x(m, R), d[0])]
+            } else {
+                vec![(l.x(m, R), d[0]), (l.x(m, R + 1), d[1])]
+            };
+            nonneg.push(row, -cx);
         }
         // Lower thrust bound, linearized around the reference direction.
         let ub = p.us[m];

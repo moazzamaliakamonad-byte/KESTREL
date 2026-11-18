@@ -304,6 +304,10 @@ pub struct Scenario {
     pub aim: [f64; 2],
     /// Multiplies the air density (a physics option; 1 = standard).
     pub density_scale: f64,
+    /// The bearing the approach comes from, rad (0: the +x side, the arms'
+    /// open side; M4.3). The gate, its velocity, the aim and the tower-side
+    /// keep-out are turned by it about the catch axis ([`Scenario::turned`]).
+    pub bearing: f64,
 }
 
 /// Physics options the page can change. Applied to a scenario with
@@ -356,6 +360,7 @@ impl Scenario {
             // The flip pushes the ship toward the tower: start it beyond.
             aim: [450.0, 0.0],
             density_scale: 1.0,
+            bearing: 0.0,
             ship,
         }
     }
@@ -393,6 +398,7 @@ impl Scenario {
             // Offshore until the engines are running, then divert in.
             aim: [120.0, 0.0],
             density_scale: 1.0,
+            bearing: 0.0,
             ship,
         }
     }
@@ -429,6 +435,36 @@ impl Scenario {
         self
     }
 
+    /// This scenario approached from bearing `psi` (rad, 0 = +x): the gate,
+    /// the gate velocity and the aim turned about the catch axis from the
+    /// scenario's own bearing to `psi`. The keep-out turns with
+    /// [`Scenario::approach_dir`]. Turning to the bearing it already has
+    /// changes nothing.
+    pub fn turned(&self, psi: f64) -> Scenario {
+        let mut out = self.clone();
+        let d = psi - self.bearing;
+        if d == 0.0 {
+            return out;
+        }
+        let (c, s) = (d.cos(), d.sin());
+        let turn = |v: [f64; 2]| [c * v[0] - s * v[1], s * v[0] + c * v[1]];
+        let g = turn([self.gate[0], self.gate[1]]);
+        out.gate = [g[0], g[1], self.gate[2]];
+        let gv = turn([self.gate_velocity[0], self.gate_velocity[1]]);
+        out.gate_velocity = [gv[0], gv[1], self.gate_velocity[2]];
+        out.aim = turn(self.aim);
+        out.bearing = psi;
+        out
+    }
+
+    /// Unit horizontal direction the approach comes from (+x at bearing 0).
+    pub fn approach_dir(&self) -> [f64; 2] {
+        if self.bearing == 0.0 {
+            return [1.0, 0.0];
+        }
+        [self.bearing.cos(), self.bearing.sin()]
+    }
+
     /// Height of the centre of mass when caught, m.
     pub fn rest_cm_z(&self) -> f64 {
         self.floor_z
@@ -438,6 +474,24 @@ impl Scenario {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Turning by nothing changes nothing (a flight that keeps the +x
+    /// approach is the old flight); turned a quarter turn, the gate, its
+    /// approach velocity and the aim come round to +y (M4.3).
+    #[test]
+    fn turning_the_approach() {
+        for scn in [Scenario::earth(), Scenario::booster()] {
+            assert_eq!(scn.turned(0.0), scn);
+            let q = scn.turned(std::f64::consts::FRAC_PI_2);
+            assert!((q.gate[0]).abs() < 1e-12 && (q.gate[1] - scn.gate[0]).abs() < 1e-12);
+            assert_eq!(q.gate[2], scn.gate[2]);
+            assert!((q.gate_velocity[1] - scn.gate_velocity[0]).abs() < 1e-12);
+            assert!((q.aim[1] - scn.aim[0]).abs() < 1e-9 && q.aim[0].abs() < 1e-9);
+            assert_eq!(q.bearing, std::f64::consts::FRAC_PI_2);
+            // Turning again is from the scenario's own bearing, not added up.
+            assert_eq!(q.turned(0.0).gate, scn.gate);
+        }
+    }
 
     #[test]
     fn density_values() {

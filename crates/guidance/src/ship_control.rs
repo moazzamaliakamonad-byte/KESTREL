@@ -117,6 +117,16 @@ pub const WN_FIN: f64 = 1.0;
 /// The nose points along `HEADING · x` in the belly flop.
 pub const HEADING: f64 = -1.0;
 
+/// Belly down, nose toward the tower from bearing `bearing` (rad; 0 is the
+/// +x side, nose along −x), pitched up by `pitch` (rad). M4.3.
+pub fn belly_attitude_at(pitch: f64, bearing: f64) -> Quat {
+    let q = belly_attitude(pitch);
+    if bearing == 0.0 {
+        return q;
+    }
+    quat::mul(quat::from_axis_angle([0.0, 0.0, 1.0], bearing), q)
+}
+
 /// Belly down, nose along `HEADING · x`, pitched up by `pitch` (rad).
 pub fn belly_attitude(pitch: f64) -> Quat {
     let along_plus_x = quat::from_axis_angle([0.0, 1.0, 0.0], std::f64::consts::FRAC_PI_2 - pitch);
@@ -289,7 +299,7 @@ pub fn descent(scn: &Scenario, x: &State, aim: [f64; 2], ignition_z: f64, air: &
 /// The unpowered phase of either vehicle toward the scenario's aim point.
 pub fn unpowered(scn: &Scenario, x: &State, ignition_z: f64, air: &Air) -> Actuation {
     match scn.ship.kind {
-        VehicleKind::Ship => belly_flop(scn, x, scn.aim[0], ignition_z, air),
+        VehicleKind::Ship => belly_flop(scn, x, scn.aim, ignition_z, air),
         VehicleKind::Booster => descent(scn, x, scn.aim, ignition_z, air),
     }
 }
@@ -298,7 +308,7 @@ pub fn unpowered(scn: &Scenario, x: &State, ignition_z: f64, air: &Air) -> Actua
 pub fn belly_flop(
     scn: &Scenario,
     x: &State,
-    target_x: f64,
+    target: [f64; 2],
     ignition_z: f64,
     air: &Air,
 ) -> Actuation {
@@ -306,7 +316,11 @@ pub fn belly_flop(
     let r = dynamics::position(x);
     let v = dynamics::velocity(x);
     let t_go = ((r[2] - ignition_z) / (-v[2]).max(10.0)).max(2.0);
-    let miss = target_x - (r[0] + v[0] * t_go);
+    // The miss along the approach's bearing (the pitch slides the ship
+    // along its nose; across it, the chosen bearing absorbs the drift).
+    let b = scn.approach_dir();
+    let miss =
+        (target[0] - (r[0] + v[0] * t_go)) * b[0] + (target[1] - (r[1] + v[1] * t_go)) * b[1];
     // Pitching the nose up by θ slides the ship toward its tail (−HEADING·x)
     // at about g·sin θ when drag carries the weight.
     let a_want = (2.0 * miss / (t_go * t_go)).clamp(-g, g);
@@ -315,7 +329,13 @@ pub fn belly_flop(
         .asin()
         .clamp(-MAX_PITCH, MAX_PITCH);
 
-    let mut tau = attitude_torque(scn, x, belly_attitude(pitch), [0.0; 3], WN_FLAP);
+    let mut tau = attitude_torque(
+        scn,
+        x,
+        belly_attitude_at(pitch, scn.bearing),
+        [0.0; 3],
+        WN_FLAP,
+    );
     // What the body and the trimmed flaps do anyway.
     let q = dynamics::attitude(x);
     let rho = scn.density(r[2]);
@@ -919,6 +939,41 @@ mod tests {
         x
     }
 
+    /// Turned to bearing ψ the belly-down attitude points its nose at the
+    /// tower from that side (along −b); at ψ = 0 it is the old one.
+    #[test]
+    fn belly_attitude_turns_with_the_bearing() {
+        assert_eq!(belly_attitude_at(0.1, 0.0), belly_attitude(0.1));
+        let psi = 0.7f64;
+        let nose = quat::rotate(belly_attitude_at(0.0, psi), [0.0, 0.0, 1.0]);
+        assert!(
+            (nose[0] + psi.cos()).abs() < 1e-9 && (nose[1] + psi.sin()).abs() < 1e-9,
+            "{nose:?}"
+        );
+    }
+
+    /// At a turned bearing the belly flop steers its along-track miss: from
+    /// 400 m short along b it ends near the target.
+    #[test]
+    fn belly_flop_steers_along_the_bearing() {
+        let psi = 0.6f64;
+        let scn = Scenario::earth().turned(psi);
+        let b = [psi.cos(), psi.sin()];
+        let x0 = dynamics::state(
+            scn.start_mass,
+            [-400.0 * b[0], -400.0 * b[1], 6000.0],
+            [0.0, 0.0, -80.0],
+            belly_attitude_at(0.0, psi),
+            [0.0; 3],
+        );
+        let target = [0.0, 0.0];
+        let x = fly(&scn, x0, 60.0, |x| {
+            belly_flop(&scn, x, target, 600.0, &Air::STILL)
+        });
+        let along = x[R] * b[0] + x[R + 1] * b[1];
+        assert!(along.abs() < 150.0, "along-track {along} m");
+    }
+
     #[test]
     fn belly_flop_holds_attitude() {
         let scn = Scenario::earth();
@@ -930,7 +985,7 @@ mod tests {
             [0.0, 0.02, 0.0],
         );
         let x = fly(&scn, x0, 30.0, |x| {
-            belly_flop(&scn, x, 0.0, 600.0, &Air::STILL)
+            belly_flop(&scn, x, [0.0, 0.0], 600.0, &Air::STILL)
         });
         let tilt = quat::tilt(dynamics::attitude(&x)).to_degrees();
         assert!((90.0 - tilt).abs() < 13.0, "tilt {tilt}");
@@ -948,7 +1003,7 @@ mod tests {
             [0.0; 3],
         );
         let x = fly(&scn, x0, 60.0, |x| {
-            belly_flop(&scn, x, 0.0, 600.0, &Air::STILL)
+            belly_flop(&scn, x, [0.0, 0.0], 600.0, &Air::STILL)
         });
         let r = dynamics::position(&x);
         assert!(r[0].abs() < 150.0, "x {} at z {}", r[0], r[2]);
@@ -1044,7 +1099,7 @@ mod tests {
         let wind = [10.0, 0.0, 0.0];
         let end = |air: Air| {
             let x = fly_in(&scn, x0, 60.0, wind, |x| {
-                belly_flop(&scn, x, 0.0, 600.0, &air)
+                belly_flop(&scn, x, [0.0, 0.0], 600.0, &air)
             });
             let tilt = quat::tilt(dynamics::attitude(&x)).to_degrees();
             assert!((90.0 - tilt).abs() < 15.0, "tilt {tilt}");

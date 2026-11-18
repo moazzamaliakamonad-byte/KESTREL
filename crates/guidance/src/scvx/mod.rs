@@ -332,6 +332,7 @@ pub fn plan_ship(
             w_max: OMEGA_MAX * units.t,
             floor_z: scn.floor_z / units.l,
             clearance_x: scn.clearance_x.map(|c| c / units.l),
+            clearance_dir: scn.approach_dir(),
             approach: (p.approach.0 / units.l, p.approach.1),
             // Upright before dropping to one engine (the flip is done on all
             // of them), else for the last part of the burn.
