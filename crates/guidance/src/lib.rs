@@ -4,6 +4,7 @@
 //!
 //! Simulation only. Not flight software.
 
+pub mod approach;
 pub mod entry;
 pub mod envelope;
 pub mod params;
