@@ -105,8 +105,13 @@ What is simulated, and what is only shown:
   the gap alone takes more height than is left.
 
 - **The plan ends 10 m out and 20 m above the arms**; the last 20 m are
-  flown by a simple terminal controller (4-10 s). Plans ending on the arms
-  hit the mast under sensor noise (D-033).
+  flown by the terminal controller, which glides onto the arms (D-047:
+  slides in and comes down in one movement; 9-11 s from the gate). Plans
+  ending on the arms hit the mast under sensor noise (D-033), and a
+  separately planned approach from the gate (`planned_approach`, off)
+  caught fewer flights on every board (D-047: ship nominal 8/12, seeds
+  28/40, booster 33/40, engine-out 11/20, against 12/12, 38/40, 40/40,
+  20/20).
 - **The catch is a test, not contact dynamics**: within 4 m of the catch
   axis, at most 2 m/s down and 1 m/s sideways, tilt under 5°, turning
   slower than 5°/s (all *illustrative*; D-026). The arms are drawn closing
@@ -524,6 +529,27 @@ arrive within 3 m); the ship over the arms in a 10 m/s wind, mean
 distance from the axis in the second 10 s 1.81 m without, 1.04 m with.
 Tried and removed: a belly-flop roll against a crosswind (no effect, see
 above) and a belly-flop drift term along the track (3 m worse).
+
+### The final approach (M4.2)
+
+`approach_board` (`--ignored`, 2026-11-19, same build, wind awareness
+on): the boards of the wind section, the terminal controller with its
+old stop-and-wait and with the glide (D-047). Mean over the caught
+flights of the time from the gate to the catch and of the contact speeds.
+
+| Board | Stop-and-wait | Glide |
+| --- | --- | --- |
+| Ship nominal (12) | 12/12 · 11.4 s · 1.50 down · 0.34 side | 12/12 · 9.1 s · 1.23 · 0.24 |
+| Ship seeds 11-30 (40) | 38/40 · 13.9 s · 1.42 · 0.42 | 38/40 · 10.9 s · 1.25 · 0.31 |
+| Booster seeds 11-30 (40) | 40/40 · 13.1 s · 1.61 · 0.40 | 40/40 · 10.3 s · 1.17 · 0.27 |
+| Ship engine-out window (20) | 20/20 · 11.4 s · 1.46 · 0.31 | 20/20 · 9.9 s · 1.11 · 0.28 |
+
+Speeds in m/s (the catch allows 2 down, 1 sideways). The same two ship
+flights are lost both ways (seed 17 low and seed 24 high: they hit the
+tower before the final approach). Wind sweep with the glide: 146 of 216
+(144 without), no fewer at any wind speed. The navigation filter's
+horizontal error in the final approach (`nav_error_by_noise`): ship 0.22
+/ 0.94 m RMS, booster 0.28 / 1.07 m, at low / high noise (seeds 7-9).
 
 ### Solve-time benchmark (M3, both solvers)
 
