@@ -89,7 +89,8 @@ Measured numbers and every known approximation:
 6. **Front end.** Next.js (static export) + React Three Fiber. Everything
    on screen is procedural: no image, model or sound files except the
    commentary clips, which are rendered from the phrase list by an open
-   text-to-speech model (see `web/scripts/make-voice.mjs`).
+   text-to-speech model, Kokoro-82M (Apache-2.0; see
+   `web/scripts/make-voice.mjs`).
 
 The first milestones' 3-DoF guidance (lossless convexification) is still in
 the repository and tested; the page no longer uses it.

@@ -77,6 +77,17 @@ Notes:
   packages installed in a scratch folder, not in the project, and downloads
   an open text-to-speech model of about 90 MB on first use).
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request (D-045):
+`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, then the
+WebAssembly build and `npm run lint`, `typecheck`, `test` and `build` in
+`web/`. Run the same before pushing to avoid a red check. Pushes to `main`
+also publish the page to GitHub Pages; once per repository, set
+Settings → Pages → Source to "GitHub Actions". To try the Pages build
+locally: `NEXT_PUBLIC_BASE_PATH=/Kestrel npm run build`, then serve a
+folder that holds `out/` renamed to `Kestrel/` and open `/Kestrel/`.
+
 ## Test policy
 
 - `cargo test` must stay under two minutes for the whole suite.

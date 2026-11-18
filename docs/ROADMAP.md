@@ -107,6 +107,21 @@ simulation can be, on one page with a mission-control interface.
 - [x] Update the end-to-end tests and the demo recording for the new page
 - [x] `learn/` chapter for M3 (local only)
 
+## Publishing on GitHub
+
+Not a milestone: getting the finished project public (D-045).
+
+- [x] Checks on every push: Rust format, clippy (warnings are errors),
+      tests; web lint, types, unit tests (`.github/workflows/ci.yml`)
+- [x] Publish `main` to GitHub Pages under the repository's base path
+      (built and flown locally under `/Kestrel/` before the first push)
+- [x] Clippy clean; `CLAUDE.md` no longer tracked
+- [ ] History: `CLAUDE.md` out of its two old commits; commit email
+      (waiting on the owner)
+- [ ] Repository created and pushed; Pages source set to "GitHub Actions"
+- [ ] Live link and CI badge at the top of the README; `repository` in
+      `Cargo.toml`
+
 ## Change log
 
 - 2026-11-11 — Roadmap written from the project brief.
@@ -132,3 +147,5 @@ simulation can be, on one page with a mission-control interface.
 - 2026-11-18 — M3 done. The simulated ascent, hot staging and boostback
   removed from the roadmap by the owner: Kestrel is the landing guidance
   (D-044); the opening sequence stays an illustration.
+- 2026-11-18 — Prepared for GitHub: CI and a GitHub Pages deploy, clippy
+  clean, the agent's rules file kept local (D-045).

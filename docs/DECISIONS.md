@@ -677,3 +677,30 @@ Template:
   separation) stays an illustration timed by hand and says so on screen.
 - Consequences: D-022's "it must be replaced when the ascent is simulated"
   no longer applies: nothing replaces it. With this, M3 is done.
+
+## D-045 — Publishing: CI on every push, the page on GitHub Pages
+- Date: 2026-11-18
+- Status: accepted
+- Context: the project goes public on GitHub. Most visitors will not
+  clone and build a Rust + WebAssembly project, so it needs a live page;
+  nothing checked the code except the owner's machine. The owner: the
+  coding agent's rules file (`CLAUDE.md`) "should not be pushed".
+- Decision:
+  - One workflow (`.github/workflows/ci.yml`) on every push and pull
+    request: `cargo fmt --check`, `cargo clippy -D warnings`,
+    `cargo test`; the WebAssembly build, `npm run lint`, `typecheck`,
+    `test`, and the static site build. The opt-in slow tests
+    (`#[ignore]`, Playwright) stay off, as the test policy says.
+  - Pushes to `main` publish `web/out` to GitHub Pages. The page is
+    static (D-005), so Pages needs no server; the base path is the
+    repository name, set through `NEXT_PUBLIC_BASE_PATH`.
+  - `wasm-bindgen` comes as a prebuilt binary at the pinned 0.2.130
+    (D-007) instead of `cargo install`, which would compile it on every
+    run.
+  - `CLAUDE.md` joins `learn/` and `project-ideas.md` as local-only and
+    gitignored.
+- Consequences: the first deploy needs one manual step on GitHub
+  (Settings → Pages → Source: GitHub Actions). The workflow has only run
+  on this machine's build so far: the base-path build was served under
+  `/Kestrel/` and flown in Chromium (page, solver worker and landing burn
+  ran, no load errors); the Linux runner itself is unproven until the first push.
