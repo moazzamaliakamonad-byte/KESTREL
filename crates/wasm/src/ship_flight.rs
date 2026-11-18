@@ -21,6 +21,7 @@
 //! Simulation only.
 
 use guidance::GuidanceError;
+use guidance::approach::{self, ApproachPlan, ApproachPlanner, ApproachProblem};
 use guidance::scvx::{self, ShipPlan, ShipProblem};
 use guidance::ship_control::{self, Actuation, Air};
 use guidance::wind::{WindEstimate, WindFilter, WindInputs};
@@ -101,6 +102,12 @@ pub const ENVELOPE_FLOOR: f64 = 0.0;
 /// (booster) each (D-040):
 /// (position, velocity).
 pub const NAV_SHIP: (f64, f64) = (1.0, 0.5);
+/// The navigation estimate's horizontal error in the final approach, m
+/// (RMS, measured: `nav_error_by_noise`, ship 0.22 / 0.94, booster 0.28 /
+/// 1.07 at low / high noise); the approach's mast margin is 1 m plus twice it.
+pub const NAV_ERROR_LOW: f64 = 0.3;
+pub const NAV_ERROR_HIGH: f64 = 1.1;
+
 pub const NAV_BOOSTER: (f64, f64) = (4.0, 2.0);
 
 /// Default wind gust speed, m/s.
@@ -206,6 +213,10 @@ pub struct ShipFlightConfig {
     /// Guidance uses its wind estimate (D-046). Off: the estimate is still
     /// made (and shown) but guidance flies as if the air were still.
     pub wind_aware: bool,
+    /// From the gate onto the arms, fly a re-planned approach (D-047,
+    /// experimental: off by default; on the boards it caught fewer flights
+    /// than the terminal controller).
+    pub planned_approach: bool,
 }
 
 /// An entry from orbit (*illustrative* numbers, chosen so guidance has
@@ -289,6 +300,7 @@ impl ShipFlightConfig {
             entry: None,
             attitude: None,
             wind_aware: true,
+            planned_approach: false,
         }
     }
 
@@ -380,6 +392,13 @@ pub struct ShipFlight {
     earth: Option<model::entry::EarthFrame>,
     /// Guidance's estimate of the wind, from what the vehicle senses.
     wind: WindFilter,
+    /// The final approach: its planner (one set-up solver), the plan being
+    /// flown and the sim time it starts at, and whether planning gave up
+    /// for this flight (the scripted controller flies the rest).
+    approach_planner: ApproachPlanner,
+    approach: Option<(ApproachPlan, f64)>,
+    approach_given_up: bool,
+    approach_plans: u32,
 }
 
 impl ShipFlight {
@@ -455,6 +474,10 @@ impl ShipFlight {
             imu_dv: [0.0; 3],
             imu_h: 0.0,
             wind: WindFilter::new(),
+            approach_planner: ApproachPlanner::new(),
+            approach: None,
+            approach_given_up: false,
+            approach_plans: 0,
         })
     }
 
@@ -939,7 +962,14 @@ impl ShipFlight {
                 if lit > 1 && self.command_limits().0 > HOVER_SHARE * weight {
                     self.sim.cluster.shutdown_to(lit - 1);
                 }
-                ship_control::terminal(&scn, &est, self.command_limits(), &air)
+                let limits = self.command_limits();
+                if self.config.planned_approach
+                    && let Some(a) = self.approach_step(&scn, &est, t, limits, &air)
+                {
+                    a
+                } else {
+                    ship_control::terminal(&scn, &est, limits, &air)
+                }
             }
             Phase::Entry | Phase::Done => self.last,
         };
@@ -1329,6 +1359,146 @@ impl ShipFlight {
             },
         };
         self.wind.update(&inputs);
+    }
+
+    /// The approach problem from the estimate `x`: final time `t_f` (0 for a
+    /// search), starting from sideways acceleration `a0`.
+    fn approach_problem(
+        &self,
+        x: &State,
+        t_f: f64,
+        a0: [f64; 2],
+        limits: (f64, f64),
+    ) -> ApproachProblem {
+        let scn = &self.sim.scn;
+        let g = scn.planet.gravity();
+        let nav = if self.noise.pos_sigma >= Noise::HIGH.pos_sigma {
+            NAV_ERROR_HIGH
+        } else if self.noise.pos_sigma > 0.0 {
+            NAV_ERROR_LOW
+        } else {
+            0.0
+        };
+        let c = scn.catch.expect("a tower to approach");
+        ApproachProblem {
+            r0: dynamics::position(x),
+            v0: dynamics::velocity(x),
+            a0,
+            z_catch: scn.rest_cm_z(),
+            t_f,
+            a_min: limits.0 / x[M] * 1.05,
+            a_max: limits.1 / x[M] * 0.9,
+            keep_x: c.mast_x + c.mast_half + scn.ship.radius + 1.0 + 2.0 * nav,
+            base_arm: scn.ship.cm_height,
+            nose_arm: scn.ship.length - scn.ship.cm_height,
+            g,
+        }
+    }
+
+    /// One control step of the planned approach: (re-)plan when there is no
+    /// plan yet or the vehicle has drifted off it, then fly it. None: fly
+    /// the scripted controller (no tower, planning gave up, or the plan is
+    /// over and the vehicle is on the arms).
+    fn approach_step(
+        &mut self,
+        scn: &Scenario,
+        est: &State,
+        t: f64,
+        limits: (f64, f64),
+        air: &Air,
+    ) -> Option<Actuation> {
+        if self.approach_given_up || scn.catch.is_none() || limits.1 * 0.9 <= limits.0 * 1.05 {
+            return None;
+        }
+        let g = scn.planet.gravity();
+        let want = match &self.approach {
+            None => true,
+            Some((plan, t0)) => {
+                let tau = t - t0;
+                if tau >= plan.t_f {
+                    return None;
+                }
+                let (rr, vr, _) = plan.sample(tau);
+                let off = quat::norm(quat::sub(rr, dynamics::position(est)));
+                let slip = quat::norm(quat::sub(vr, dynamics::velocity(est)));
+                (off > approach::REPLAN_OFF || slip > approach::REPLAN_SLIP)
+                    && plan.t_f - tau > 0.5
+                    && tau >= approach::REPLAN_GAP
+            }
+        };
+        if want {
+            let replanned = match &self.approach {
+                None => {
+                    let axis = quat::rotate(dynamics::attitude(est), [0.0, 0.0, 1.0]);
+                    let p = self.approach_problem(est, 0.0, [g * axis[0], g * axis[1]], limits);
+                    self.approach_planner.plan_free(&p, &approach::FINAL_TIMES)
+                }
+                Some((plan, t0)) => {
+                    let tau = t - t0;
+                    let left = plan.t_f - tau;
+                    let cmd = plan.sample(tau).2;
+                    let p = self.approach_problem(est, left, [cmd[0], cmd[1]], limits);
+                    self.approach_planner.plan(&p).or_else(|_| {
+                        self.approach_planner
+                            .plan_free(&p, &[left + 1.0, left + 2.0, left + 4.0])
+                    })
+                }
+            };
+            match replanned {
+                Ok(plan) => {
+                    self.approach = Some((plan, t));
+                    self.approach_plans += 1;
+                }
+                Err(_) => {
+                    // Keep the plan only while still close to it.
+                    let close = self.approach.as_ref().is_some_and(|(plan, t0)| {
+                        let (rr, vr, _) = plan.sample(t - t0);
+                        quat::norm(quat::sub(rr, dynamics::position(est))) < 3.0
+                            && quat::norm(quat::sub(vr, dynamics::velocity(est))) < 1.0
+                    });
+                    if !close {
+                        self.approach = None;
+                        self.approach_given_up = true;
+                        return None;
+                    }
+                }
+            }
+        }
+        let (plan, t0) = self.approach.as_ref()?;
+        let tau = t - t0;
+        let (r, v, a) = plan.sample(tau);
+        Some(ship_control::approach(
+            scn,
+            est,
+            (r, v, a, plan.jerk(tau)),
+            limits,
+            air,
+        ))
+    }
+
+    /// The approach plan being flown and the sim time it starts at.
+    pub fn approach(&self) -> Option<(&ApproachPlan, f64)> {
+        self.approach.as_ref().map(|(p, t0)| (p, *t0))
+    }
+
+    /// "plan" (flying a planned approach), "fallback" (planning gave up:
+    /// the scripted controller), "off" (switched off), or "none" (not in the
+    /// final approach yet).
+    pub fn approach_mode(&self) -> &'static str {
+        if !self.config.planned_approach {
+            "off"
+        } else if self.approach_given_up {
+            "fallback"
+        } else if self.approach.is_some() {
+            "plan"
+        } else {
+            "none"
+        }
+    }
+
+    /// Approach plans made this flight.
+    pub fn approach_plans(&self) -> u32 {
+        self.approach_plans
     }
 
     /// Guidance flies with its wind estimate (the configuration's choice).

@@ -30,6 +30,12 @@ pub const FUNNEL: (f64, f64) = (0.5, 1.2);
 /// Sink rate ≤ SINK_CONE.0 + SINK_CONE.1 · height, m/s (it slows as it
 /// comes down).
 pub const SINK_CONE: (f64, f64) = (1.0, 0.4);
+/// Toward the mast (−x) no faster than MAST_SPEED.0 + MAST_SPEED.1 · x,
+/// m/s: slower the nearer the axis, so a vehicle that brakes sideways at
+/// a few tenths of a metre per second squared can stop over it (planned
+/// arrivals at 1 m/s overshot into the mast: seen). The terminal
+/// controller's slide does the same.
+pub const MAST_SPEED: (f64, f64) = (0.3, 0.25);
 /// Sideways speed ≤ SIDE_CONE.0 + SIDE_CONE.1 · height, m/s.
 pub const SIDE_CONE: (f64, f64) = (1.0, 0.2);
 /// Largest rate of change of the planned tilt, rad/s (1.5°/s): the
@@ -53,6 +59,12 @@ pub const FUEL: f64 = 0.1;
 /// limits, and with hard ones a re-plan after the slightest drift had no
 /// solution). The mast keep-out, the thrust and the end stay hard.
 pub const SOFT: f64 = 300.0;
+/// Re-plan when this far off the plan, m and m/s, and no more often than
+/// every REPLAN_GAP s (re-planning many times a second against a vehicle
+/// that lags its command fed back on itself: seen).
+pub const REPLAN_OFF: f64 = 1.5;
+pub const REPLAN_SLIP: f64 = 0.75;
+pub const REPLAN_GAP: f64 = 0.5;
 /// Final times the first plan tries, s.
 pub const FINAL_TIMES: [f64; 5] = [5.0, 7.0, 9.0, 12.0, 15.0];
 
@@ -95,8 +107,12 @@ pub struct ApproachPlan {
     pub a: Vec<Vec3>,
     /// Gravity it was planned with, m/s².
     pub g: f64,
-    /// The objective's value (propellant plus smoothness).
+    /// The objective's value (gentle: effort, smoothness, comfort given up).
     pub cost: f64,
+    /// Propellant it needs, as the integral of the acceleration's magnitude
+    /// over time (m/s), plus SOFT times the comfort it gives up: what the
+    /// final-time search compares (a gentle shape, but not a slow hover).
+    pub price: f64,
     /// Interior-point iterations of the solve.
     pub iterations: usize,
     /// The largest amount any comfort limit was given up by (0: none).
@@ -182,14 +198,18 @@ impl Layout {
         6 * (NODES + 1) + 4 * (NODES + 1) + 3 * k
     }
     /// Slack of comfort limit `f` (0 tilt rate, 1 funnel, 2 side cone,
-    /// 3 sink cone) on interval or node `k` (0..NODES).
+    /// 3 sink cone, 4 speed toward the mast) on interval or node `k`
+    /// (0..NODES).
     fn eps(f: usize, k: usize) -> usize {
-        6 * (NODES + 1) + 4 * (NODES + 1) + 3 * NODES + 4 * k + f
+        6 * (NODES + 1) + 4 * (NODES + 1) + 3 * NODES + SOFTS * k + f
     }
     fn n() -> usize {
-        6 * (NODES + 1) + 4 * (NODES + 1) + 3 * NODES + 4 * NODES
+        6 * (NODES + 1) + 4 * (NODES + 1) + 3 * NODES + SOFTS * NODES
     }
 }
+
+/// Comfort limits with a slack each, per node.
+const SOFTS: usize = 5;
 
 /// Rows of `A x + s = b`, built in cone order.
 struct Rows {
@@ -300,8 +320,19 @@ fn assemble(p: &ApproachProblem) -> Assembled {
             SINK_CONE.0 - SINK_CONE.1 * p.z_catch,
         );
     }
+    for k in 1..=n {
+        // v_x ≥ −(m0 + m1 x) − ε: slower toward the mast the nearer the axis.
+        rows.row(
+            &[
+                (Layout::v(k), -1.0),
+                (Layout::r(k), -MAST_SPEED.1),
+                (Layout::eps(4, k - 1), -1.0),
+            ],
+            MAST_SPEED.0,
+        );
+    }
     for k in 0..n {
-        for f in 0..4 {
+        for f in 0..SOFTS {
             rows.row(&[(Layout::eps(f, k), -1.0)], 0.0);
         }
     }
@@ -365,7 +396,7 @@ fn assemble(p: &ApproachProblem) -> Assembled {
         for i in 0..3 {
             pd[Layout::j(k) + i] = SMOOTH;
         }
-        for f in 0..4 {
+        for f in 0..SOFTS {
             q[Layout::eps(f, k)] = SOFT;
         }
     }
@@ -427,6 +458,14 @@ impl ApproachPlanner {
         let get = |at: usize| -> Vec3 { [x[at], x[at + 1], x[at + 2]] };
         let cost = q.iter().zip(x).map(|(c, v)| c * v).sum::<f64>()
             + 0.5 * pd.iter().zip(x).map(|(c, v)| c * v * v).sum::<f64>();
+        let dt = p.t_f / n as f64;
+        let propellant: f64 = (0..=n)
+            .map(|k| x[Layout::sigma(k)] * if k == 0 || k == n { 0.5 * dt } else { dt })
+            .sum();
+        let given_up: f64 = (0..n)
+            .flat_map(|k| (0..SOFTS).map(move |f| Layout::eps(f, k)))
+            .map(|i| x[i])
+            .sum();
         Ok(ApproachPlan {
             t_f: p.t_f,
             r: (0..=n).map(|k| get(Layout::r(k))).collect(),
@@ -434,16 +473,17 @@ impl ApproachPlanner {
             a: (0..=n).map(|k| get(Layout::a(k))).collect(),
             g: p.g,
             cost,
+            price: propellant + SOFT * given_up,
             iterations: solver.iterations(),
             slack: (0..n)
-                .flat_map(|k| (0..4).map(move |f| Layout::eps(f, k)))
+                .flat_map(|k| (0..SOFTS).map(move |f| Layout::eps(f, k)))
                 .map(|i| x[i])
                 .fold(0.0, f64::max),
         })
     }
 
-    /// Plan with each of `times` as the final time; keep the cheapest that
-    /// solves.
+    /// Plan with each of `times` as the final time; keep the one that solves
+    /// with the lowest price (propellant plus comfort given up).
     pub fn plan_free(
         &mut self,
         p: &ApproachProblem,
@@ -455,7 +495,7 @@ impl ApproachPlanner {
             let mut q = p.clone();
             q.t_f = t;
             match self.plan(&q) {
-                Ok(plan) if best.as_ref().is_none_or(|b| plan.cost < b.cost) => best = Some(plan),
+                Ok(plan) if best.as_ref().is_none_or(|b| plan.price < b.price) => best = Some(plan),
                 Ok(_) => {}
                 Err(e) => last = e,
             }
@@ -479,7 +519,7 @@ mod tests {
             v0: [-1.0, 0.0, -2.0],
             a0: [0.0, 0.0],
             z_catch,
-            t_f: 9.0,
+            t_f: 12.0,
             a_min: 0.4 * 2.45e6 / 120e3 * 1.05,
             a_max: 2.45e6 / 120e3 * 0.9,
             keep_x: -9.5 + 4.5 + 1.6,
@@ -490,8 +530,14 @@ mod tests {
     }
 
     fn check(p: &ApproachProblem, plan: &ApproachPlan) {
+        check_within(p, plan, 1e-4);
+    }
+
+    /// As `check`, allowing a comfort limit to be given up by `slack`.
+    fn check_within(p: &ApproachProblem, plan: &ApproachPlan, slack: f64) {
+        let tol = slack.max(1e-5);
         assert!(
-            plan.slack < 1e-4,
+            plan.slack < slack,
             "gave up {} of a comfort limit",
             plan.slack
         );
@@ -534,7 +580,7 @@ mod tests {
             let (a, b) = (plan.a[k], plan.a[k + 1]);
             let step = (b[0] - a[0]).hypot(b[1] - a[1]);
             assert!(
-                step <= p.g * TILT_RATE * dt * (1.0 + 1e-5) + 1e-6,
+                step <= p.g * TILT_RATE * dt * (1.0 + 1e-5) + tol,
                 "node {k}: tilt rate"
             );
         }
@@ -542,17 +588,22 @@ mod tests {
             let (r, v) = (plan.r[k], plan.v[k]);
             let h = r[2] - p.z_catch;
             assert!(
-                r[0].hypot(r[1]) <= FUNNEL.0 + FUNNEL.1 * h + 1e-5,
+                r[0].hypot(r[1]) <= FUNNEL.0 + FUNNEL.1 * h + tol,
                 "node {k}: funnel"
             );
             assert!(
-                v[2] >= -(SINK_CONE.0 + SINK_CONE.1 * h) - 1e-5,
+                v[2] >= -(SINK_CONE.0 + SINK_CONE.1 * h) - tol,
                 "node {k}: sink {}",
                 v[2]
             );
             assert!(
-                v[0].hypot(v[1]) <= SIDE_CONE.0 + SIDE_CONE.1 * h + 1e-5,
+                v[0].hypot(v[1]) <= SIDE_CONE.0 + SIDE_CONE.1 * h + tol,
                 "node {k}: side"
+            );
+            assert!(
+                v[0] >= -(MAST_SPEED.0 + MAST_SPEED.1 * r[0]) - tol,
+                "node {k}: toward the mast at {}",
+                v[0]
             );
         }
     }
@@ -607,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn free_time_keeps_the_cheapest() {
+    fn free_time_keeps_the_least_propellant() {
         let p = ship_gate();
         let mut planner = ApproachPlanner::new();
         let best = planner.plan_free(&p, &FINAL_TIMES).expect("plan");
@@ -616,12 +667,12 @@ mod tests {
             q.t_f = t;
             if let Ok(other) = planner.plan(&q) {
                 assert!(
-                    best.cost <= other.cost + 1e-6,
+                    best.price <= other.price + 1e-6,
                     "{} s ({}) beats {} s ({})",
                     t,
-                    other.cost,
+                    other.price,
                     best.t_f,
-                    best.cost
+                    best.price
                 );
             }
         }
@@ -637,7 +688,8 @@ mod tests {
         let plan = ApproachPlanner::new()
             .plan_free(&p, &FINAL_TIMES)
             .expect("plan");
-        check(&p, &plan);
+        // Unwinding a tilt toward the mast costs a little comfort.
+        check_within(&p, &plan, 0.05);
     }
 
     /// A start that breaks a comfort limit (sliding sideways at 4 m/s, low,

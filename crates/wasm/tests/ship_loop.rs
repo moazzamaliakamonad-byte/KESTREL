@@ -677,12 +677,24 @@ fn wind_run(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64) -> WindRun {
 }
 
 fn wind_run_with(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64, aware: bool) -> WindRun {
+    wind_run_cfg(kind, wind, noise, seed, aware, true)
+}
+
+fn wind_run_cfg(
+    kind: Kind,
+    wind: [f64; 2],
+    noise: Noise,
+    seed: u64,
+    aware: bool,
+    planned_approach: bool,
+) -> WindRun {
     let mut f = ShipFlight::new(ShipFlightConfig {
         seed,
         lag: 0.3,
         noise,
         wind,
         wind_aware: aware,
+        planned_approach,
         ..ShipFlightConfig::new(kind)
     })
     .unwrap();
@@ -789,9 +801,8 @@ fn wind_sweep() {
     }
 }
 
-/// With wind awareness off, guidance flies exactly the flight it flew
-/// before M4 (numbers read from that code, 2026-11-18): the estimate is
-/// made but used nowhere.
+/// With wind awareness and the planned approach off, guidance flies exactly
+/// the flight it flew before M4 (numbers read from that code, 2026-11-18).
 #[test]
 fn unaware_flight_matches_today() {
     for (kind, wind, t, left) in [
@@ -808,7 +819,7 @@ fn unaware_flight_matches_today() {
             25.712377419400028,
         ),
     ] {
-        let r = wind_run_with(kind, wind, Noise::LOW, 7, false);
+        let r = wind_run_cfg(kind, wind, Noise::LOW, 7, false, false);
         assert_eq!(r.outcome, Some(Outcome::Caught), "{kind:?}");
         assert_eq!(r.t, t, "{kind:?}");
         assert!((r.left - left).abs() < 1e-9, "{kind:?}: {} t left", r.left);
@@ -1041,5 +1052,159 @@ fn nav_error_by_noise() {
                 (sum / n.max(1) as f64).sqrt()
             );
         }
+    }
+}
+
+/// The planned final approach (M4.2) against the scripted terminal
+/// controller, same build, wind awareness on: the boards of
+/// `wind_aware_board` plus, per flight, the time from the gate to the catch
+/// and the speeds at contact. `--ignored --nocapture`.
+#[test]
+#[ignore]
+fn approach_board() {
+    #[derive(Clone, Copy)]
+    enum Job {
+        Seed(Kind, Noise, &'static str, u64),
+        EngineOut(Noise, &'static str, f64),
+    }
+    struct Out {
+        caught: bool,
+        approach_s: Option<f64>,
+        contact: Option<(f64, f64)>,
+        line: String,
+    }
+    let run = |job: Job, planned: bool| -> Out {
+        let (kind, noise, name, seed, fail) = match job {
+            Job::Seed(k, n, name, s) => (k, n, name, s, None),
+            Job::EngineOut(n, name, at) => (Kind::Earth, n, name, 7, Some(at)),
+        };
+        let mut f = ShipFlight::new(ShipFlightConfig {
+            seed,
+            lag: 0.3,
+            noise,
+            planned_approach: planned,
+            ..ShipFlightConfig::new(kind)
+        })
+        .unwrap();
+        let mut pending: Option<Pending> = None;
+        let mut last_request = f64::NEG_INFINITY;
+        let mut gate_t = None;
+        let mut failed = false;
+        while f.phase() != Phase::Done && f.sim().t < 400.0 {
+            f.step(FRAME);
+            if let Some(at) = fail
+                && !failed
+                && f.sim().t >= at
+            {
+                failed = true;
+                f.engine_out();
+            }
+            if gate_t.is_none() && f.phase() == Phase::Terminal {
+                gate_t = Some(f.sim().t);
+            }
+            deliver(&mut f, &mut pending);
+            request(&mut f, &mut pending, &mut last_request);
+        }
+        let s = f.sim();
+        let caught = s.outcome == Some(Outcome::Caught);
+        let contact = s.end_velocity.map(|v| (-v[2], v[0].hypot(v[1])));
+        Out {
+            caught,
+            approach_s: gate_t.filter(|_| caught).map(|g| s.t - g),
+            contact: contact.filter(|_| caught),
+            line: format!(
+                "{kind:?} seed {seed} noise {name} fail {fail:?}: {:?} at {:.1} s, approach {}",
+                s.outcome,
+                s.t,
+                f.approach_mode()
+            ),
+        }
+    };
+    let mut jobs = Vec::new();
+    for planned in [false, true] {
+        for seed in 7..=10 {
+            for (name, noise) in [
+                ("off", Noise::OFF),
+                ("low", Noise::LOW),
+                ("high", Noise::HIGH),
+            ] {
+                jobs.push((
+                    "ship nominal 7-10",
+                    planned,
+                    Job::Seed(Kind::Earth, noise, name, seed),
+                ));
+            }
+        }
+        for seed in 11..=30 {
+            for (name, noise) in [("low", Noise::LOW), ("high", Noise::HIGH)] {
+                jobs.push((
+                    "ship seeds 11-30",
+                    planned,
+                    Job::Seed(Kind::Earth, noise, name, seed),
+                ));
+                jobs.push((
+                    "booster seeds 11-30",
+                    planned,
+                    Job::Seed(Kind::Booster, noise, name, seed),
+                ));
+            }
+        }
+        for at in [49.0, 51.0, 53.0, 55.0, 57.0, 59.0, 61.0, 63.0, 65.0, 67.0] {
+            for (name, noise) in [("off", Noise::OFF), ("low", Noise::LOW)] {
+                jobs.push((
+                    "ship engine-out window",
+                    planned,
+                    Job::EngineOut(noise, name, at),
+                ));
+            }
+        }
+    }
+    let queue = std::sync::Mutex::new(jobs.into_iter().enumerate().collect::<Vec<_>>());
+    let results = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|sc| {
+        for _ in 0..6 {
+            sc.spawn(|| {
+                loop {
+                    let Some((i, (group, planned, job))) = queue.lock().unwrap().pop() else {
+                        break;
+                    };
+                    let o = run(job, planned);
+                    results.lock().unwrap().push((i, group, planned, o));
+                }
+            });
+        }
+    });
+    let mut results = results.into_inner().unwrap();
+    results.sort_by_key(|r| r.0);
+    for (_, group, planned, o) in &results {
+        if !o.caught {
+            eprintln!("LOST planned {planned}: {group}: {}", o.line);
+        }
+    }
+    eprintln!("\nboard                     scripted                         planned");
+    for group in [
+        "ship nominal 7-10",
+        "ship seeds 11-30",
+        "booster seeds 11-30",
+        "ship engine-out window",
+    ] {
+        let stats = |planned: bool| {
+            let cell: Vec<_> = results
+                .iter()
+                .filter(|r| r.1 == group && r.2 == planned)
+                .collect();
+            let caught = cell.iter().filter(|r| r.3.caught).count();
+            let ts: Vec<f64> = cell.iter().filter_map(|r| r.3.approach_s).collect();
+            let cs: Vec<(f64, f64)> = cell.iter().filter_map(|r| r.3.contact).collect();
+            let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len().max(1) as f64;
+            format!(
+                "{caught:2}/{:2} gate->catch {:4.1} s down {:.2} side {:.2} m/s",
+                cell.len(),
+                mean(&ts),
+                mean(&cs.iter().map(|c| c.0).collect::<Vec<_>>()),
+                mean(&cs.iter().map(|c| c.1).collect::<Vec<_>>())
+            )
+        };
+        eprintln!("{group:24}  {}   {}", stats(false), stats(true));
     }
 }
