@@ -85,6 +85,47 @@ pub fn derivative(q: Quat, w: Vec3) -> Quat {
     [d[0] / 2.0, d[1] / 2.0, d[2] / 2.0, d[3] / 2.0]
 }
 
+/// The rotation whose body axes are `x`, `y`, `z` in inertial coordinates
+/// (orthonormal, right-handed).
+pub fn from_axes(x: Vec3, y: Vec3, z: Vec3) -> Quat {
+    // Rotation matrix columns are the body axes; Shepperd's method.
+    let (m00, m01, m02) = (x[0], y[0], z[0]);
+    let (m10, m11, m12) = (x[1], y[1], z[1]);
+    let (m20, m21, m22) = (x[2], y[2], z[2]);
+    let tr = m00 + m11 + m22;
+    let q = if tr > 0.0 {
+        let s = (tr + 1.0).sqrt() * 2.0;
+        [0.25 * s, (m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s]
+    } else if m00 > m11 && m00 > m22 {
+        let s = (1.0 + m00 - m11 - m22).sqrt() * 2.0;
+        [(m21 - m12) / s, 0.25 * s, (m01 + m10) / s, (m02 + m20) / s]
+    } else if m11 > m22 {
+        let s = (1.0 + m11 - m00 - m22).sqrt() * 2.0;
+        [(m02 - m20) / s, (m01 + m10) / s, 0.25 * s, (m12 + m21) / s]
+    } else {
+        let s = (1.0 + m22 - m00 - m11).sqrt() * 2.0;
+        [(m10 - m01) / s, (m02 + m20) / s, (m12 + m21) / s, 0.25 * s]
+    };
+    normalize(q)
+}
+
+/// Spherical interpolation from `a` (s = 0) to `b` (s = 1), the short way.
+pub fn slerp(a: Quat, b: Quat, s: f64) -> Quat {
+    let mut d: f64 = (0..4).map(|i| a[i] * b[i]).sum();
+    let b = if d < 0.0 {
+        d = -d;
+        b.map(|c| -c)
+    } else {
+        b
+    };
+    if d > 0.9995 {
+        return normalize(std::array::from_fn(|i| a[i] + s * (b[i] - a[i])));
+    }
+    let th = d.clamp(-1.0, 1.0).acos();
+    let (wa, wb) = (((1.0 - s) * th).sin() / th.sin(), (s * th).sin() / th.sin());
+    normalize(std::array::from_fn(|i| wa * a[i] + wb * b[i]))
+}
+
 /// Angle between the body axis `b_z` and inertial up, rad.
 pub fn tilt(q: Quat) -> f64 {
     rotate(q, [0.0, 0.0, 1.0])[2].clamp(-1.0, 1.0).acos()
@@ -93,6 +134,25 @@ pub fn tilt(q: Quat) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_axes_recovers_a_rotation() {
+        let q = normalize([0.3, -0.5, 0.7, 0.2]);
+        let (x, y, z) = (
+            rotate(q, [1.0, 0.0, 0.0]),
+            rotate(q, [0.0, 1.0, 0.0]),
+            rotate(q, [0.0, 0.0, 1.0]),
+        );
+        let p = from_axes(x, y, z);
+        let same = (0..4).all(|i| (p[i] - q[i]).abs() < 1e-12)
+            || (0..4).all(|i| (p[i] + q[i]).abs() < 1e-12);
+        assert!(same, "{q:?} {p:?}");
+        let h = slerp(q, p, 0.5);
+        assert!(
+            (0..4).all(|i| (h[i] - q[i]).abs() < 1e-9)
+                || (0..4).all(|i| (h[i] + q[i]).abs() < 1e-9)
+        );
+    }
 
     fn close(a: Vec3, b: Vec3, tol: f64) -> bool {
         (0..3).all(|i| (a[i] - b[i]).abs() < tol)

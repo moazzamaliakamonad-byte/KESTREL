@@ -199,6 +199,9 @@ pub struct ShipFlightConfig {
     /// Start from orbit (the ship only): the entry, then the 6-DoF flight
     /// from where it hands over (`position`/`velocity` are then unused).
     pub entry: Option<EntryConfig>,
+    /// Start attitude (None: the vehicle's usual one). Set at the
+    /// hand-over so the 6-DoF flight continues the entry's attitude.
+    pub attitude: Option<quat::Quat>,
 }
 
 /// An entry from orbit (*illustrative* numbers, chosen so guidance has
@@ -280,6 +283,7 @@ impl ShipFlightConfig {
             gust_speed: GUST_SPEED,
             failed: Vec::new(),
             entry: None,
+            attitude: None,
         }
     }
 
@@ -300,10 +304,15 @@ impl ShipFlightConfig {
 /// The start attitude. Ship: belly down, nose toward the tower (−x).
 /// Booster: engines first, its axis along the fall.
 pub fn start_state(scn: &Scenario, r: Vec3, v: Vec3) -> State {
-    let q = match scn.ship.kind {
+    start_state_with(scn, r, v, None)
+}
+
+/// As [`start_state`], with an attitude given (or the usual one).
+pub fn start_state_with(scn: &Scenario, r: Vec3, v: Vec3, q: Option<quat::Quat>) -> State {
+    let q = q.unwrap_or_else(|| match scn.ship.kind {
         VehicleKind::Ship => ship_control::belly_attitude(0.0),
         VehicleKind::Booster => ship_control::descent_attitude(v),
-    };
+    });
     dynamics::state(scn.start_mass, r, v, q, [0.0; 3])
 }
 
@@ -361,6 +370,9 @@ pub struct ShipFlight {
     config: ShipFlightConfig,
     entry: Option<Box<EntryPhase>>,
     entry_summary: Option<EntrySummary>,
+    /// From orbit: the tower frame on the round Earth (following the ship
+    /// during the entry, fixed from the hand-over on).
+    earth: Option<model::entry::EarthFrame>,
 }
 
 impl ShipFlight {
@@ -379,7 +391,12 @@ impl ShipFlight {
         {
             return Err("bad flight configuration");
         }
-        let x = start_state(&scn, c.position, c.velocity);
+        let x = start_state_with(
+            &scn,
+            c.position,
+            c.velocity,
+            c.attitude.filter(|q| q.iter().all(|v| v.is_finite())),
+        );
         let trim = scn.ship.surface_trim();
         let mut sim = ShipSim::new(scn, x);
         sim.cluster.lag = c.lag;
@@ -401,6 +418,9 @@ impl ShipFlight {
             } else {
                 Phase::BellyFlop
             },
+            earth: entry.as_ref().map(|e| {
+                model::entry::EarthFrame::toward(e.site, model::entry::position(&e.sim.x))
+            }),
             entry,
             entry_summary: None,
             config: c.clone(),
@@ -470,6 +490,29 @@ impl ShipFlight {
         self.entry_summary
     }
 
+    /// From orbit: the tower frame on the round Earth.
+    pub fn earth_frame(&self) -> Option<model::entry::EarthFrame> {
+        self.earth
+    }
+
+    /// The entry in the tower frame: (position, velocity, attitude), the
+    /// same numbers the 6-DoF flight starts from at the hand-over.
+    pub fn entry_local(&self) -> Option<(Vec3, Vec3, quat::Quat)> {
+        let (e, frame) = (self.entry.as_deref()?, self.earth?);
+        Some(Self::local_state(&frame, e))
+    }
+
+    fn local_state(frame: &model::entry::EarthFrame, e: &EntryPhase) -> (Vec3, Vec3, quat::Quat) {
+        use model::entry as me;
+        let x = &e.sim.x;
+        let mach = me::loads(&e.sim.aero, x, e.sim.mass).mach;
+        (
+            frame.position(me::position(x)),
+            frame.vector(me::velocity(x)),
+            me::attitude(frame, x, e.sim.bank, mach),
+        )
+    }
+
     /// Fly the entry for `dt` seconds: guidance every CYCLE, truth in its
     /// own steps. At the hand-over the 6-DoF flight starts from where the
     /// entry ended; if the tiles burn through, the flight is lost.
@@ -494,6 +537,9 @@ impl ShipFlight {
             e.since += h;
             left -= h;
         }
+        // The tower frame follows the ship (a fraction of a degree in all).
+        let r = model::entry::position(&e.sim.x);
+        self.earth = Some(model::entry::EarthFrame::toward(e.site, r));
         match e.sim.outcome {
             Some(sim::entry::EntryOutcome::HandOver) => self.hand_over(),
             Some(sim::entry::EntryOutcome::BurnedThrough) => {
@@ -514,23 +560,11 @@ impl ShipFlight {
             return;
         };
         use model::entry as me;
-        let site = e.site;
         let r = me::position(&e.sim.x);
-        let v = me::velocity(&e.sim.x);
-        let up_ship = me::unit(r);
-        // Horizontal direction from the site toward the ship.
-        let toward = me::unit(quat::sub(
-            up_ship,
-            quat::scale(site, quat::dot(up_ship, site)),
-        ));
-        let side = quat::cross(site, toward);
-        let x = me::surface_distance(site, r);
-        let y = quat::dot(quat::sub(r, quat::scale(site, me::RADIUS)), side);
-        let z = me::altitude(&e.sim.x);
-        // Velocity: horizontal parts along the tower axes, vertical along the ship up.
-        let vz = quat::dot(v, up_ship);
-        let vh = quat::sub(v, quat::scale(up_ship, vz));
-        let velocity = [quat::dot(vh, toward), quat::dot(vh, side), vz];
+        // The same frame and numbers the page was shown a moment ago: the
+        // flight continues where the entry was, moving and turned as it was.
+        let frame = me::EarthFrame::toward(e.site, r);
+        let (position, velocity, attitude) = Self::local_state(&frame, &e);
         let summary = EntrySummary {
             duration: e.sim.t,
             peak_heat_flux: e.sim.peak_heat_flux,
@@ -542,13 +576,15 @@ impl ShipFlight {
         };
         let mut c = self.config.clone();
         c.entry = None;
-        c.position = [x, y, z];
+        c.position = position;
         c.velocity = velocity;
+        c.attitude = Some(attitude);
         match ShipFlight::new(c) {
             Ok(mut next) => {
                 next.sim.t = e.sim.t;
                 next.entry_summary = Some(summary);
                 next.config = self.config.clone();
+                next.earth = Some(frame);
                 *self = next;
             }
             Err(_) => {

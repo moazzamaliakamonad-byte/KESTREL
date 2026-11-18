@@ -286,6 +286,96 @@ pub fn rk4(aero: &EntryAero, x: &EntryState, m: f64, bank: f64, dt: f64) -> Entr
     std::array::from_fn(|i| x[i] + dt / 6.0 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]))
 }
 
+/// The tower's frame on the round Earth, the one the landing is simulated
+/// in: origin at the site on the surface, `z` up there, `x` horizontal
+/// toward the ship (following it during the entry, so the ship stays in
+/// the x-z plane; the turn is a fraction of a degree), `y = z × x`.
+/// Exact 3D: far away the ship is below the site's horizon, as on a
+/// round Earth; near the site it agrees with the flat landing frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EarthFrame {
+    /// Unit vector of the site (its local up).
+    pub site: Vec3,
+    pub x: Vec3,
+    pub y: Vec3,
+}
+
+impl EarthFrame {
+    /// The frame at `site` with `x` toward the point under `r`.
+    pub fn toward(site: Vec3, r: Vec3) -> EarthFrame {
+        let site = unit(site);
+        let mut x = quat::sub(unit(r), quat::scale(site, quat::dot(unit(r), site)));
+        if quat::norm(x) < 1e-12 {
+            // Straight above the site: any horizontal direction.
+            x = quat::cross([0.0, 0.0, 1.0], site);
+            if quat::norm(x) < 1e-12 {
+                x = [1.0, 0.0, 0.0];
+            }
+        }
+        let x = unit(x);
+        EarthFrame {
+            site,
+            x,
+            y: quat::cross(site, x),
+        }
+    }
+
+    /// An Earth-centred position in the tower frame, m.
+    pub fn position(&self, r: Vec3) -> Vec3 {
+        let d = quat::sub(r, quat::scale(self.site, RADIUS));
+        [
+            quat::dot(d, self.x),
+            quat::dot(d, self.y),
+            quat::dot(d, self.site),
+        ]
+    }
+
+    /// An Earth-centred vector (velocity, axis) in the tower frame.
+    pub fn vector(&self, v: Vec3) -> Vec3 {
+        [
+            quat::dot(v, self.x),
+            quat::dot(v, self.y),
+            quat::dot(v, self.site),
+        ]
+    }
+}
+
+/// Angle of attack the ship is drawn and handed over at: about 60° (nose
+/// up from the velocity) hypersonic, easing below Mach 5 into the belly
+/// flop (body level along the motion, belly down) reached at Mach 1.5,
+/// where the model's lift has faded too. The bank rolls the hypersonic
+/// pose about the velocity.
+pub const HYPERSONIC_ATTACK: f64 = 1.047_197_551_196_597_7;
+
+/// The ship's attitude in the tower frame for state `x` (Earth-centred),
+/// bank `bank` (rad, positive right) and Mach `mach`: body x the belly,
+/// body z the nose (the 6-DoF model's axes).
+pub fn attitude(frame: &EarthFrame, x: &EntryState, bank: f64, mach: f64) -> quat::Quat {
+    let f = unit(frame.vector(velocity(x)));
+    // Local up at the ship (radial), in the tower frame.
+    let up = unit(frame.vector(position(x)));
+    let n = unit(quat::sub(up, quat::scale(f, quat::dot(up, f))));
+    let a = HYPERSONIC_ATTACK;
+    let roll = |v: Vec3| -> Vec3 {
+        // Rodrigues: rotate v about f by the bank.
+        let (s, c) = bank.sin_cos();
+        let k = quat::cross(f, v);
+        quat::add(
+            quat::add(quat::scale(v, c), quat::scale(k, s)),
+            quat::scale(f, quat::dot(f, v) * (1.0 - c)),
+        )
+    };
+    let nose = roll(quat::add(quat::scale(f, a.cos()), quat::scale(n, a.sin())));
+    let belly = roll(quat::sub(quat::scale(f, a.sin()), quat::scale(n, a.cos())));
+    let hypersonic = quat::from_axes(belly, quat::cross(nose, belly), nose);
+    // Belly flop: nose level along the horizontal motion, belly down.
+    let level = unit(quat::sub(f, quat::scale(up, quat::dot(f, up))));
+    let down = quat::scale(up, -1.0);
+    let flop = quat::from_axes(down, quat::cross(level, down), level);
+    let s = ((mach - 1.5) / (5.0 - 1.5)).clamp(0.0, 1.0);
+    quat::slerp(flop, hypersonic, s)
+}
+
 /// Unit vector of the point at latitude `lat`, longitude `lon` (rad).
 pub fn surface_point(lat: f64, lon: f64) -> Vec3 {
     [lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()]

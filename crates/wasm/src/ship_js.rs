@@ -763,7 +763,7 @@ impl ShipFlightJs {
         };
         // During the entry the clock is the entry's (the 6-DoF flight has not begun).
         let t = f.entry().map_or(s.t, |e| e.sim.t);
-        json!({
+        let mut out = json!({
             "t": t,
             "vehicle": vehicle_str(s.scn.ship.kind),
             "phase": f.phase().label(f.kind),
@@ -803,8 +803,29 @@ impl ShipFlightJs {
             "entry": entry_json(f),
             "entry_summary": entry_summary_json(f),
             "engine_out_margin": f.engine_out_margin(),
-        })
-        .to_string()
+        });
+        out["earth_frame"] = f.earth_frame().map_or(
+            Value::Null,
+            |fr| json!({"site": fr.site, "x": fr.x, "y": fr.y}),
+        );
+        // During the entry the vehicle is where the entry has it, in the
+        // tower frame (the 6-DoF flight has not begun): the page draws one
+        // continuous flight through the hand-over.
+        if let (Some(e), Some((p, vel, qq))) = (f.entry(), f.entry_local()) {
+            let l = model::entry::loads(&e.sim.aero, &e.sim.x, e.sim.mass);
+            out["position"] = json!(p);
+            out["velocity"] = json!(vel);
+            out["quat"] = json!(qq);
+            out["omega"] = json!([0.0, 0.0, 0.0]);
+            out["tilt_deg"] = json!(quat::tilt(qq).to_degrees());
+            out["heat_flux"] = json!(e.sim.heat_flux());
+            out["density"] = json!(l.rho);
+            out["mach"] = json!(l.mach);
+            out["q_dyn"] = json!(l.q_dyn);
+            out["wind"] = json!([0.0, 0.0, 0.0]);
+            out["aero_force"] = json!(quat::scale(model::entry::unit(vel), -l.drag * e.sim.mass));
+        }
+        out.to_string()
     }
 
     /// The current plan for drawing: `{t0, final_time, position[], quat[]}` or null.
