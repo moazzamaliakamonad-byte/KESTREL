@@ -59,6 +59,8 @@ export interface Options {
   seed: number | null;
   /** The convex solver inside guidance. */
   solver: PlannerSolver;
+  /** Guidance flies with its wind estimate (D-046). */
+  windAware: boolean;
 }
 
 export interface ViewOptions {
@@ -97,6 +99,7 @@ export const DEFAULT_OPTIONS: Options = {
   noise: "low",
   seed: null,
   solver: "clarabel",
+  windAware: true,
 };
 
 export const DEFAULT_VIEW: ViewOptions = {
@@ -204,6 +207,7 @@ export function configOf(s: Pick<ShipState, "scenario" | "start" | "options"> & 
     gust_speed: o.gustSpeed,
     failed: o.failed,
     solver: o.solver,
+    wind_aware: o.windAware,
   };
   if (s.orbit && s.scenario === "earth") config.entry = { range_km: s.orbit.rangeKm, gamma_deg: s.orbit.gammaDeg };
   if (o.propellant !== null) config.propellant = o.propellant * 1000;
@@ -395,6 +399,7 @@ function carried(o: Options): Partial<Options> {
     noise: o.noise,
     seed: o.seed,
     solver: o.solver,
+    windAware: o.windAware,
     propellant: null,
     failed: [],
     gimbal: null,

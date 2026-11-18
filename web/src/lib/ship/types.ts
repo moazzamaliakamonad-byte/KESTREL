@@ -97,6 +97,11 @@ export interface ShipSnapshot {
   heat_flux: number;
   arms: boolean;
   wind: Vec3;
+  /** Guidance's estimate of the steady wind (x, y), m/s, and its 1σ (D-046). */
+  wind_est: [number, number];
+  wind_sigma: [number, number];
+  /** Guidance flies with its wind estimate. */
+  wind_aware: boolean;
   guide: "plan" | "none" | "brake";
   leg_engines: number;
   ignition_z: number;
@@ -198,6 +203,8 @@ export interface FlightConfig {
   failed?: number[];
   /** Which convex solver the planner uses (read by the worker, not by the flight). */
   solver?: PlannerSolver;
+  /** Guidance flies with its wind estimate (default true). */
+  wind_aware?: boolean;
   /** Start from orbit (the ship only). */
   entry?: { range_km: number; gamma_deg: number };
 }

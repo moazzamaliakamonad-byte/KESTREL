@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decisionsBetween, frameAt, planDecision, planPositionAt, pushFrame, replanReason, FRAMES_MAX } from "./record";
+import { decisionsBetween, frameAt, planDecision, planPositionAt, pushFrame, replanReason, windReadout, windWords, WindWatch, FRAMES_MAX } from "./record";
 import type { EngineState, PlanDraw, ShipSnapshot } from "./types";
 
 function snap(patch: Partial<ShipSnapshot>): ShipSnapshot {
@@ -32,6 +32,9 @@ function snap(patch: Partial<ShipSnapshot>): ShipSnapshot {
     heat_flux: 0,
     arms: false,
     wind: [0, 0, 0],
+    wind_est: [0, 0],
+    wind_sigma: [15, 15],
+    wind_aware: true,
     guide: "none",
     leg_engines: 0,
     ignition_z: 900,
@@ -116,5 +119,53 @@ describe("flight record", () => {
     expect(frameAt(frames, 12.34)?.t).toBeCloseTo(12.4, 5);
     expect(frameAt(frames, -5)?.t).toBe(0);
     expect(frameAt([], 3)).toBeNull();
+  });
+});
+
+describe("wind in the flight record", () => {
+  it("names where the wind comes from", () => {
+    // Blowing toward −y comes from the north (+y).
+    expect(windWords([0, -12])).toBe("12 m/s from the north (+y)");
+    expect(windWords([-8, 0])).toBe("8 m/s from the sea (+x)");
+    expect(windWords([0.2, 0.1])).toBe("calm");
+  });
+
+  it("records once when the estimate settles", () => {
+    const w = new WindWatch();
+    const out = [15, 8, 3, 1.9, 1.5, 1.2].flatMap((sig, i) =>
+      w.update(snap({ t: i, wind_est: [0, -12], wind_sigma: [sig, sig] })),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe("wind");
+    expect(out[0].t).toBe(3);
+    expect(out[0].title).toBe("Wind estimated: 12 m/s from the north (+y)");
+    expect(out[0].facts).toContainEqual(["Uncertainty (1σ)", "±1.9 m/s"]);
+  });
+
+  it("records a gust when the estimate moves more than 4 m/s within 3 s, at most every 4 s", () => {
+    const w = new WindWatch();
+    const at = (t: number, wy: number) => w.update(snap({ t, wind_est: [0, wy], wind_sigma: [1, 1] }));
+    at(0, -10); // settles
+    expect(at(1, -10)).toHaveLength(0);
+    const gust = at(2.5, -16);
+    expect(gust).toHaveLength(1);
+    expect(gust[0].kind).toBe("gust");
+    expect(gust[0].title).toBe("Gust felt: 6 m/s change");
+    expect(at(4, -22)).toHaveLength(0); // within 4 s of the last entry
+    expect(at(6.6, -10)).toHaveLength(1); // back by 12 m/s within 3 s, 4.1 s after the last entry
+  });
+
+  it("says nothing while the estimate is still unsure", () => {
+    const w = new WindWatch();
+    expect(w.update(snap({ t: 0, wind_est: [0, 0], wind_sigma: [15, 15] }))).toHaveLength(0);
+    expect(w.update(snap({ t: 1, wind_est: [9, 0], wind_sigma: [9, 9] }))).toHaveLength(0);
+  });
+});
+
+describe("wind readout", () => {
+  it("says it is still estimating until it is sure, and when guidance ignores it", () => {
+    expect(windReadout({ wind_est: [3, 4], wind_sigma: [9, 9], wind_aware: true })).toBe("estimating…");
+    expect(windReadout({ wind_est: [3, 4], wind_sigma: [0.4, 0.3], wind_aware: true })).toBe("5.0 m/s ±0.4");
+    expect(windReadout({ wind_est: [3, 4], wind_sigma: [0.4, 0.3], wind_aware: false })).toBe("5.0 m/s ±0.4 (not used)");
   });
 });

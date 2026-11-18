@@ -11,7 +11,7 @@ import { clampDt, createMpc } from "../mpc";
 import type { SolverClient } from "../solverClient";
 import { Commentator, callouts } from "./commentary";
 import { pushSample, sampleOf, shipLive } from "./live";
-import { FRAME_EVERY, decisionsBetween, planDecision, pushFrame, replanReason, type Decision } from "./record";
+import { FRAME_EVERY, WindWatch, decisionsBetween, planDecision, pushFrame, replanReason, type Decision } from "./record";
 import { configOf, useShip, type FlightView } from "./store";
 import type { PlanDraw, ShipSnapshot } from "./types";
 
@@ -27,6 +27,7 @@ const mpc = createMpc(SHIP_REPLAN_PERIOD);
 let lastTrail = -Infinity;
 let lastSample = -Infinity;
 let lastFrame = -Infinity;
+let windWatch = new WindWatch();
 /** Something happened that makes the plan wrong (said in the next plan's reason). */
 let pendingEvent: string | null = null;
 /** Re-plan without waiting for the usual minimum gap (something happened). */
@@ -100,6 +101,7 @@ export function stopShip() {
   shipLive.history = [];
   shipLive.caption = null;
   shipLive.decisions = [];
+  windWatch = new WindWatch();
   shipLive.frames = [];
   shipLive.decisionVersion += 1;
   lastTrail = -Infinity;
@@ -166,6 +168,7 @@ function publish(snap: ShipSnapshot, prev: ShipSnapshot | null) {
     lastFrame = snap.t;
   }
   record(decisionsBetween(prev, snap));
+  record(windWatch.update(snap));
   const view = viewOf(snap);
   if (!sameView(st.flight, view)) st.setFlight(view);
   if (snap.outcome) st.finish();

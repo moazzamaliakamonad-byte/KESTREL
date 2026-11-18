@@ -7,7 +7,7 @@
 
 import type { PlanDraw, ShipSnapshot } from "./types";
 
-export type DecisionKind = "phase" | "ignition" | "plan" | "plan-failed" | "engines" | "failure" | "relight" | "arms" | "outcome" | "event";
+export type DecisionKind = "phase" | "ignition" | "plan" | "plan-failed" | "engines" | "failure" | "relight" | "arms" | "outcome" | "event" | "wind" | "gust";
 
 export interface Decision {
   /** Sim time, s. */
@@ -30,6 +30,73 @@ const PHASE_WHY: Record<string, [string, string]> = {
   "landing-burn": ["Landing burn", "Upright and on its burn engines: guidance's plan now steers the burn to the approach gate."],
   terminal: ["Final approach", "The plan reached its gate above the arms: the terminal controller flies the last metres onto them."],
 };
+
+const FROM = ["the sea (+x)", "the north-east", "the north (+y)", "the north-west", "the tower side (−x)", "the south-west", "the south (−y)", "the south-east"];
+
+/** A wind (the air's velocity, x and y) in words: its speed and where it comes from. */
+export function windWords(w: readonly [number, number] | readonly number[]): string {
+  const speed = Math.hypot(w[0], w[1]);
+  if (speed < 0.5) return "calm";
+  // It comes from the opposite of where it blows.
+  const deg = (Math.atan2(-w[1], -w[0]) * 180) / Math.PI;
+  return `${n(speed)} m/s from ${FROM[Math.round((((deg % 360) + 360) % 360) / 45) % 8]}`;
+}
+
+/** Guidance's wind for a readout: "estimating…", "12.0 m/s ±0.4", or "off" when guidance does not use it. */
+export function windReadout(s: Pick<ShipSnapshot, "wind_est" | "wind_sigma" | "wind_aware">): string {
+  const sigma = Math.max(s.wind_sigma[0], s.wind_sigma[1]);
+  const text = sigma < WIND_SETTLED ? `${n(Math.hypot(s.wind_est[0], s.wind_est[1]), 1)} m/s ±${n(sigma, 1)}` : "estimating…";
+  return s.wind_aware ? text : `${text} (not used)`;
+}
+
+/** The estimate counts as settled once its 1σ is below this, m/s. */
+export const WIND_SETTLED = 2;
+/** A gust: the estimate moves more than GUST_JUMP m/s within GUST_WINDOW s; at most one entry per GUST_GAP s. */
+export const GUST_JUMP = 4;
+export const GUST_WINDOW = 3;
+export const GUST_GAP = 4;
+
+/** Watches guidance's wind estimate and records when it settles and when it feels a gust (D-046). */
+export class WindWatch {
+  private settled = false;
+  private samples: { t: number; w: [number, number] }[] = [];
+  private lastGust = -Infinity;
+
+  update(s: ShipSnapshot): Decision[] {
+    const sigma = Math.max(s.wind_sigma[0], s.wind_sigma[1]);
+    const truth: [string, string] = ["True wind (the simulator's; guidance does not know it)", windWords([s.wind[0], s.wind[1]])];
+    if (!this.settled) {
+      if (!(sigma < WIND_SETTLED)) return [];
+      this.settled = true;
+      this.samples = [{ t: s.t, w: s.wind_est }];
+      return [
+        {
+          t: s.t,
+          kind: "wind",
+          title: `Wind estimated: ${windWords(s.wind_est)}`,
+          why: "The accelerometers' force, less gravity and the engines' thrust, is the air's push; the wind that explains it is now known to within 2 m/s. Guidance plans and steers with it from here.",
+          facts: [["Uncertainty (1σ)", `±${n(sigma, 1)} m/s`], truth, ["Used by guidance", s.wind_aware ? "yes" : "no (switched off)"]],
+        },
+      ];
+    }
+    this.samples = this.samples.filter((p) => s.t - p.t <= GUST_WINDOW);
+    this.samples.push({ t: s.t, w: s.wind_est });
+    if (s.t - this.lastGust < GUST_GAP) return [];
+    const jump = Math.max(...this.samples.map((p) => Math.hypot(s.wind_est[0] - p.w[0], s.wind_est[1] - p.w[1])));
+    if (!(jump > GUST_JUMP)) return [];
+    this.lastGust = s.t;
+    this.samples = [{ t: s.t, w: s.wind_est }];
+    return [
+      {
+        t: s.t,
+        kind: "gust",
+        title: `Gust felt: ${n(jump)} m/s change`,
+        why: "The air's push changed faster than a steady wind would: the estimate follows the gust, and the next plan flies in it.",
+        facts: [["Wind now (estimated)", windWords(s.wind_est)], truth],
+      },
+    ];
+  }
+}
 
 /** What changed between two consecutive snapshots that is worth recording. */
 export function decisionsBetween(prev: ShipSnapshot | null, next: ShipSnapshot): Decision[] {

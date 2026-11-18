@@ -74,6 +74,8 @@ const KIND_LABEL: Record<Decision["kind"], string> = {
   arms: "Tower",
   outcome: "Outcome",
   event: "You",
+  wind: "Wind",
+  gust: "Wind",
 };
 
 /** The flight's timeline: drag to replay any recorded instant; a mark per decision. */

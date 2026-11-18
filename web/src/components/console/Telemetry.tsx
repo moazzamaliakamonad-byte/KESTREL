@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { rotate } from "@/lib/ship/frames";
 import { shipLive, type Sample } from "@/lib/ship/live";
 import { failEngine } from "@/lib/ship/runtime";
+import { windReadout } from "@/lib/ship/record";
 import { PHASE_LABEL, useShip } from "@/lib/ship/store";
 import type { EntrySnapshot, ShipSnapshot } from "@/lib/ship/types";
 import { EngineMap } from "./Dock";
@@ -257,6 +258,10 @@ export function Telemetry() {
         <span>Mass</span>
         <b>
           <Units text={`${fmt(s.mass / 1000, 1)} t`} />
+        </b>
+        <span title="Guidance's own estimate of the steady wind, from its accelerometers and engine telemetry (D-046)">Wind (guidance)</span>
+        <b>
+          <Units text={windReadout(s)} />
         </b>
       </div>
       <Bar label="Propellant" value={s.propellant / full} text={`${fmt(s.propellant / 1000, 1)} t`} tone={s.propellant / full < 0.15 ? "warm" : undefined} />

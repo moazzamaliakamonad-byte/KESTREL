@@ -1326,6 +1326,11 @@ impl ShipFlight {
         self.wind.update(&inputs);
     }
 
+    /// Guidance flies with its wind estimate (the configuration's choice).
+    pub fn wind_aware(&self) -> bool {
+        self.config.wind_aware
+    }
+
     /// Guidance's wind estimate now.
     pub fn wind_estimate(&self) -> WindEstimate {
         self.wind.estimate()

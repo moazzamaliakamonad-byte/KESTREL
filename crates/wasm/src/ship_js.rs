@@ -49,6 +49,9 @@ struct ConfigDto {
     /// Start from orbit (the ship only).
     #[serde(default)]
     entry: Option<EntryDto>,
+    /// Guidance uses its wind estimate (default true; D-046).
+    #[serde(default)]
+    wind_aware: Option<bool>,
 }
 
 /// An entry from orbit as the page sends it.
@@ -197,6 +200,7 @@ fn config(json: &str) -> Option<ShipFlightConfig> {
             gamma: e.gamma_deg.to_radians(),
             ..Default::default()
         }),
+        wind_aware: c.wind_aware.unwrap_or(true),
         ..base
     })
 }
@@ -804,6 +808,11 @@ impl ShipFlightJs {
             "entry_summary": entry_summary_json(f),
             "engine_out_margin": f.engine_out_margin(),
         });
+        // Guidance's own view of the air (D-046).
+        let est = f.wind_estimate();
+        out["wind_est"] = json!(est.w);
+        out["wind_sigma"] = json!(est.sigma);
+        out["wind_aware"] = json!(f.wind_aware());
         out["earth_frame"] = f.earth_frame().map_or(
             Value::Null,
             |fr| json!({"site": fr.site, "x": fr.x, "y": fr.y}),
@@ -947,5 +956,24 @@ mod tests {
         }
         assert_eq!(s["phase"], "belly-flop");
         assert_eq!(parse(&ship_scenario("mars"))["ok"], false);
+    }
+
+    /// Guidance's wind estimate reaches the page, with its 1-sigma and
+    /// whether guidance uses it; the page can switch that off.
+    #[test]
+    fn snapshot_carries_the_wind_estimate() {
+        let windy = r#"{"scenario":"booster","position":[900,0,14000],"velocity":[-30,0,-420],"noise":"low","wind":[0,-15]}"#;
+        let mut f = ShipFlightJs::create(windy).unwrap();
+        for _ in 0..600 {
+            f.step(1.0 / 60.0);
+        }
+        let s = parse(&f.snapshot());
+        let est = s["wind_est"].as_array().expect("wind_est");
+        assert!((est[1].as_f64().unwrap() + 15.0).abs() < 2.0, "{est:?}");
+        assert!(s["wind_sigma"][0].as_f64().unwrap() < 2.0);
+        assert_eq!(s["wind_aware"], true);
+        let blind = r#"{"scenario":"booster","position":[900,0,14000],"velocity":[-30,0,-420],"wind":[0,-15],"wind_aware":false}"#;
+        let f = ShipFlightJs::create(blind).unwrap();
+        assert_eq!(parse(&f.snapshot())["wind_aware"], false);
     }
 }

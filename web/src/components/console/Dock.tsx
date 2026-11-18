@@ -199,6 +199,7 @@ function Environment() {
       >
         Throw a 4-second gust now
       </button>
+      <Toggle label="Guidance uses its wind estimate" value={options.windAware} onChange={(x) => setOptions({ windAware: x })} />
       <Slider label="Air density (× standard)" value={options.density} range={[0.5, 1.5]} step={0.05} disabled={locked} format={(x) => `${fmt(x, 2)} ×`} onChange={(x) => setOptions({ density: x })} />
       <Field label="Sensor noise">
         <Seg<Noise> label="Sensor noise" value={options.noise} onChange={(x) => setOptions({ noise: x })} options={[["off", "Off"], ["low", "Low"], ["high", "High"]]} />
