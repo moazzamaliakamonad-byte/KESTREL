@@ -3,7 +3,7 @@
 import { shown } from "@/lib/ship/shown";
 import { OrbitControls } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { entryNow } from "./Entry";
+import { EARTH_CENTRE } from "./Entry";
 import { useRef } from "react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
@@ -14,12 +14,15 @@ import type { ShipSnapshot } from "@/lib/ship/types";
 import { launchLive } from "./Vehicle";
 
 /** A concrete shot (the director picks among these). */
-export type Shot = "pad" | "launch" | "chase" | "track" | "onboard" | "tower" | "orbit" | "circle";
+export type Shot = "pad" | "launch" | "chase" | "track" | "onboard" | "tower" | "orbit" | "circle" | "entry";
 
 /** The director's cut: which shot suits this moment of the flight. */
 export function directorShot(s: ShipSnapshot | null): Shot {
   if (!s) return "chase";
   if (s.outcome) return "circle";
+  if (s.phase === "entry") return "entry";
+  // Just after an entry from orbit: stay with the ship (no cut) while it settles into the belly flop.
+  if (s.entry_summary && s.t - s.entry_summary.duration < 30) return "chase";
   const z = s.position[2];
   switch (s.phase) {
     case "terminal":
@@ -39,6 +42,8 @@ export function directorShot(s: ShipSnapshot | null): Shot {
 }
 
 export function shotOf(mode: CameraMode, s: ShipSnapshot | null): Shot {
+  // During the entry every camera but the free one rides with the ship (there is no ground to film from).
+  if (s?.phase === "entry" && mode !== "orbit") return "entry";
   return mode === "director" ? directorShot(s) : mode;
 }
 
@@ -64,15 +69,10 @@ export function Cameras() {
   /** The analysis view's focus (a part id, "" for the whole vehicle) and the seconds its fly-in has left. */
   const focus = useRef<string | null>(null);
   const flying = useRef(0);
+  /** The entry camera's offset from the ship (smoothed). */
+  const entryOffset = useRef(new THREE.Vector3());
 
   useFrame(({ camera, clock }, dt) => {
-    // The entry from orbit has its own camera (Entry.tsx); cut back after it.
-    if (entryNow() !== null) {
-      if (controls.current) controls.current.enabled = false;
-      last.current = "";
-      shaken.current = false;
-      return;
-    }
     const cam = camera as THREE.PerspectiveCamera;
     const st = useShip.getState();
     const editing = st.mode === "editing";
@@ -86,7 +86,8 @@ export function Cameras() {
     const length = info?.ship.length ?? 60;
     const analysis = analysisOn(st);
     const shot: Shot = editing ? "pad" : launching ? "launch" : st.view.paused || analysis ? "orbit" : shotOf(st.view.camera, snap);
-    const cut = shot !== last.current;
+    // Leaving the entry is not a cut: the camera glides from where it was.
+    const cut = shot !== last.current && last.current !== "entry";
     const from = last.current;
     last.current = shot;
     const k = 1 - Math.exp(-dt * 4);
@@ -167,6 +168,32 @@ export function Cameras() {
         }
         controls.current.update();
       }
+    } else if (shot === "entry" && snap) {
+      // Beside the ship, a little ahead and above, oriented to the local
+      // vertical of the round Earth: the plasma streams past.
+      const radial = ship.clone().sub(EARTH_CENTRE).normalize();
+      const fwd = new THREE.Vector3(...toScene(snap.velocity)).normalize();
+      const side = new THREE.Vector3().crossVectors(fwd, radial).normalize();
+      const drift = 0.6 + 0.35 * Math.sin(clock.elapsedTime * 0.05);
+      // The ship covers kilometres per frame here: follow it exactly and
+      // smooth only the camera's offset from it.
+      const want = new THREE.Vector3()
+        .addScaledVector(fwd, 40 + 30 * Math.sin(drift))
+        .addScaledVector(radial, 35)
+        .addScaledVector(side, -185);
+      // Over the last 10 km before the hand-over, ease into the chase
+      // camera framing, so the landing camera starts where this one is.
+      const speed = Math.hypot(...snap.velocity);
+      const chase = new THREE.Vector3(Math.sin(0.9) * 0.82, 0.24, Math.cos(0.9) * 0.82).multiplyScalar(3.2 * length + Math.min(520, speed * 0.75));
+      const blend = THREE.MathUtils.smoothstep(35_000 - (snap.entry?.altitude ?? 35_000), 0, 10_000);
+      want.lerp(chase, blend);
+      if (cut) entryOffset.current.copy(want);
+      else entryOffset.current.lerp(want, k);
+      cam.position.copy(ship).add(entryOffset.current);
+      lookAt.current.copy(ship).addScaledVector(fwd, -25 * (1 - blend));
+      cam.up.copy(radial);
+      cam.lookAt(lookAt.current);
+      fov = 40;
     } else if (shot === "chase" || shot === "circle") {
       const speed = snap ? Math.hypot(...snap.velocity) : 0;
       const d = 3.2 * length + Math.min(520, speed * 0.75);

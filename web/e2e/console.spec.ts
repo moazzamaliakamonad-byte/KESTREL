@@ -120,6 +120,8 @@ test("reset mid-flight goes back to the pad; a second flight starts cleanly", as
 });
 
 test("ship from orbit: entry sped up, hand-over at real time, caught", async ({ page }) => {
+  // About ten minutes of flight: the entry eases from ×16 to ×1 as it comes down.
+  test.setTimeout(900_000);
   const errors = collectErrors(page);
   await open(page);
   await page.evaluate(() => (window as unknown as { __kestrel: Probe }).__kestrel.getState().setVehicle("ship"));
@@ -129,7 +131,7 @@ test("ship from orbit: entry sped up, hand-over at real time, caught", async ({ 
   await expect.poll(() => state(page, (k) => k.live.snapshot?.phase)).toBe("entry");
   await expect(page.getByTestId("phase")).toHaveText("Entry");
   // The entry ends, and the flight continues in real time.
-  await expect.poll(() => state(page, (k) => k.live.snapshot?.phase), { timeout: 150_000, intervals: [500] }).not.toBe("entry");
+  await expect.poll(() => state(page, (k) => k.live.snapshot?.phase), { timeout: 400_000, intervals: [500] }).not.toBe("entry");
   await expect.poll(() => state(page, (k) => (k.getState().view as unknown as { speed: number }).speed)).toBe(1);
   await expect(page.getByTestId("verdict")).toHaveText("Ship caught by the tower", { timeout: 300_000 });
   expect(errors).toEqual([]);

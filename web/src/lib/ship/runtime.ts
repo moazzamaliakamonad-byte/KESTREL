@@ -132,19 +132,28 @@ function sameView(a: FlightView | null, b: FlightView): boolean {
   );
 }
 
+/** Simulation speed for an entry at `altitude` m: ×16 high up, ×1 by the hand-over at 25 km. */
+export function entrySpeed(altitude: number): number {
+  if (altitude > 55_000) return 16;
+  if (altitude > 42_000) return 8;
+  if (altitude > 34_000) return 4;
+  if (altitude > 28_000) return 2;
+  return 1;
+}
+
 function publish(snap: ShipSnapshot, prev: ShipSnapshot | null) {
   const st = useShip.getState();
   commentator.enabled = st.view.voice;
   commentator.say(callouts(st.scenario, prev, snap), st.view.speed);
   shipLive.caption = commentator.caption;
   shipLive.snapshot = snap;
-  // The entry hands over to the landing: back to real time, and the trail
-  // starts where the 6-DoF flight does.
-  if (prev?.phase === "entry" && snap.phase !== "entry") {
-    if (st.view.speed > 1) st.setView({ speed: 1 });
-    shipLive.trail = [];
+  // From orbit, time eases back toward real time as the ship comes down
+  // (never faster than the visitor chose).
+  if (snap.entry) {
+    const want = entrySpeed(snap.entry.altitude);
+    if (st.view.speed > want) st.setView({ speed: want });
   }
-  if (snap.phase !== "entry" && (snap.t - lastTrail >= TRAIL_EVERY || snap.outcome)) {
+  if (snap.t - lastTrail >= TRAIL_EVERY || snap.outcome) {
     shipLive.trail.push(snap.position);
     lastTrail = snap.t;
   }

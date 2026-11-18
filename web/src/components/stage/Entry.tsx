@@ -1,23 +1,31 @@
 "use client";
 
 import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef, type ReactNode } from "react";
+import { useMemo, useRef } from "react";
 import * as THREE from "three";
+import { toScene, type Vec3 } from "@/lib/ship/frames";
 import { shown } from "@/lib/ship/shown";
 import { useShip } from "@/lib/ship/store";
-import type { EntrySnapshot } from "@/lib/ship/types";
-import { ShipModel, type VehiclePose } from "./Vehicles";
+import type { EntrySnapshot, ShipSnapshot } from "@/lib/ship/types";
 
 /**
- * The entry from orbit, drawn around the ship: a round Earth below it (in
- * metres, Earth-centred, turned so that "up" at the ship is the scene's up
- * and its motion is +x), the thin line of the atmosphere, stars, the ground
- * track guidance predicted, the ship belly first with its heat glow and
- * plasma, and a camera that rides behind it. Everything is procedural; the
- * land and clouds are noise, not real geography. Simulation only.
+ * The round Earth for a flight from orbit, in the same world as the
+ * landing: the tower's frame (scene origin at the site, its up the scene's
+ * +y), so the ship flies one continuous path from 120 km to the arms. The
+ * globe's top sits just under the flat landing ground; a regional cap
+ * around the site continues the painted coast for a thousand kilometres
+ * and blends into the globe beyond. Also the atmosphere's thin line at the
+ * limb and the plasma wake behind the ship while it is hot. Everything is
+ * procedural; land and clouds are noise, not real geography. Simulation only.
  */
 
-const R = 6_371_000;
+export const EARTH_RADIUS = 6_371_000;
+/** The scene position of Earth's centre (the site is at the origin, up +y). */
+export const EARTH_CENTRE = new THREE.Vector3(0, -EARTH_RADIUS, 0);
+/** The globe lies this far under the flat ground at the site, m (no z-fighting). */
+const SINK = 150;
+/** Radius of the regional cap around the site, m. */
+const CAP = 1_200_000;
 
 /** The entry being shown, or null (not flying, or past the hand-over). */
 export function entryNow(): EntrySnapshot | null {
@@ -26,13 +34,17 @@ export function entryNow(): EntrySnapshot | null {
   return shown()?.entry ?? null;
 }
 
-/** Hides its children while the entry is shown (the landing scenery and vehicle). */
-export function NotInEntry({ children }: { children: ReactNode }) {
-  const g = useRef<THREE.Group>(null);
-  useFrame(() => {
-    if (g.current) g.current.visible = entryNow() === null;
-  });
-  return <group ref={g}>{children}</group>;
+/** The flight shown is one from orbit (during the entry and after it). */
+export function orbitFlight(): ShipSnapshot | null {
+  const st = useShip.getState();
+  const s = st.mode === "flying" || st.mode === "done" ? shown() : null;
+  if (s?.earth_frame) return s;
+  return null;
+}
+
+/** Altitude above the round Earth of a scene point, m. */
+export function trueAltitude(p: THREE.Vector3): number {
+  return p.distanceTo(EARTH_CENTRE) - EARTH_RADIUS;
 }
 
 // Value noise on the unit sphere (seamless), a few octaves.
@@ -62,9 +74,18 @@ function fbm(x: number, y: number, z: number, octaves: number): number {
   return s;
 }
 
+/** Land and sea colours close to the painted coast's (World.tsx). */
+function landColour(dry: number, t: number): [number, number, number] {
+  return [118 + 40 * dry + 20 * t, 112 + 26 * dry + 14 * t, 84 + 18 * dry + 8 * t];
+}
+function seaColour(depth: number): [number, number, number] {
+  return [18 + 50 * (1 - depth), 66 + 60 * (1 - depth), 104 + 46 * (1 - depth)];
+}
+
 /**
  * Equirectangular textures for a three.js sphere turned z-up (see `Globe`):
- * column u is longitude u·360° − 180°. Land, sea and ice; clouds apart.
+ * column u is longitude u·360° − 180° of the globe's own coordinates. Land,
+ * sea and ice; clouds as grey levels (an alpha map reads green).
  */
 function earthTextures(): { map: THREE.CanvasTexture; clouds: THREE.CanvasTexture } {
   const W = 1024, H = 512;
@@ -84,31 +105,14 @@ function earthTextures(): { map: THREE.CanvasTexture; clouds: THREE.CanvasTextur
       const h = fbm(x * 2.2 + 5, y * 2.2 + 3, z * 2.2 + 1, 6);
       const k = (j * W + i) * 4;
       const polar = Math.abs(lat) > 1.2 + 0.08 * (fbm(x * 6, y * 6, z * 6, 2) - 0.5);
-      let r: number, g: number, bl: number;
-      if (polar) [r, g, bl] = [222, 230, 236];
-      else if (h > 0.56) {
-        // Land: drier toward the low latitudes, a little relief.
-        const t = Math.min(1, (h - 0.56) * 6);
-        const dry = Math.max(0, 1 - Math.abs(lat) / 0.6) * fbm(x * 4, y * 4, z * 4, 3);
-        r = 74 + 70 * dry + 30 * t;
-        g = 84 + 40 * dry + 18 * t;
-        bl = 58 + 20 * dry + 10 * t;
-      } else {
-        // Sea: deeper away from the coast.
-        const d = Math.min(1, (0.56 - h) * 5);
-        r = 14 + 18 * (1 - d);
-        g = 46 + 40 * (1 - d);
-        bl = 86 + 50 * (1 - d);
-      }
-      a.data[k] = r;
-      a.data[k + 1] = g;
-      a.data[k + 2] = bl;
-      a.data[k + 3] = 255;
-      // Cloud cover as grey levels: an alpha map reads the green channel.
-      const c = fbm(x * 3.5 + 11, y * 3.5 + 7, z * 9 + 2, 5);
-      const cover = Math.max(0, Math.min(255, (c - 0.55) * 700));
-      b.data[k] = b.data[k + 1] = b.data[k + 2] = cover;
-      b.data[k + 3] = 255;
+      let c: [number, number, number];
+      if (polar) c = [222, 230, 236];
+      else if (h > 0.56) c = landColour(Math.max(0, 1 - Math.abs(lat) / 0.6) * fbm(x * 4, y * 4, z * 4, 3), Math.min(1, (h - 0.56) * 6));
+      else c = seaColour(Math.min(1, (0.56 - h) * 5));
+      a.data.set([c[0], c[1], c[2], 255], k);
+      const cl = fbm(x * 3.5 + 11, y * 3.5 + 7, z * 9 + 2, 5);
+      const cover = Math.max(0, Math.min(255, (cl - 0.55) * 700));
+      b.data.set([cover, cover, cover, 255], k);
     }
   }
   land.getContext("2d")!.putImageData(a, 0, 0);
@@ -117,8 +121,76 @@ function earthTextures(): { map: THREE.CanvasTexture; clouds: THREE.CanvasTextur
   map.colorSpace = THREE.SRGBColorSpace;
   map.anisotropy = 4;
   const clouds = new THREE.CanvasTexture(sky);
-  clouds.colorSpace = THREE.SRGBColorSpace;
   return { map, clouds };
+}
+
+/**
+ * The region around the site, seen from the scene's top (x across, z
+ * down the picture): the painted coast's shore (along x, 700 m toward +z)
+ * continues, wandering more the farther it gets; inland and offshore
+ * vary; the edge fades into the globe.
+ */
+function capTextures(): { map: THREE.CanvasTexture; alpha: THREE.CanvasTexture } {
+  const N = 1024;
+  const c = document.createElement("canvas");
+  c.width = c.height = N;
+  const al = document.createElement("canvas");
+  al.width = al.height = N;
+  const img = c.getContext("2d")!.createImageData(N, N);
+  const am = al.getContext("2d")!.createImageData(N, N);
+  for (let j = 0; j < N; j++) {
+    const z = ((j + 0.5) / N - 0.5) * 2 * CAP;
+    for (let i = 0; i < N; i++) {
+      const x = ((i + 0.5) / N - 0.5) * 2 * CAP;
+      const r = Math.hypot(x, z);
+      // The shore: straight at the site, wandering with distance.
+      const wander = Math.min(1, Math.abs(x) / 400_000);
+      const shore = 700 + wander * 260_000 * (fbm(x / 300_000 + 3, 1.7, 0.4, 4) - 0.5) * 2;
+      const k = (j * N + i) * 4;
+      const n = fbm(x / 60_000 + 9, z / 60_000 + 2, 0.3, 4);
+      const col = z < shore ? landColour(0.5 + 0.5 * fbm(x / 150_000, z / 150_000, 5.1, 3), n) : seaColour(Math.min(1, (z - shore) / 120_000));
+      img.data.set([col[0], col[1], col[2], 255], k);
+      const fade = Math.max(0, Math.min(1, (CAP - r) / (0.35 * CAP)));
+      const v = Math.round(255 * fade);
+      am.data.set([v, v, v, 255], k);
+    }
+  }
+  c.getContext("2d")!.putImageData(img, 0, 0);
+  al.getContext("2d")!.putImageData(am, 0, 0);
+  const map = new THREE.CanvasTexture(c);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = 8;
+  return { map, alpha: new THREE.CanvasTexture(al) };
+}
+
+/** A disc of the round Earth around the site, in scene coordinates (site at the origin, up +y). */
+function capGeometry(): THREE.BufferGeometry {
+  const rings = 64, segs = 128;
+  const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+  const R = EARTH_RADIUS - SINK / 3;
+  for (let r = 0; r <= rings; r++) {
+    // Denser near the site.
+    const rho = CAP * Math.pow(r / rings, 1.6);
+    const th = rho / R;
+    for (let s = 0; s <= segs; s++) {
+      const ph = (s / segs) * Math.PI * 2;
+      const x = R * Math.sin(th) * Math.cos(ph), z = R * Math.sin(th) * Math.sin(ph);
+      pos.push(x, R * Math.cos(th) - EARTH_RADIUS, z);
+      uv.push(0.5 + x / (2 * CAP), 0.5 - z / (2 * CAP));
+    }
+  }
+  for (let r = 0; r < rings; r++) {
+    for (let s = 0; s < segs; s++) {
+      const a = r * (segs + 1) + s, b = a + segs + 1;
+      idx.push(a, a + 1, b, b, a + 1, b + 1);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
 }
 
 /** The thin blue line of the atmosphere at the limb. */
@@ -127,136 +199,108 @@ function atmosphereMaterial(): THREE.ShaderMaterial {
     side: THREE.BackSide,
     transparent: true,
     depthWrite: false,
+    fog: false,
     blending: THREE.AdditiveBlending,
     uniforms: { uColor: { value: new THREE.Color("#4f9bff") } },
     vertexShader: /* glsl */ `
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
       varying vec3 vN; varying vec3 vV;
       void main() {
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vN = normalize(mat3(modelMatrix) * normal);
         vV = normalize(cameraPosition - wp.xyz);
         gl_Position = projectionMatrix * viewMatrix * wp;
+        #include <logdepthbuf_vertex>
       }`,
     fragmentShader: /* glsl */ `
+      #include <logdepthbuf_pars_fragment>
       uniform vec3 uColor; varying vec3 vN; varying vec3 vV;
       void main() {
+        #include <logdepthbuf_fragment>
         float rim = pow(1.0 - abs(dot(vN, vV)), 6.0);
         gl_FragColor = vec4(uColor * rim * 1.6, rim);
       }`,
   });
 }
 
-/** Earth-centred (z north) point of a latitude/longitude (degrees) at radius `r`. */
-function eci(latDeg: number, lonDeg: number, r: number): THREE.Vector3 {
-  const la = (latDeg * Math.PI) / 180, lo = (lonDeg * Math.PI) / 180;
-  return new THREE.Vector3(Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)).multiplyScalar(r);
-}
-
-const fwd = new THREE.Vector3();
-const up = new THREE.Vector3();
-const right = new THREE.Vector3();
+const ex = new THREE.Vector3();
+const ey = new THREE.Vector3();
+const ez = new THREE.Vector3();
 const basis = new THREE.Matrix4();
 const shift = new THREE.Matrix4();
 
-/** The globe, turned so the ship (at the scene origin) has Earth below it and moves along +x. */
+/**
+ * Earth-centred coordinates → scene: the tower frame's axes (x, y, up =
+ * site) mapped to the scene's (x, −z, y), the site at the origin.
+ */
+function earthToScene(frame: { site: Vec3; x: Vec3; y: Vec3 }, out: THREE.Matrix4): THREE.Matrix4 {
+  ex.set(...frame.x);
+  ey.set(...frame.site);
+  ez.set(...frame.y).negate();
+  basis.makeBasis(ex, ey, ez).transpose();
+  shift.makeTranslation(0, -EARTH_RADIUS, 0);
+  return out.multiplyMatrices(shift, basis);
+}
+
+/** The globe, the regional cap and the atmosphere, for a flight from orbit. */
 function Globe() {
   const group = useRef<THREE.Group>(null);
-  const textures = useRef<ReturnType<typeof earthTextures> | null>(null);
+  const local = useRef<THREE.Group>(null);
+  const textures = useRef<{ earth: ReturnType<typeof earthTextures>; cap: ReturnType<typeof capTextures> } | null>(null);
   const earth = useRef<THREE.MeshStandardMaterial>(null);
   const cloud = useRef<THREE.MeshStandardMaterial>(null);
+  const cap = useRef<THREE.MeshStandardMaterial>(null);
   const atmosphere = useMemo(() => atmosphereMaterial(), []);
-  const track = useRef<THREE.BufferGeometry>(null);
-  const trackKey = useRef<unknown>(null);
-  const site = useRef<THREE.Group>(null);
+  const capGeo = useMemo(() => capGeometry(), []);
 
   useFrame(() => {
     const g = group.current;
-    const e = entryNow();
-    if (!g) return;
-    g.visible = e !== null;
-    if (!e) return;
-    // The textures are made the first time an entry is shown (a fraction of a second, once).
-    if (!textures.current && earth.current && cloud.current) {
-      textures.current = earthTextures();
-      earth.current.map = textures.current.map;
+    const s = orbitFlight();
+    const visible = s !== null;
+    if (g) g.visible = visible;
+    if (local.current) local.current.visible = visible;
+    if (!g || !s?.earth_frame) return;
+    // Made the first time a flight from orbit is shown (about a second, once).
+    if (!textures.current && earth.current && cloud.current && cap.current) {
+      textures.current = { earth: earthTextures(), cap: capTextures() };
+      earth.current.map = textures.current.earth.map;
       earth.current.needsUpdate = true;
-      cloud.current.alphaMap = textures.current.clouds;
+      cloud.current.alphaMap = textures.current.earth.clouds;
       cloud.current.needsUpdate = true;
+      cap.current.map = textures.current.cap.map;
+      cap.current.alphaMap = textures.current.cap.alpha;
+      cap.current.needsUpdate = true;
     }
-    up.set(...e.position).normalize();
-    fwd.set(...e.velocity);
-    fwd.addScaledVector(up, -fwd.dot(up)).normalize();
-    right.crossVectors(fwd, up);
-    basis.makeBasis(fwd, up, right).transpose();
-    shift.makeTranslation(0, -Math.hypot(...e.position), 0);
-    g.matrix.multiplyMatrices(shift, basis);
+    earthToScene(s.earth_frame, g.matrix);
     g.matrixWorldNeedsUpdate = true;
-    // The ground track guidance predicted before the flight (from the prediction).
-    const preview = useShip.getState().preview;
-    if (track.current && preview?.entry_track && trackKey.current !== preview) {
-      trackKey.current = preview;
-      const pts = preview.entry_track.map(([la, lo]) => eci(la, lo, R + 200));
-      track.current.setFromPoints(pts);
-    }
-    if (site.current) site.current.position.copy(eci(e.site[0], e.site[1], R + 300));
   });
 
   return (
-    <group ref={group} matrixAutoUpdate={false} visible={false}>
-      {/* three.js spheres are y-up; Earth-centred coordinates are z-up. */}
-      <group rotation-x={Math.PI / 2}>
-        <mesh>
-          <sphereGeometry args={[R, 160, 80]} />
-          <meshStandardMaterial ref={earth} color="#ffffff" roughness={0.9} metalness={0} />
-        </mesh>
-        <mesh>
-          <sphereGeometry args={[R + 4_000, 128, 64]} />
-          <meshStandardMaterial ref={cloud} color="#ffffff" transparent depthWrite={false} roughness={1} />
-        </mesh>
-        <mesh material={atmosphere}>
-          <sphereGeometry args={[R + 90_000, 128, 64]} />
+    <>
+      <group ref={group} matrixAutoUpdate={false} visible={false}>
+        {/* three.js spheres are y-up; Earth-centred coordinates are z-up. */}
+        <group rotation-x={Math.PI / 2}>
+          <mesh>
+            <sphereGeometry args={[EARTH_RADIUS - SINK, 192, 96]} />
+            <meshStandardMaterial ref={earth} color="#ffffff" roughness={0.9} metalness={0} fog={false} />
+          </mesh>
+          <mesh>
+            <sphereGeometry args={[EARTH_RADIUS + 6_000, 128, 64]} />
+            <meshStandardMaterial ref={cloud} color="#ffffff" transparent opacity={0.6} depthWrite={false} roughness={1} fog={false} />
+          </mesh>
+          <mesh material={atmosphere}>
+            <sphereGeometry args={[EARTH_RADIUS + 90_000, 128, 64]} />
+          </mesh>
+        </group>
+      </group>
+      {/* The region around the site, already in scene coordinates. */}
+      <group ref={local} visible={false}>
+        <mesh geometry={capGeo} renderOrder={-1}>
+          <meshStandardMaterial ref={cap} color="#ffffff" transparent depthWrite={false} roughness={0.95} fog={false} />
         </mesh>
       </group>
-      <line>
-        <bufferGeometry ref={track} />
-        <lineBasicMaterial color="#8fe9ff" transparent opacity={0.75} depthWrite={false} />
-      </line>
-      <group ref={site}>
-        <mesh>
-          <sphereGeometry args={[1_500, 16, 8]} />
-          <meshBasicMaterial color="#8fe9ff" />
-        </mesh>
-      </group>
-    </group>
-  );
-}
-
-/** Stars far away (they ride with the camera). */
-function Stars() {
-  const points = useRef<THREE.Points>(null);
-  const geometry = useMemo(() => {
-    const g = new THREE.BufferGeometry();
-    const n = 2500;
-    const p = new Float32Array(n * 3);
-    let s = 7;
-    const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-    for (let i = 0; i < n; i++) {
-      const u = rnd() * 2 - 1, t = rnd() * Math.PI * 2, r = Math.sqrt(1 - u * u);
-      p.set([r * Math.cos(t) * 2e6, u * 2e6, r * Math.sin(t) * 2e6], i * 3);
-    }
-    g.setAttribute("position", new THREE.BufferAttribute(p, 3));
-    return g;
-  }, []);
-  useFrame(({ camera }) => {
-    const pt = points.current;
-    if (!pt) return;
-    pt.visible = entryNow() !== null;
-    pt.position.copy(camera.position);
-  });
-  return (
-    <points ref={points} geometry={geometry} visible={false} frustumCulled={false}>
-      <pointsMaterial color="#dfe8ff" size={1.4} sizeAttenuation={false} depthWrite={false} />
-    </points>
+    </>
   );
 }
 
@@ -265,10 +309,13 @@ function plasmaMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
+    fog: false,
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
     uniforms: { uHeat: { value: 0 }, uTime: { value: 0 } },
     vertexShader: /* glsl */ `
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
       varying float vAlong; varying vec3 vN; varying vec3 vV;
       void main() {
         vAlong = uv.y;
@@ -276,11 +323,14 @@ function plasmaMaterial(): THREE.ShaderMaterial {
         vN = normalize(mat3(modelMatrix) * normal);
         vV = normalize(cameraPosition - wp.xyz);
         gl_Position = projectionMatrix * viewMatrix * wp;
+        #include <logdepthbuf_vertex>
       }`,
     fragmentShader: /* glsl */ `
+      #include <logdepthbuf_pars_fragment>
       uniform float uHeat; uniform float uTime;
       varying float vAlong; varying vec3 vN; varying vec3 vV;
       void main() {
+        #include <logdepthbuf_fragment>
         // uv.y is 0 at the narrow (belly) end of the cylinder, 1 downstream.
         float near = pow(1.0 - vAlong, 2.2);
         float edge = pow(abs(dot(vN, vV)), 1.5);
@@ -292,138 +342,51 @@ function plasmaMaterial(): THREE.ShaderMaterial {
   });
 }
 
-/** Angle of attack for a Mach number: about 60° hypersonic, broadside (90°) slow, as the model's lift fades. */
-function attack(mach: number): number {
-  const s = THREE.MathUtils.clamp((mach - 1.5) / 3.5, 0, 1);
-  return THREE.MathUtils.degToRad(90 - 30 * s);
-}
-
-const f = new THREE.Vector3();
-const n = new THREE.Vector3();
-const side = new THREE.Vector3();
-const nose = new THREE.Vector3();
-const belly = new THREE.Vector3();
-const third = new THREE.Vector3();
-const m4 = new THREE.Matrix4();
 const Y = new THREE.Vector3(0, 1, 0);
+const flow = new THREE.Vector3();
 
-/** Rotate `v` about unit axis `k` by `a` (Rodrigues). */
-function roll(v: THREE.Vector3, k: THREE.Vector3, a: number): THREE.Vector3 {
-  const c = Math.cos(a), s = Math.sin(a);
-  const cross = new THREE.Vector3().crossVectors(k, v);
-  return v.multiplyScalar(c).add(cross.multiplyScalar(s)).addScaledVector(k, k.dot(v) * (1 - c));
-}
+/** Heat flux (W/m²) at which the plasma is fully bright; below 20 kW/m² there is none. */
+const PLASMA_FULL = 250_000;
+const PLASMA_START = 20_000;
 
-/** The ship belly first at its angle of attack, rolled by the bank angle; its glow and plasma trail. */
-function EntryShip() {
-  const root = useRef<THREE.Group>(null);
-  const trail = useRef<THREE.Group>(null);
-  const plasma = useMemo(() => plasmaMaterial(), []);
+/** The plasma streaming back from the vehicle while it is hot (any flight). */
+function Plasma() {
+  const g = useRef<THREE.Group>(null);
   const wake = useRef<THREE.Mesh>(null);
-  const pose = useRef<VehiclePose | null>(null);
-
+  const material = useMemo(() => plasmaMaterial(), []);
   useFrame(({ clock }) => {
-    const g = root.current;
-    const e = entryNow();
-    if (!g) return;
-    g.visible = e !== null;
-    if (!e) {
-      pose.current = null;
-      return;
-    }
-    // Scene: x = horizontal motion, y = up; the velocity climbs at the flight-path angle.
-    const gamma = THREE.MathUtils.degToRad(e.gamma_deg);
-    f.set(Math.cos(gamma), Math.sin(gamma), 0);
-    n.copy(Y).addScaledVector(f, -Y.dot(f)).normalize();
-    side.crossVectors(f, n);
-    const a = attack(e.mach);
-    nose.copy(f).multiplyScalar(Math.cos(a)).addScaledVector(n, Math.sin(a));
-    belly.copy(f).multiplyScalar(Math.sin(a)).addScaledVector(n, -Math.cos(a));
-    const bank = THREE.MathUtils.degToRad(e.bank_deg);
-    roll(nose, f, bank);
-    roll(belly, f, bank);
-    third.crossVectors(belly, nose);
-    m4.makeBasis(belly, nose, third);
-    g.quaternion.setFromRotationMatrix(m4);
-    // Airflow in body axes (body x = model x, body y = −model z, body z = model y).
-    const fx = f.dot(belly), fy = f.dot(nose), fz = f.dot(third);
-    const heat = THREE.MathUtils.clamp(e.heat_flux / 250_000, 0, 1);
-    pose.current = {
-      surfaces: [0.55, 0.55, 0.45, 0.45],
-      thrust: [0, 0, 0],
-      engines: ["off", "off", "off"],
-      throttle: 0,
-      rcs: [],
-      heat,
-      flowBody: [fx, -fz, fy],
-      vacuum: THREE.MathUtils.clamp(1 - e.density / 1.225, 0, 1),
-    };
-    // Plasma: a glow on the windward belly and a wake streaming back from it.
-    if (trail.current) {
-      trail.current.quaternion.setFromUnitVectors(Y, f.clone().negate());
-      const flicker = 0.85 + 0.15 * Math.sin(clock.elapsedTime * 23) * Math.sin(clock.elapsedTime * 7.3);
-      const u = (wake.current?.material as THREE.ShaderMaterial | undefined)?.uniforms;
-      if (!u) return;
-      u.uHeat.value = heat * flicker;
-      u.uTime.value = clock.elapsedTime;
-    }
+    const group = g.current;
+    const st = useShip.getState();
+    const s = st.mode === "flying" || st.mode === "done" ? shown() : null;
+    const heat = s ? THREE.MathUtils.clamp((s.heat_flux - PLASMA_START) / (PLASMA_FULL - PLASMA_START), 0, 1) : 0;
+    if (!group) return;
+    group.visible = heat > 0.01 && !st.view.analysis;
+    if (!s || !group.visible) return;
+    group.position.set(...toScene(s.position));
+    flow.set(...toScene(s.velocity)).normalize().negate();
+    group.quaternion.setFromUnitVectors(Y, flow);
+    const u = (wake.current?.material as THREE.ShaderMaterial | undefined)?.uniforms;
+    if (!u) return;
+    const flicker = 0.85 + 0.15 * Math.sin(clock.elapsedTime * 23) * Math.sin(clock.elapsedTime * 7.3);
+    u.uHeat.value = heat * flicker;
+    u.uTime.value = clock.elapsedTime;
   });
-
   return (
-    <>
-      <group ref={root} visible={false}>
-        <ShipModel pose={pose} />
-      </group>
-      <group ref={trail}>
-        {/* The wake: its +y runs downstream from the belly. */}
-        <mesh ref={wake} position-y={90} material={plasma}>
-          <cylinderGeometry args={[30, 9, 180, 32, 8, true]} />
-        </mesh>
-      </group>
-    </>
+    <group ref={g} visible={false}>
+      {/* Its +y runs downstream from the belly. */}
+      <mesh ref={wake} position-y={90} material={material}>
+        <cylinderGeometry args={[30, 9, 180, 32, 8, true]} />
+      </mesh>
+    </group>
   );
 }
 
-const camPos = new THREE.Vector3();
-const camLook = new THREE.Vector3();
-
-/** Rides behind and above the ship, drifting slowly around it. */
-function EntryCamera() {
-  const was = useRef(false);
-  useFrame(({ camera, clock }, dt) => {
-    const e = entryNow();
-    if (!e) {
-      was.current = false;
-      return;
-    }
-    const gamma = THREE.MathUtils.degToRad(e.gamma_deg);
-    f.set(Math.cos(gamma), Math.sin(gamma), 0);
-    const a = 0.6 + 0.35 * Math.sin(clock.elapsedTime * 0.05);
-    // Beside the ship, a little ahead and above: the plasma streams past.
-    camPos.set(0, 0, 0).addScaledVector(f, 40 + 30 * Math.sin(a)).add(new THREE.Vector3(0, 35, 0)).add(new THREE.Vector3(0, 0, 185));
-    camLook.copy(f).multiplyScalar(-25);
-    const k = was.current ? 1 - Math.exp(-dt * 2) : 1;
-    was.current = true;
-    camera.position.lerp(camPos, k);
-    camera.up.set(0, 1, 0);
-    camera.lookAt(camLook);
-    const cam = camera as THREE.PerspectiveCamera;
-    if (cam.fov !== 40) {
-      cam.fov = 40;
-      cam.updateProjectionMatrix();
-    }
-  });
-  return null;
-}
-
-/** Everything drawn during the entry from orbit. */
+/** Everything a flight from orbit adds to the world. */
 export function Entry() {
   return (
     <>
-      <Stars />
       <Globe />
-      <EntryShip />
-      <EntryCamera />
+      <Plasma />
     </>
   );
 }

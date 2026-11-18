@@ -9,7 +9,7 @@ import { useShip } from "@/lib/ship/store";
 import { Analysis } from "./Analysis";
 import { SkinGuard } from "./Blueprint";
 import { Cameras } from "./Cameras";
-import { Entry, NotInEntry } from "./Entry";
+import { Entry } from "./Entry";
 import { Paths, Smoke } from "./Fx";
 import { Post, type Quality } from "./Post";
 import { Sound } from "./Sound";
@@ -63,15 +63,13 @@ export function Stage() {
       <Loop />
       <SkinGuard />
       <World />
-      <NotInEntry>
-        <Stack />
-        <ParkedBooster />
-        <Paths />
-        <Vehicle />
-        <Smoke />
-        <Analysis />
-      </NotInEntry>
+      <Stack />
+      <ParkedBooster />
+      <Paths />
       <Entry />
+      <Vehicle />
+      <Smoke />
+      <Analysis />
       <Cameras />
       <Sound />
       <Post quality={quality} />

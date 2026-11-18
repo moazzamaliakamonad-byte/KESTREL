@@ -107,6 +107,8 @@ export interface ShipSnapshot {
   /** The entry from orbit while it lasts, else null. */
   entry: EntrySnapshot | null;
   entry_summary: EntrySummary | null;
+  /** From orbit: the tower frame on the round Earth (Earth-centred unit vectors), else null. */
+  earth_frame: { site: Vec3; x: Vec3; y: Vec3 } | null;
   /**
    * Engine-out envelope: how much slower than the survivable limit the ship
    * is sinking, m/s (negative: losing the running engine now could not be

@@ -3,7 +3,7 @@
 import { shown as shownState } from "@/lib/ship/shown";
 import { Environment } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { entryNow } from "./Entry";
+import { EARTH_CENTRE, orbitFlight, trueAltitude } from "./Entry";
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useShip } from "@/lib/ship/store";
@@ -42,6 +42,7 @@ function Sky() {
         uAlt: { value: 0 },
         uScale: { value: 8500 },
         uRadius: { value: 6.371e6 },
+        uUp: { value: new THREE.Vector3(0, 1, 0) },
       },
       vertexShader: /* glsl */ `
         varying vec3 vDir;
@@ -51,7 +52,7 @@ function Sky() {
         }`,
       fragmentShader: /* glsl */ `
         uniform vec3 uZenith; uniform vec3 uHorizon; uniform vec3 uGround; uniform vec3 uSunColor;
-        uniform vec3 uSun; uniform float uAlt; uniform float uScale; uniform float uRadius;
+        uniform vec3 uSun; uniform float uAlt; uniform float uScale; uniform float uRadius; uniform vec3 uUp;
         varying vec3 vDir;
         float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
         void main() {
@@ -59,7 +60,8 @@ function Sky() {
           // Air left above the camera (1 on the ground, → 0 in space).
           float air = exp(-uAlt / uScale);
           float dip = sqrt(2.0 * uAlt / uRadius);
-          float up = (d.y + dip) / (1.0 + dip);
+          // "Up" is the local vertical: on a round Earth it turns with distance from the site.
+          float up = (dot(d, uUp) + dip) / (1.0 + dip);
           vec3 zenith = uZenith * pow(air, 0.75);
           // The horizon band gets thinner and sharper with altitude.
           float band = exp(-max(up, 0.0) * mix(3.2, 26.0, 1.0 - air));
@@ -80,7 +82,15 @@ function Sky() {
     const m = mesh.current;
     if (!m) return;
     m.position.copy(camera.position);
-    (m.material as THREE.ShaderMaterial).uniforms.uAlt.value = Math.max(0, camera.position.y);
+    const u = (m.material as THREE.ShaderMaterial).uniforms;
+    // From orbit the sky follows the true altitude and the local vertical.
+    if (orbitFlight()) {
+      u.uAlt.value = Math.max(0, trueAltitude(camera.position));
+      (u.uUp.value as THREE.Vector3).copy(camera.position).sub(EARTH_CENTRE).normalize();
+    } else {
+      u.uAlt.value = Math.max(0, camera.position.y);
+      (u.uUp.value as THREE.Vector3).set(0, 1, 0);
+    }
   });
   return (
     <mesh ref={mesh} material={material} renderOrder={-10} frustumCulled={false}>
@@ -258,6 +268,24 @@ const GROUND_SIZE = 120_000;
 
 function EarthGround() {
   const t = useMemo(() => coastTextures(), []);
+  const far = useRef<THREE.Group>(null);
+  // Opaque out to 60 % of the patch's half-width, then fading to its edge.
+  const edgeFade = useMemo(() => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 256;
+    const g = c.getContext("2d")!;
+    const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+    grad.addColorStop(0, "#fff");
+    grad.addColorStop(0.6, "#fff");
+    grad.addColorStop(1, "#000");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 256);
+    return new THREE.CanvasTexture(c);
+  }, []);
+  // From orbit the round Earth (Entry.tsx) replaces the flat horizon.
+  useFrame(() => {
+    if (far.current) far.current.visible = orbitFlight() === null;
+  });
   const detail = useMemo(() => {
     const c = document.createElement("canvas");
     c.width = c.height = 256;
@@ -291,19 +319,22 @@ function EarthGround() {
   }, []);
   return (
     <group>
-      {/* Beyond the painted coast: land one way, sea the other, out to the horizon. */}
-      <mesh rotation-x={-Math.PI / 2} position={[0, -8, -1_000_000 + 700]}>
-        <planeGeometry args={[4_000_000, 2_000_000]} />
-        <meshStandardMaterial color="#7d7a5c" roughness={1} />
-      </mesh>
-      <mesh rotation-x={-Math.PI / 2} position={[0, -8, 1_000_000 + 700]}>
-        <planeGeometry args={[4_000_000, 2_000_000]} />
-        <meshStandardMaterial color="#123f5e" roughness={0.3} envMapIntensity={0.9} />
-      </mesh>
+      {/* Beyond the painted coast: land one way, sea the other, out to the horizon (flat; from orbit a round Earth instead). */}
+      <group ref={far}>
+        <mesh rotation-x={-Math.PI / 2} position={[0, -8, -1_000_000 + 700]}>
+          <planeGeometry args={[4_000_000, 2_000_000]} />
+          <meshStandardMaterial color="#7d7a5c" roughness={1} />
+        </mesh>
+        <mesh rotation-x={-Math.PI / 2} position={[0, -8, 1_000_000 + 700]}>
+          <planeGeometry args={[4_000_000, 2_000_000]} />
+          <meshStandardMaterial color="#123f5e" roughness={0.3} envMapIntensity={0.9} />
+        </mesh>
+      </group>
       {/* The site sits about 700 m inland of the painted shore. */}
+      {/* Its edge fades into what lies beyond (the flat horizon, or from orbit the round Earth). */}
       <mesh rotation-x={-Math.PI / 2} position={[0, -2, 0]} receiveShadow>
         <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
-        <meshStandardMaterial map={t.map} roughnessMap={t.rough} roughness={1} metalness={0} envMapIntensity={0.9} />
+        <meshStandardMaterial map={t.map} roughnessMap={t.rough} alphaMap={edgeFade} transparent roughness={1} metalness={0} envMapIntensity={0.9} />
       </mesh>
       {/* Near-field sand with grain, fading out at its edge, so the ground has detail up close. */}
       <mesh rotation-x={-Math.PI / 2} position={[0, -0.6, -700]} receiveShadow>
@@ -445,7 +476,8 @@ function Haze() {
   useFrame(({ camera, scene }) => {
     if (!(scene.fog instanceof THREE.FogExp2)) scene.fog = new THREE.FogExp2(SKY.fog, 0.00003);
     // (No haze over the blueprint.)
-    scene.fog.density = skin.on || entryNow() !== null ? 0 : 0.000024 * Math.exp(-Math.max(0, camera.position.y) / 9000) + 0.0000012;
+    const alt = orbitFlight() ? trueAltitude(camera.position) : camera.position.y;
+    scene.fog.density = skin.on ? 0 : 0.000024 * Math.exp(-Math.max(0, alt) / 9000) + 0.0000012 * Math.exp(-Math.max(0, alt) / 30000);
   });
   return null;
 }
@@ -456,8 +488,7 @@ export function World() {
   const scenery = useRef<THREE.Group>(null);
   // The blueprint view shows the vehicle alone: the world steps aside.
   useFrame(() => {
-    // ...and so does it for the entry from orbit (a globe is drawn instead).
-    if (scenery.current) scenery.current.visible = !skin.on && entryNow() === null;
+    if (scenery.current) scenery.current.visible = !skin.on;
   });
   return (
     <group>
