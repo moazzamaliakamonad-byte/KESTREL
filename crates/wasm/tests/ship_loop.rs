@@ -655,6 +655,8 @@ struct WindRun {
     /// Sideways distance from the approach gate and sideways speed when
     /// the terminal phase began, m and m/s (None: it never began).
     gate: Option<(f64, f64)>,
+    /// Error of the wind estimate when the engines lit, m/s.
+    est_err: Option<f64>,
 }
 
 fn wind_run(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64) -> WindRun {
@@ -674,8 +676,13 @@ fn wind_run_with(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64, aware: boo
     let mut pending: Option<Pending> = None;
     let mut last_request = f64::NEG_INFINITY;
     let mut gate = None;
+    let mut est_err = None;
     while f.phase() != Phase::Done && f.sim().t < 400.0 {
         f.step(FRAME);
+        if est_err.is_none() && f.phase() != Phase::BellyFlop {
+            let e = f.wind_estimate().w;
+            est_err = Some((e[0] - wind[0]).hypot(e[1] - wind[1]));
+        }
         if gate.is_none() && f.phase() == Phase::Terminal {
             let x = f.sim().x;
             let (r, v) = (dynamics::position(&x), dynamics::velocity(&x));
@@ -690,6 +697,7 @@ fn wind_run_with(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64, aware: boo
         t: f.sim().t,
         left: f.sim().propellant() / 1e3,
         gate,
+        est_err,
     }
 }
 
@@ -723,9 +731,10 @@ fn wind_sweep() {
                                 let gate = r.gate.map_or("     —      ".to_string(), |(e, v)| {
                                     format!("{e:5.1} m {v:4.1} m/s")
                                 });
+                                let est = r.est_err.map_or("—".to_string(), |e| format!("{e:.1}"));
                                 out.push((
                                     format!(
-                                        "{kind:?} {speed:4.0} m/s from {from} noise {noise_name:4} seed {seed}: {:?} t {:5.1} left {:5.1} t gate {gate}",
+                                        "{kind:?} {speed:4.0} m/s from {from} noise {noise_name:4} seed {seed}: {:?} t {:5.1} left {:5.1} t gate {gate} est err {est} m/s",
                                         r.outcome, r.t, r.left
                                     ),
                                     kind,
@@ -837,4 +846,19 @@ fn estimate_survives_grab() {
     f.grab([500.0, 0.0, 9000.0]);
     f.release();
     assert_eq!(f.wind_estimate(), before);
+}
+
+/// A crosswind the booster was lost in before guidance knew the wind (wind
+/// sweep baseline, 2026-11-18, low noise, seed 7: 20 m/s from +y, out of
+/// propellant). The ship's crosswind losses are not here: its belly flop
+/// can only slide along its nose, so a crosswind needs a heading choice
+/// (M4 sub-project 3).
+#[test]
+fn booster_crosswind_is_caught() {
+    let r = wind_run(Kind::Booster, [0.0, -20.0], Noise::LOW, 7);
+    eprintln!(
+        "booster, 20 m/s from +y: {:?} t {:.1} left {:.1} t",
+        r.outcome, r.t, r.left
+    );
+    assert_eq!(r.outcome, Some(Outcome::Caught));
 }

@@ -1069,7 +1069,13 @@ impl ShipFlight {
             && !matches!(self.guide, Guide::Plan { .. });
         let lead = if first { self.solve_time } else { 0.0 };
         let x = if lead > 0.0 {
-            predict(&self.sim.scn, &measured, self.last.thrust_body, lead)
+            predict(
+                &self.sim.scn,
+                &measured,
+                self.last.thrust_body,
+                lead,
+                self.air().wind,
+            )
         } else {
             measured
         };
@@ -1092,7 +1098,10 @@ impl ShipFlight {
             // when it gives thrust (it falls meanwhile).
             let spin_up = self.sim.cluster.spin_up_left();
             let (t, x) = if spin_up > 0.0 && self.sim.cluster.running() == 0 {
-                (t + spin_up, predict(&self.sim.scn, &x, [0.0; 3], spin_up))
+                (
+                    t + spin_up,
+                    predict(&self.sim.scn, &x, [0.0; 3], spin_up, self.air().wind),
+                )
             } else {
                 (t, x)
             };
@@ -1358,7 +1367,7 @@ impl ShipFlight {
 /// attitude frozen (the shared model, no flaps, fins or wind), in 20 ms
 /// Euler steps. Only the translation is predicted: holding a gimbal
 /// command for a second would spin the prediction.
-pub fn predict(scn: &Scenario, x: &State, thrust: Vec3, seconds: f64) -> State {
+pub fn predict(scn: &Scenario, x: &State, thrust: Vec3, seconds: f64, wind: Vec3) -> State {
     let mut x = *x;
     let steps = (seconds / 0.02).ceil().max(0.0) as usize;
     if steps == 0 {
@@ -1367,7 +1376,11 @@ pub fn predict(scn: &Scenario, x: &State, thrust: Vec3, seconds: f64) -> State {
     let h = seconds / steps as f64;
     let along = [0.0, 0.0, quat::norm(thrust)];
     for _ in 0..steps {
-        let d = dynamics::f(scn, &x, along, &dynamics::Extra::default());
+        let extra = dynamics::Extra {
+            wind,
+            ..Default::default()
+        };
+        let d = dynamics::f(scn, &x, along, &extra);
         for i in M..V + 3 {
             x[i] += h * d[i];
         }
