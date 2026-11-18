@@ -107,6 +107,9 @@ pub const GLIDE_SETTLE_SLIDE: f64 = 0.4;
 /// Gliding, the contact sink rate, m/s: it arrives at the settle already
 /// coming down, and at high noise touched down at 2.02 m/s with SINK.
 pub const GLIDE_SINK: f64 = 1.0;
+/// Gliding, below its funnel floor while still sliding sideways, it climbs
+/// back at up to this, m/s.
+pub const GLIDE_RISE: f64 = 0.3;
 
 /// Largest lean of the booster's axis from the airflow in the descent,
 /// rad (8°): the single yaw fin can still hold it there.
@@ -593,7 +596,15 @@ pub fn terminal_shaped(
         } else {
             0.0
         };
-        (APPROACH_GAIN * (h - floor)).clamp(creep, settle.max(creep))
+        // Below the floor and still sliding: climb back to it, gently. A
+        // vehicle held at the floor's height only by "don't sink" settled
+        // into the arms mid-correction, sliding at 1 m/s (seen).
+        let lowest = if side > scn.settle_side_speed {
+            -GLIDE_RISE
+        } else {
+            creep
+        };
+        (APPROACH_GAIN * (h - floor)).clamp(lowest, settle.max(creep))
     } else {
         // Still sliding in: come down to FINAL_HEIGHT meanwhile and wait
         // there (hovering high until centred took half a minute). Nearly
@@ -1266,6 +1277,30 @@ mod tests {
         );
         let a = terminal_shaped(&scn, &x, scn.ship.thrust_limits(3), &Air::STILL, true);
         assert!(a.thrust_body.iter().all(|c| c.is_finite()), "{a:?}");
+    }
+
+    #[test]
+    fn glide_does_not_sink_into_the_arms_while_sliding() {
+        // Low over the arms, below the funnel floor for 2.4 m off the axis
+        // and sliding at 1 m/s (the catch allows 1): climb back to the
+        // floor, don't let the catch happen mid-slide (a prediction
+        // touched down at 1.02 m/s sideways: seen).
+        let scn = Scenario::earth();
+        let m = 120e3;
+        let x = dynamics::state(
+            m,
+            [-2.4, 0.0, scn.rest_cm_z() + 0.3],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 3],
+        );
+        let a = terminal_shaped(&scn, &x, (0.98e6, 7.35e6), &Air::STILL, true);
+        let mg = m * scn.planet.gravity();
+        assert!(
+            a.thrust_body[2] > 1.03 * mg,
+            "{} vs hover {mg}",
+            a.thrust_body[2]
+        );
     }
 
     #[test]
