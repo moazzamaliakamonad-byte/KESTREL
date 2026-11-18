@@ -15,6 +15,7 @@ pub mod ship_control;
 mod socp;
 mod solve;
 pub mod track;
+pub mod wind;
 
 pub use params::{ParamError, Vec3, Vehicle};
 pub use problem::{GuidanceError, LandingProblem, Trajectory};
