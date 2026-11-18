@@ -9,6 +9,9 @@
 //! a metre per second of crosswind is a large force, near hover it is
 //! almost none, and the filter's gain follows on its own.
 //!
+//! It learns while the engines are off and holds its estimate while they
+//! burn (see `update`).
+//!
 //! Inputs are what the vehicle senses (navigation estimate, accelerometers,
 //! engine telemetry, surface positions), never the truth. Simulation only.
 
@@ -26,6 +29,9 @@ pub const WALK: f64 = 3.0;
 pub const THRUST_TELEMETRY: f64 = 0.01;
 /// Unmodelled force (model error, vibration), N, 1σ per axis.
 pub const FORCE_FLOOR: f64 = 2e3;
+/// Guidance flies only the part of the estimate beyond this many standard
+/// deviations (along it).
+pub const SIGNIFICANT: f64 = 2.0;
 /// The estimate never leaves ±LIMIT m/s per axis.
 pub const LIMIT: f64 = 60.0;
 /// Innovations this unlikely (normalized, 3 degrees of freedom; 25 is far
@@ -52,6 +58,10 @@ pub struct WindInputs<'a> {
     /// 1σ of the attitude estimate, rad, and of the velocity estimate, m/s.
     pub att_sigma: f64,
     pub vel_sigma: f64,
+    /// How long those errors stay alike, s (their correlation times; 0:
+    /// independent from step to step).
+    pub att_corr: f64,
+    pub vel_corr: f64,
 }
 
 /// The filter's answer.
@@ -108,12 +118,44 @@ impl WindFilter {
         [self.w[0], self.w[1], 0.0]
     }
 
+    /// The wind guidance flies: none at all when it cannot be told from
+    /// calm (within two standard deviations along it), and beyond that the
+    /// estimate times 1 - (2 sigma / |w|)^2. So the estimate's own noise in still air is not flown, and
+    /// a still-air flight is the wind-blind one (D-046).
+    pub fn significant(&self) -> Vec3 {
+        let n = self.w[0].hypot(self.w[1]);
+        if n < 1e-9 {
+            return [0.0; 3];
+        }
+        let u = [self.w[0] / n, self.w[1] / n];
+        let var = u[0] * u[0] * self.p[0][0]
+            + 2.0 * u[0] * u[1] * self.p[0][1]
+            + u[1] * u[1] * self.p[1][1];
+        // Zero within SIGNIFICANT sigma, nearly whole far beyond it, smooth
+        // in between (subtracting a fixed 2 sigma flew a 20 m/s wind as 17).
+        let ratio = SIGNIFICANT * var.max(0.0).sqrt() / n;
+        if ratio >= 1.0 {
+            return [0.0; 3];
+        }
+        let keep = 1.0 - ratio * ratio;
+        [self.w[0] * keep, self.w[1] * keep, 0.0]
+    }
+
     pub fn covariance(&self) -> [[f64; 2]; 2] {
         self.p
     }
 
     pub fn update(&mut self, i: &WindInputs) {
         if !(i.h.is_finite() && i.h > 0.0) {
+            return;
+        }
+        // Under thrust the air's force is small beside the engines', and
+        // the thrust line's own errors (the vehicle turning within a step,
+        // the attitude estimate) look like wind and are correlated from
+        // step to step, so the filter grew sure of a wind that was not
+        // there (up to 10 m/s in still air). Hold what the fall taught:
+        // the wind here is the same at every height (D-046).
+        if quat::norm(i.thrust_body) > 0.0 {
             return;
         }
         // The wind may have wandered since the last step.
@@ -152,6 +194,12 @@ impl WindFilter {
         }
 
         // Measurement noise: what the readings' own errors do to the force.
+        // An error that stays alike for `corr` seconds is one piece of
+        // evidence per `corr`, not one per step: weigh it as 2 corr / h
+        // independent ones would be (else the filter grows sure of noise).
+        let alike = |corr: f64| (2.0 * corr / i.h).max(1.0);
+        let att_var = i.att_sigma * i.att_sigma * alike(i.att_corr);
+        let vel_var = i.vel_sigma * i.vel_sigma * alike(i.vel_corr);
         let mut rm = [[0.0; 3]; 3];
         let mut add_outer = |col: Vec3, var: f64| {
             for r in 0..3 {
@@ -168,7 +216,7 @@ impl WindFilter {
                 quat::sub(model(self.w, qa, v), model(self.w, qb, v)),
                 0.5 / DQ,
             );
-            add_outer(d, i.att_sigma * i.att_sigma);
+            add_outer(d, att_var);
         }
         const DV: f64 = 0.1;
         for k in 0..3 {
@@ -179,7 +227,7 @@ impl WindFilter {
                 quat::sub(model(self.w, q, va), model(self.w, q, vb)),
                 0.5 / DV,
             );
-            add_outer(d, i.vel_sigma * i.vel_sigma);
+            add_outer(d, vel_var);
         }
         let thrust = quat::rotate(q, i.thrust_body);
         add_outer(thrust, THRUST_TELEMETRY * THRUST_TELEMETRY);
@@ -333,6 +381,8 @@ mod tests {
             surfaces,
             att_sigma: 0.0,
             vel_sigma: 0.0,
+            att_corr: 0.0,
+            vel_corr: 0.0,
         }
     }
 
@@ -488,6 +538,104 @@ mod tests {
         let moved = error(&f, truth);
         eprintln!("glitch moved {moved:.3} m/s");
         assert!(moved < 2.0, "moved {moved}");
+    }
+
+    /// Under thrust the air's force is small beside the engines' and the
+    /// thrust direction's errors look like wind: the estimate learned in
+    /// the fall is held, unmoved and no less sure, however the readings go.
+    #[test]
+    fn holds_its_estimate_while_the_engines_burn() {
+        let (scn, mut x) = booster_start();
+        x[R + 2] = 2000.0;
+        x[V..V + 3].copy_from_slice(&[0.0, 0.0, -150.0]);
+        x[dynamics::Q..dynamics::Q + 4].copy_from_slice(&[1.0, 0.0, 0.0, 0.0]);
+        let mut f = WindFilter::with_prior([6.0, -2.0], 0.5);
+        let before = f.estimate();
+        for k in 0..500 {
+            // A thrust line a degree off what telemetry says, and noise.
+            let wobble = 0.017 * ((k as f64) * 0.3).sin();
+            let dv = [H * 9.81 * wobble, H * 3.0, H * 20.0];
+            f.update(&inputs(&scn, &x, dv, [0.0, 0.0, 9e6], [0.0; aero::FLAPS]));
+        }
+        let after = f.estimate();
+        assert_eq!(after.w, before.w);
+        assert_eq!(after.sigma, before.sigma);
+    }
+
+    /// The attitude reading's error drifts slowly (Gauss-Markov, 2 s), so
+    /// a hundred readings a second are not a hundred independent ones. In
+    /// still air, falling belly first with a 0.2-degree attitude error,
+    /// the estimate must stay within its own stated uncertainty, not
+    /// claim +-1 m/s while wandering by 5 (seen in flight).
+    #[test]
+    fn correlated_attitude_noise_does_not_make_it_sure() {
+        let (scn, mut x) = ship_start();
+        let mut f = WindFilter::new();
+        let surfaces = [scn.ship.surface_trim(); aero::FLAPS];
+        let (sigma, tau) = (0.0035, 2.0);
+        let mut err = [0.0f64; 3];
+        let mut seed = 2024u64;
+        let mut gauss = || {
+            // Two uniforms summed: rough but symmetric, enough here.
+            let mut u = || {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed as f64 / u64::MAX as f64 - 0.5
+            };
+            (u() + u() + u() + u()) * 1.7
+        };
+        let phi = (-H / tau).exp();
+        let mut worst: f64 = 0.0;
+        for k in 0..3000 {
+            let (next, dv) = truth_step(&scn, &x, [0.0; 3], surfaces, [0.0; 3]);
+            x = next;
+            for e in &mut err {
+                *e = phi * *e + (1.0 - phi * phi).sqrt() * gauss();
+            }
+            let mut seen = x;
+            let dq = quat::from_axis_angle(
+                [err[0], err[1], err[2]],
+                sigma * quat::norm([err[0], err[1], err[2]]),
+            );
+            let q = quat::normalize(quat::mul(dynamics::attitude(&x), dq));
+            seen[dynamics::Q..dynamics::Q + 4].copy_from_slice(&q);
+            let mut i = inputs(&scn, &seen, dv, [0.0; 3], surfaces);
+            i.att_sigma = sigma;
+            i.att_corr = tau;
+            f.update(&i);
+            if k > 500 {
+                let e = f.estimate();
+                let ratio = (e.w[0] / e.sigma[0]).abs().max((e.w[1] / e.sigma[1]).abs());
+                worst = worst.max(ratio);
+            }
+        }
+        eprintln!("worst |error| / sigma over the fall: {worst:.2}");
+        assert!(
+            worst < 3.5,
+            "the estimate claimed to be surer than it was: {worst:.2} sigma"
+        );
+    }
+
+    /// Guidance flies only a wind it can tell from calm (beyond two of its
+    /// standard deviations): in still air the noise in the estimate is not
+    /// flown at all, a strong wind is flown almost whole, and in between
+    /// it fades in smoothly (w (1 - (2 sigma / |w|)^2)).
+    #[test]
+    fn a_wind_it_cannot_tell_from_calm_is_not_flown() {
+        assert_eq!(
+            WindFilter::with_prior([0.5, -0.4], 1.0).significant(),
+            [0.0; 3]
+        );
+        let strong = WindFilter::with_prior([20.0, 0.0], 1.4).significant();
+        let want = 20.0 * (1.0 - (2.8f64 / 20.0).powi(2));
+        assert!((strong[0] - want).abs() < 1e-9, "{strong:?}");
+        assert!(strong[0] > 19.5 && strong[1] == 0.0 && strong[2] == 0.0);
+        let faint = WindFilter::with_prior([0.0, 3.0], 1.0).significant();
+        assert!(
+            (faint[1] - 3.0 * (1.0 - 4.0 / 9.0)).abs() < 1e-9,
+            "{faint:?}"
+        );
     }
 
     #[test]

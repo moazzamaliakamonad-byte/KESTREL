@@ -1322,6 +1322,11 @@ impl ShipFlight {
             surfaces: self.sim.flaps,
             att_sigma,
             vel_sigma: self.noise.vel_sigma,
+            att_corr: sim::sensor::CORRELATION_TIME,
+            vel_corr: match self.sim.scn.ship.kind {
+                VehicleKind::Ship => NAV_SHIP.1,
+                VehicleKind::Booster => NAV_BOOSTER.1,
+            },
         };
         self.wind.update(&inputs);
     }
@@ -1341,7 +1346,7 @@ impl ShipFlight {
     pub fn air(&self) -> Air {
         if self.config.wind_aware {
             Air {
-                wind: self.wind.wind(),
+                wind: self.wind.significant(),
             }
         } else {
             Air::STILL

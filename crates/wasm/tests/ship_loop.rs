@@ -87,10 +87,23 @@ fn fly(
     events: &[(f64, Event)],
     ignition_events: &[Event],
 ) -> Report {
+    fly_with(kind, noise, lag, events, ignition_events, true)
+}
+
+/// As `fly`, with wind awareness on or off.
+fn fly_with(
+    kind: Kind,
+    noise: Noise,
+    lag: f64,
+    events: &[(f64, Event)],
+    ignition_events: &[Event],
+    wind_aware: bool,
+) -> Report {
     let mut f = ShipFlight::new(ShipFlightConfig {
         seed: 7,
         lag,
         noise,
+        wind_aware,
         ..ShipFlightConfig::new(kind)
     })
     .unwrap();
@@ -861,4 +874,128 @@ fn booster_crosswind_is_caught() {
         r.outcome, r.t, r.left
     );
     assert_eq!(r.outcome, Some(Outcome::Caught));
+}
+
+/// The robustness boards flown twice on the same build, wind awareness off
+/// (exactly the guidance before M4.1) and on, in still air: nominal ship
+/// flights (seeds 7-10, noise off/low/high), ship and booster seeds 11-30
+/// (noise low/high), and the ship's engine-out window (running engine
+/// failed at 49-67 s, noise off/low). Slow (224 flights, threaded):
+/// `--ignored --nocapture`.
+#[test]
+#[ignore]
+fn wind_aware_board() {
+    #[derive(Clone, Copy)]
+    enum Job {
+        Seed(Kind, Noise, &'static str, u64),
+        EngineOut(Noise, &'static str, f64),
+    }
+    let mut jobs = Vec::new();
+    for aware in [false, true] {
+        for seed in 7..=10 {
+            for (name, noise) in [
+                ("off", Noise::OFF),
+                ("low", Noise::LOW),
+                ("high", Noise::HIGH),
+            ] {
+                jobs.push((
+                    "ship nominal 7-10",
+                    aware,
+                    Job::Seed(Kind::Earth, noise, name, seed),
+                ));
+            }
+        }
+        for seed in 11..=30 {
+            for (name, noise) in [("low", Noise::LOW), ("high", Noise::HIGH)] {
+                jobs.push((
+                    "ship seeds 11-30",
+                    aware,
+                    Job::Seed(Kind::Earth, noise, name, seed),
+                ));
+                jobs.push((
+                    "booster seeds 11-30",
+                    aware,
+                    Job::Seed(Kind::Booster, noise, name, seed),
+                ));
+            }
+        }
+        for at in [49.0, 51.0, 53.0, 55.0, 57.0, 59.0, 61.0, 63.0, 65.0, 67.0] {
+            for (name, noise) in [("off", Noise::OFF), ("low", Noise::LOW)] {
+                jobs.push((
+                    "ship engine-out window",
+                    aware,
+                    Job::EngineOut(noise, name, at),
+                ));
+            }
+        }
+    }
+    let queue = std::sync::Mutex::new(jobs.into_iter().enumerate().collect::<Vec<_>>());
+    let results = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|sc| {
+        for _ in 0..6 {
+            sc.spawn(|| {
+                loop {
+                    let Some((i, (group, aware, job))) = queue.lock().unwrap().pop() else {
+                        break;
+                    };
+                    let (caught, line) = match job {
+                        Job::Seed(kind, noise, name, seed) => {
+                            let r = wind_run_with(kind, [0.0, 0.0], noise, seed, aware);
+                            (
+                                r.outcome == Some(Outcome::Caught),
+                                format!(
+                                    "{kind:?} seed {seed} noise {name}: {:?} left {:.1} t",
+                                    r.outcome, r.left
+                                ),
+                            )
+                        }
+                        Job::EngineOut(noise, name, at) => {
+                            let r = fly_with(
+                                Kind::Earth,
+                                noise,
+                                0.3,
+                                &[(at, Event::EngineOut)],
+                                &[],
+                                aware,
+                            );
+                            (
+                                r.outcome == Some(Outcome::Caught),
+                                format!("engine out at {at} s noise {name}: {:?}", r.outcome),
+                            )
+                        }
+                    };
+                    results
+                        .lock()
+                        .unwrap()
+                        .push((i, group, aware, caught, line));
+                }
+            });
+        }
+    });
+    let mut results = results.into_inner().unwrap();
+    results.sort_by_key(|r| r.0);
+    for (_, group, aware, caught, line) in &results {
+        if !caught {
+            eprintln!("LOST  aware {aware}: {group}: {line}");
+        }
+    }
+    eprintln!(
+        "
+board                     aware off   aware on"
+    );
+    for group in [
+        "ship nominal 7-10",
+        "ship seeds 11-30",
+        "booster seeds 11-30",
+        "ship engine-out window",
+    ] {
+        let count = |aware: bool| {
+            let cell: Vec<_> = results
+                .iter()
+                .filter(|r| r.1 == group && r.2 == aware)
+                .collect();
+            format!("{:2}/{:2}", cell.iter().filter(|r| r.3).count(), cell.len())
+        };
+        eprintln!("{group:24}  {}       {}", count(false), count(true));
+    }
 }
