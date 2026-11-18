@@ -216,6 +216,10 @@ crates/guidance
                reversals on a heading deadband, heating override; entry_start geometry
   envelope.rs  engine-out envelope: the largest sink speed from which a relit spare can
                still stop the ship above the arms (point-mass bound, D-039)
+  wind.rs      the wind estimate (D-046): a 2-state extended Kalman filter on the air's
+               force (accelerometers − gravity − engine telemetry, against the shared
+               aerodynamic model at the airspeed v − w); its noise from the readings'
+               own errors, so it trusts the air at speed and coasts near hover
 crates/wasm
   ship_flight.rs  ShipFlight: phases ([entry from orbit ->] unpowered -> flip/start-up -> burn
                legs -> terminal); the entry hands over at 25 km by rebuilding the flight from
@@ -225,7 +229,9 @@ crates/wasm
                emergency full-thrust option and a lower emergency gate after an engine
                loss; engine_out_margin() for the page; navigate(): the navigation
                filter (complementary: accelerometers + readings, D-040) that every
-               controller and plan request reads;
+               controller and plan request reads; the wind filter, updated every
+               control step, and air(): the estimate (or still air when wind
+               awareness is off) that the plans, controllers and predictions use;
 
                legs (full engine set to a mid gate, final engines to the approach gate),
                when to re-plan, prediction of the booster's first plan, options
@@ -317,7 +323,7 @@ flies the free camera to the open part; `console/AnalysisPanel.tsx` shows
 
 `ShipFlight.wants_replan()` (drift, age, or an event) → `measure_request()`
 (the problem as JSON: options, engine switch, tilt cap, funnel, side-speed
-limit) → the worker's `plan_ship` (SCvx: ship 16 nodes, 1e-6 tolerance, up
+limit, the estimated wind) → the worker's `plan_ship` (SCvx: ship 16 nodes, 1e-6 tolerance, up
 to 15 iterations, abandoned after 7 if still infeasible; booster 24 nodes,
 up to 8) → `apply_replan()`. Each answer is also written to the flight
 record with the reason it was asked for. `Stage.GiveWay` lowers the

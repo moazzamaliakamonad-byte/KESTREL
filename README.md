@@ -61,6 +61,11 @@ return to the same tower.
   Clarabel stays the default) with a published benchmark, and a guided
   entry from orbit (120 km, 7.5 km/s, a round Earth, tiles that can burn
   through) that hands over to the landing.
+- **M4 in progress, smarter guidance:** guidance now estimates the wind
+  in flight and plans and steers with it (in the wind sweep 144 of 216
+  flights caught, 110 before). Next: a planned final approach, a chosen
+  approach direction, and Kestrel's own solver as the only one that
+  flies.
 - **Scope:** the landing guidance. The launch, ascent, hot staging and
   boostback are not simulated and not planned; the opening sequence is an
   illustration.

@@ -704,3 +704,83 @@ Template:
   on this machine's build so far: the base-path build was served under
   `/Kestrel/` and flown in Chromium (page, solver worker and landing burn
   ran, no load errors); the Linux runner itself is unproven until the first push.
+
+## D-046 — Guidance estimates the wind and flies with it (M4.1)
+- Date: 2026-11-18
+- Status: accepted
+- Context: the owner: guidance "is not as smart as it should be", naming
+  among other things that it does not react to wind. The simulator blew
+  wind and gusts, but guidance modelled still air everywhere: the
+  planner's dynamics were called with zero wind, the controllers'
+  torque model had "no wind known", and guidance only fought the wind
+  after being pushed off its plan. Measured before the change (wind
+  sweep, LIMITATIONS.md): 110 of 216 flights caught; none of either
+  vehicle at 20 m/s or more.
+- Decision:
+  - `guidance::wind`, a two-state extended Kalman filter on the
+    horizontal wind. Measurement: the air's force, from the
+    accelerometers less gravity and the engines' delivered thrust
+    (engine telemetry: chamber pressure and gimbal angle, which real
+    engines report; a 1 % reading, *illustrative*). Prediction: the
+    shared aerodynamic model (body and surfaces at their measured
+    positions) at the airspeed `v − w`. Its noise comes from the
+    readings' own errors (attitude and velocity through the model's
+    sensitivities, the thrust line, a floor), so it trusts the air at
+    speed and coasts near hover with no special case. A random walk lets
+    it follow gusts; innovations beyond a 3-degree-of-freedom gate are
+    set aside unless they persist 0.3 s (a glitch, not a gust).
+  - It learns while the engines are off and holds its estimate while
+    they give thrust. Running through the burn (the first design) it
+    wandered up to 10 m/s in still air at high noise and 4.9 m/s with no
+    noise at all: beside meganewtons of thrust the air's kilonewtons are
+    lost, and the thrust line's own errors (the vehicle turning within a
+    step, the attitude estimate) are correlated, so the filter grew sure
+    of wind that was not there, and the still-air boards lost flights
+    (ship seeds 38 → 36 of 40, booster 40 → 39, engine-out window 20 →
+    18). The simulator's wind is the same at every height, so the fall's
+    estimate stays valid; a gust that begins in the burn is not tracked.
+  - Errors that stay alike over time count once per correlation time,
+    not once per step (their variance times 2τ/h: the attitude reading's
+    2 s, the navigation velocity's time constant). Counting every 10 ms
+    reading as new evidence, the ship's belly-flop estimate wandered by
+    5 m/s while claiming ±1 (unit test: worst error 3.6σ before, 0.8σ
+    after).
+  - Guidance flies only the **significant** wind: the estimate shrunk by
+    two of its standard deviations along it, and none when it cannot be
+    told from calm. Without this the knife-edge flights flipped on noise:
+    an engine-out flight with no sensor noise at all was lost with an
+    estimate of 0.02 m/s. With it, a still-air flight is (almost always)
+    the wind-blind one, and winds under about 2σ (1-3 m/s) are not flown.
+  - One rule everywhere: the wind enters as *the model in the estimated
+    wind minus the model in still air*, so a zero estimate is exactly
+    the old guidance. A switch (`wind_aware`, the page's "Guidance uses
+    its wind estimate") flies the old guidance on the same build, bit for
+    bit (`unaware_flight_matches_today`).
+  - Where it is used: the planner's dynamics (`ShipProblem.wind`); the
+    booster's descent (it leans into a crosswind before being pushed);
+    the final approach (a feed-forward of the wind's force); the
+    booster's burn tracking adds only the crossflow its plan leaves out
+    (D-031: the burn is planned without it; the ship's plan models it
+    all); every torque model; the short predictions (the booster's first
+    plan, a spare's spin-up). Not used: the ignition height and fall time
+    (vertical), the engine-out envelope, the entry.
+  - On the page: a telemetry row, two arrows in the analysis view (the
+    estimate and the true wind, labelled as not known to guidance), and
+    flight-record entries when the estimate settles (1σ under 2 m/s) and
+    when a gust is felt (more than 4 m/s within 3 s, at most every 4 s).
+    No spoken lines: the voice model could not be fetched on this
+    network, and the fallback voice would not match.
+- Tried and removed: a belly-flop roll against a crosswind (no effect:
+  hull and flaps are symmetric about the long axis, so a roll makes no
+  sideways force) and a belly-flop drift term along the track (3 m
+  worse than the feedback alone).
+- Consequences: the wind sweep catches 144 of 216 (110 before; the
+  booster at 20 m/s 14 of 18, none before), with a lower gate error at
+  10 m/s and above; one marginal flight (booster, 5 m/s, high noise) is
+  lost that was caught. The still-air boards are identical with and
+  without the estimate (same flights lost, same propellant left), so
+  nothing that worked in still air changed (LIMITATIONS.md has the
+  tables). The ship still
+  loses most strong crosswinds: it drifts ~500 m sideways in the belly
+  flop, which only a heading choice can fix (M4.3). The default test
+  suite stays under a minute.

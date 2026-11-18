@@ -107,6 +107,39 @@ simulation can be, on one page with a mission-control interface.
 - [x] Update the end-to-end tests and the demo recording for the new page
 - [x] `learn/` chapter for M3 (local only)
 
+## M4 — Smarter guidance
+
+Goal (owner, 2026-11-18): guidance "is not as smart as it should be": the
+last approach looks scripted, every flight falls the same way, and it does
+not react to wind. And Kestrel's own solver must be the one that flies.
+Four sub-projects, each with its own spec, plan and measurement.
+
+- [x] **4.1 Wind awareness** (D-046): guidance estimates the wind in flight
+      from what it senses and plans, steers and predicts with it
+  - [x] Wind filter (`guidance::wind`): a 2-state Kalman filter on the
+        air's force (accelerometers, engine telemetry, surface positions)
+  - [x] The planner, the controllers and the predictions use it; with no
+        wind known guidance is exactly the old one
+  - [x] The page: telemetry, analysis-view arrows beside the true wind,
+        flight-record entries, an on/off switch
+  - [x] Wind sweep before/after: 110 → 144 flights of 216 caught
+  - [x] The robustness boards on/off on the same build (LIMITATIONS.md)
+  - [x] `learn/` chapter (local only)
+- [ ] **4.2 A planned final approach**: the optimizer plans onto the arms
+      (a keep-out constraint, margins from the navigation uncertainty);
+      the scripted slide-and-sink becomes the fallback
+- [ ] **4.3 A chosen approach**: each flight picks its approach bearing
+      within the arms' open side from where it comes from and the wind,
+      including the ship's belly-flop heading (4.1 found that a
+      crosswind drifts the ship ~500 m sideways: its belly flop can only
+      slide along its nose)
+- [ ] **4.4 Kestrel's own solver flies**: `crates/socp` faster (warm
+      starts, centring) and the default; the 3-DoF guidance ported to it;
+      Clarabel kept only as a test-time reference
+- [ ] Booster engine-out mid-burn: two outer engines lost at 30 s hit the
+      tower (found 2026-11-18 on the page; one is caught); measure, then
+      fix in 4.2 or 4.3
+
 ## Publishing on GitHub
 
 Not a milestone: getting the finished project public (D-045).
@@ -149,3 +182,5 @@ Not a milestone: getting the finished project public (D-045).
   (D-044); the opening sequence stays an illustration.
 - 2026-11-18 — Prepared for GitHub: CI and a GitHub Pages deploy, clippy
   clean, the agent's rules file kept local (D-045).
+- 2026-11-18 — M4 begun: smarter guidance, four sub-projects. 4.1 wind
+  awareness done (D-046).

@@ -119,8 +119,33 @@ What is simulated, and what is only shown:
   Booster, seeds 11-30: 20 of 20 at high noise (11 raw), 20 of 20 at low
   (19 raw). Real accelerometers drift and have noise; these do not. One
   seed per cell: differences of one or two flights are noise.
-- **Wind** is the same at every height; a gust is a 4 s trapezoid. The
-  planner knows neither.
+- **Wind** is the same at every height; a gust is a 4 s trapezoid.
+  Guidance knows neither in advance: it **estimates** the wind in flight
+  (D-046) with a two-state Kalman filter on the air's force, made from
+  the accelerometers (taken as exact), engine telemetry (the thrust
+  delivered, taken as a 1 % reading, *illustrative*) and the surfaces'
+  positions, at the navigation estimate. In a 15 m/s crosswind it is
+  within 0.05 m/s of the truth after 10 s of noise-free fall (unit test)
+  and within 0.25 m/s (ship) and 0.13 m/s (booster) by ignition at low
+  noise (closed loop, seed 7), with a stated 1σ of 0.8-2.7 m/s (it is
+  least sure along the ship's nose, where the air's force hardly depends
+  on the wind). Correlated sensor errors count once per correlation
+  time, so its 1σ is honest (unit test with a drifting attitude error:
+  worst error 0.8σ). It follows a gust with a lag (unit test: within
+  3 m/s of a 10 m/s step within 4 s). It learns only while the engines
+  are off and holds its estimate through the burn (under thrust, errors
+  in the thrust line looked like up to 10 m/s of wind in still air): a
+  gust that begins in the burn is not tracked. Guidance flies only the
+  part beyond two standard deviations: winds under about 1-3 m/s are
+  flown as calm. The planner flies in the estimate; the
+  controllers lean into it; the booster's burn plan still has no
+  crossflow drag (D-031), so its controller adds that part.
+- **The ship cannot cross a crosswind in its belly flop**: the hull and
+  flaps are symmetric about the long axis, so a roll makes no sideways
+  force, and it can only slide along its nose (toward the tower). In a
+  15 m/s crosswind it drifts about 500 m sideways before ignition and
+  no plan reaches the gate from there (out of propellant). A heading
+  choice is M4.3.
 - **Start envelope.** Booster: caught from 6–20 km at 300–600 m/s in the
   starts tried; from 25 km and above it reaches the tower area but the
   burn's plan fails and it runs out of propellant. A sideways divert of
@@ -441,6 +466,64 @@ Not measured: a benchmark of 6-DoF solve times; Firefox or Safari; phones
 (the layout was checked at phone width only as a screenshot); frame rates;
 any Monte Carlo of the M3 flights; ×2 and faster after the retune; how
 the blueprint view performs on a slow GPU.
+
+### Wind (M4.1)
+
+**Wind sweep** (`wind_sweep`, `--ignored`; before: 2026-11-18, after:
+2026-11-19): both vehicles,
+steady wind 0, 5, 10, 15, 20, 25 m/s blowing from +x (the sea), −x (the
+tower side) and +y (across), noise low and high, seeds 7, 8, 9, 0.3 s
+throttle lag, solve latency one re-plan period (0.5 s). Caught, of 18
+per cell (3 directions × 2 noise levels × 3 seeds), before M4.1 (the
+code before any change, which the wind-blind switch still flies bit for
+bit) and after; mean
+sideways distance from the approach gate when the final approach began:
+
+| Wind | Booster before | after | gate error | Ship before | after | gate error |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 m/s | 18 | 18 | 4.9 → 4.9 m | 18 | 18 | 4.0 → 4.0 m |
+| 5 m/s | 18 | 17 | 4.7 → 3.7 m | 15 | 17 | 5.0 → 5.0 m |
+| 10 m/s | 16 | 16 | 3.9 → 3.3 m | 13 | 15 | 5.8 → 4.4 m |
+| 15 m/s | 11 | 15 | 4.0 → 4.0 m | 1 | 5 | 4.1 → 3.9 m |
+| 20 m/s | 0 | 14 | 6.7 → 4.0 m | 0 | 4 | 5.5 → 4.3 m |
+| 25 m/s | 0 | 5 | 8.2 → 3.2 m | 0 | 0 | 9.0 → 3.4 m |
+
+110 of 216 caught before, 144 after (final guidance, 2026-11-19; a first
+version that flew the raw estimate caught 149 but lost still-air flights,
+D-046). One flight was caught before and is lost now: the booster in a
+5 m/s wind from +y at high noise, seed 7 (before, a marginal catch 18.4 m
+off the gate at 7.6 m/s sideways; now it never reaches the gate and
+hits the tower). The criterion "at least as many at every wind speed" is
+missed by that one flight. Before, the booster in 20 m/s and
+more either hit the tower or reached the gate and ran out of
+propellant fighting the wind in the final slide; the ship lost most
+crosswind flights in its belly flop (above). Gate errors are means over
+the flights that reached the gate, so they mix different flights before
+and after. Three seeds per cell: not a statistical claim.
+
+**Robustness boards, wind awareness off and on, still air**
+(`wind_aware_board`, `--ignored`, same build; "off" is exactly the
+guidance before M4.1, checked bit for bit by `unaware_flight_matches_today`):
+
+| Board | Wind-blind | Wind-aware |
+| --- | --- | --- |
+| Ship nominal (seeds 7-10, noise off/low/high) | 12/12 | 12/12 |
+| Ship seeds 11-30 (noise low/high) | 38/40 | 38/40 |
+| Booster seeds 11-30 (noise low/high) | 40/40 | 40/40 |
+| Ship engine-out window (49-67 s, noise off/low) | 20/20 | 20/20 |
+
+The same two flights are lost either way (ship seed 17 at low noise and
+seed 24 at high: they hit the tower), with the same propellant left: in
+still air the wind guidance flies is zero (D-046). Single seeds per
+cell: not a statistical claim.
+
+**Controllers alone** (unit tests, the shared model as the truth, no
+noise): the booster's descent in a 15 m/s crosswind, largest sideways
+error on the way down 17.6 m without the estimate, 7.8 m with it (both
+arrive within 3 m); the ship over the arms in a 10 m/s wind, mean
+distance from the axis in the second 10 s 1.81 m without, 1.04 m with.
+Tried and removed: a belly-flop roll against a crosswind (no effect, see
+above) and a belly-flop drift term along the track (3 m worse).
 
 ### Solve-time benchmark (M3, both solvers)
 
