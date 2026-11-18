@@ -125,9 +125,12 @@ Four sub-projects, each with its own spec, plan and measurement.
   - [x] Wind sweep before/after: 110 → 144 flights of 216 caught
   - [x] The robustness boards on/off on the same build (LIMITATIONS.md)
   - [x] `learn/` chapter (local only)
-- [ ] **4.2 A planned final approach**: the optimizer plans onto the arms
-      (a keep-out constraint, margins from the navigation uncertainty);
-      the scripted slide-and-sink becomes the fallback
+- [x] **4.2 The final approach without the stop-and-wait** (D-047): a
+      planned, re-planned approach onto the arms was built (Kestrel's
+      own solver, mast keep-out for base and nose) and **lost on every
+      board**, so it is an option, off; instead the terminal controller
+      glides onto the arms in one movement: same catches, 2-3 s quicker,
+      a quarter softer at contact
 - [ ] **4.3 A chosen approach**: each flight picks its approach bearing
       within the arms' open side from where it comes from and the wind,
       including the ship's belly-flop heading (4.1 found that a
@@ -184,3 +187,5 @@ Not a milestone: getting the finished project public (D-045).
   clean, the agent's rules file kept local (D-045).
 - 2026-11-18 — M4 begun: smarter guidance, four sub-projects. 4.1 wind
   awareness done (D-046).
+- 2026-11-19 — 4.2 done: the glide onto the arms (D-047); the planned
+  approach measured worse and kept as an option.

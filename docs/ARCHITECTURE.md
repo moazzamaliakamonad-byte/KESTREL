@@ -211,11 +211,16 @@ crates/guidance
                thread), mod.rs (iteration, cold/warm references, acceptance by
                re-integration)
   ship_control.rs  belly_flop (ship) / descent (booster) -> unpowered(); flip; steady_burn;
-               powered (plan tracking); terminal; ignition_altitude; fall_time
+               powered (plan tracking); terminal (glides onto the arms, D-047); approach
+               (flies an approach plan, experimental); ignition_altitude; fall_time;
+               every model of the air in the estimated wind (Air, D-046)
   entry.rs     entry guidance: predictor-corrector on the bank angle (bisection), bank
                reversals on a heading deadband, heating override; entry_start geometry
   envelope.rs  engine-out envelope: the largest sink speed from which a relit spare can
                still stop the ship above the arms (point-mass bound, D-039)
+  approach.rs  a planned final approach (D-047, experimental, off): a 3-DoF SOCP from the
+               estimate onto the arms on Kestrel's own solver (set up once), base and nose
+               kept off the mast; the flight re-plans it on drift
   wind.rs      the wind estimate (D-046): a 2-state extended Kalman filter on the air's
                force (accelerometers − gravity − engine telemetry, against the shared
                aerodynamic model at the airspeed v − w); its noise from the readings'

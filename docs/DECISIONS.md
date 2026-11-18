@@ -784,3 +784,49 @@ Template:
   loses most strong crosswinds: it drifts ~500 m sideways in the belly
   flop, which only a heading choice can fix (M4.3). The default test
   suite stays under a minute.
+
+## D-047 — The final approach: a glide, not a plan (M4.2)
+- Date: 2026-11-19
+- Status: accepted
+- Context: the owner: the last approach "looks robotic". From the burn's
+  gate (D-033) the terminal controller slid over the catch axis, stopped
+  5 m above the arms until centred, then sank. The goal was a planned,
+  re-planned approach onto the arms instead.
+- Tried first, and kept as an option: `guidance::approach`, a 3-DoF
+  point-mass SOCP from the estimate onto the caught position (20
+  intervals, Kestrel's own solver set up once and updated after), keeping the base and nose off the mast (the
+  tilt linearised at hover), with a margin of 1 m plus twice the
+  navigation error (measured: 0.2-0.3 m RMS at low noise, 0.9-1.1 m at
+  high). Getting a vehicle on its last engine near hover to follow it
+  took, from traces: an acceleration linear between nodes (constant per
+  interval and re-planned faster than an interval, it never tilted), a
+  tilt-rate limit, starting from the last command (not the measured
+  tilt), soft comfort limits (fuel-optimal plans ride their limits and
+  re-plans failed; Clarabel agreed those problems were infeasible), a
+  gentle objective, slower toward the mast near the axis, re-planning
+  only on drift and at most every 0.5 s (many re-plans a second fed back
+  on themselves: 18 degrees of tilt), and flying it by commanded velocity
+  like the terminal controller (feeding its acceleration and tilt rate
+  forward swung 5 m across the axis in the closed loop).
+- Measured (`approach_board`, same build): it lost on every board.
+  Scripted / planned: ship nominal 12/12 / 8/12 (gate to catch 11.4 s /
+  22.9 s), ship seeds 11-30 38/40 / 28/40, booster seeds 11-30 40/40 /
+  33/40, ship engine-out window 20/20 / 11/20. Most losses followed the
+  planner giving up mid-way and handing a half-flown state to the
+  scripted fallback. It stays (`planned_approach`, off by default, not on
+  the page).
+- Decision: the terminal controller **glides**. While still off the axis
+  the height it may come down to falls with the distance from the axis
+  (1.5 m per metre beyond 1 m, at most the old 5 m), so it slides in and
+  comes down in one movement; held a few metres off but steady (a strong
+  crosswind) it creeps down as before; the final settle slides in at most
+  0.4 m/s and arrives at 1.0 m/s (1.3 before). Each of those three came
+  from a measured loss: two high-noise touchdowns too fast (one sideways,
+  one down), and 25 m/s crosswinds hovering dry.
+- Consequences (`approach_board`, then `wind_sweep`): every board catches
+  what it did (ship 12/12, 38/40, booster 40/40, engine-out 20/20, the
+  same two flights lost); gate to catch 9.1-10.9 s instead of 11.4-13.9
+  s; at contact 1.11-1.25 instead of 1.42-1.61 m/s down and 0.24-0.31
+  instead of 0.31-0.42 m/s sideways. Wind sweep 146 of 216 (144 before),
+  no fewer at any wind speed. A sink cap that went negative below the
+  rest height panicked in the sweep; fixed and tested.
