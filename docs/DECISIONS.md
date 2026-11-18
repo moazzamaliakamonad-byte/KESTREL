@@ -664,3 +664,16 @@ Template:
 - Measured: the corridor sweep is unchanged (14 of 20); the nominal
   flight from orbit is caught at 826 s; frames filmed across the
   hand-over show the same ground, attitude and framing either side.
+
+## D-044 — Scope: the landing guidance only; no simulated ascent
+- Date: 2026-11-18
+- Status: accepted
+- Context: the M3 roadmap still listed a simulated ascent, hot staging and
+  boostback ("the full mission"). Owner: "remove the simulated ascent we
+  only made the landing guide system that's it".
+- Decision: the item is removed from the roadmap. Kestrel simulates and
+  guides the return: from a start in the air (or from orbit, D-042) to the
+  catch or loss. The opening sequence (countdown, liftoff, stage
+  separation) stays an illustration timed by hand and says so on screen.
+- Consequences: D-022's "it must be replaced when the ascent is simulated"
+  no longer applies: nothing replaces it. With this, M3 is done.

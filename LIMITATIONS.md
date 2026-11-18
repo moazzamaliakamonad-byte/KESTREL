@@ -17,14 +17,15 @@ approximate. Update it whenever a milestone lands.
   chosen to be plausible. The page marks each number one way or the other.
   The models are generic "Starship-class" shapes, not anyone's design.
 
-## Current state (M3: ship, booster and the one-page console)
+## Current state (M3 done: ship, booster and the one-page console)
 
 What is simulated, and what is only shown:
 
 - **Simulated:** the return of one vehicle at a time, from a chosen start
   in the air to the catch or loss. The start is a state the page
   sets (altitude, position, velocity), not the end of a simulated ascent.
-- **Not simulated: the launch, ascent, stage separation and boostback.**
+- **Not simulated, and out of scope: the launch, ascent, stage separation
+  and boostback** (Kestrel is the landing guidance, D-044).
   The opening sequence (countdown, liftoff, the stages parting at 64 km,
   the title card) is an illustration timed by hand. The screen says so
   while it plays.

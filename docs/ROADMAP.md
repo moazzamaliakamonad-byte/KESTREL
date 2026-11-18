@@ -96,7 +96,6 @@ simulation can be, on one page with a mission-control interface.
       it) and booster 20 of 20 (11 without) (D-040)
 
 - [x] Commentary (rendered clips) and camera-aware procedural sound
-- [ ] Simulated ascent, hot staging and boostback (the full mission)
 - [x] Orbital entry (round planet, heating that matters): a guided
       entry from 120 km and 7.5 km/s on a round Earth, tiles that can
       burn through, hand-over to the landing (D-042)
@@ -106,7 +105,7 @@ simulation can be, on one page with a mission-control interface.
 - [x] Published benchmark of solve times, both solvers, native and in
       the browser (LIMITATIONS.md, method stated)
 - [x] Update the end-to-end tests and the demo recording for the new page
-- [~] `learn/` chapter for M3 (local only)
+- [x] `learn/` chapter for M3 (local only)
 
 ## Change log
 
@@ -130,3 +129,6 @@ simulation can be, on one page with a mission-control interface.
 - 2026-11-17 — M3: guided flip, engine-out relight, approach gate 10 m out
   and 20 m up, planner 2.3x faster for the ship, event re-plans, flight
   record with replay, unit and source tooltips.
+- 2026-11-18 — M3 done. The simulated ascent, hot staging and boostback
+  removed from the roadmap by the owner: Kestrel is the landing guidance
+  (D-044); the opening sequence stays an illustration.

@@ -51,7 +51,7 @@ return to the same tower.
 - **M0–M2 done:** fuel-optimal 3-DoF landing guidance (lossless
   convexification, Clarabel), in the browser, in a closed loop with a
   separate simulator, noisy sensing and "break it" controls.
-- **M3 in progress:** 6-DoF vehicles and successive convexification.
+- **M3 done:** 6-DoF vehicles and successive convexification.
   Built: the ship (belly flop, flip, tower catch),
   the booster (grid-fin descent, 13 → 3 engine landing burn, tower catch),
   one page with full customization, cinematic cameras, the blueprint
@@ -60,8 +60,10 @@ return to the same tower.
   solver (no memory allocation while solving, a fixed iteration cap;
   Clarabel stays the default) with a published benchmark, and a guided
   entry from orbit (120 km, 7.5 km/s, a round Earth, tiles that can burn
-  through) that hands over to the landing. Not built: a simulated ascent,
-  hot staging and boostback (the opening sequence is an illustration).
+  through) that hands over to the landing.
+- **Scope:** the landing guidance. The launch, ascent, hot staging and
+  boostback are not simulated and not planned; the opening sequence is an
+  illustration.
 
 Measured numbers and every known approximation:
 [LIMITATIONS.md](LIMITATIONS.md). Plan: [docs/ROADMAP.md](docs/ROADMAP.md).
