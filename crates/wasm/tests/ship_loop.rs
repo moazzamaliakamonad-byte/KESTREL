@@ -1251,32 +1251,3 @@ fn earth_crosswind_is_caught() {
     );
     assert_eq!(r.outcome, Some(Outcome::Caught));
 }
-
-#[test]
-#[ignore]
-fn tmp_preview_like() {
-    for chosen in [false, true] {
-        let mut f = ShipFlight::new(ShipFlightConfig {
-            lag: 0.3,
-            chosen_bearing: chosen,
-            ..ShipFlightConfig::new(Kind::Earth)
-        })
-        .unwrap();
-        let mut pending: Option<Pending> = None;
-        let mut last_request = f64::NEG_INFINITY;
-        while f.phase() != Phase::Done && f.sim().t < 400.0 {
-            f.step(FRAME);
-            deliver(&mut f, &mut pending);
-            request_after(&mut f, &mut pending, &mut last_request, 0.0);
-        }
-        let x = f.sim().x;
-        eprintln!(
-            "chosen {chosen}: bearing {:.6} rad, {:?} at {:.1}, end ({:.2},{:.2})",
-            f.bearing(),
-            f.sim().outcome,
-            f.sim().t,
-            x[dynamics::R],
-            x[dynamics::R + 1]
-        );
-    }
-}
