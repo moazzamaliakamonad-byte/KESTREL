@@ -263,10 +263,11 @@ web/src/components/console  DOM overlay
   Console (top bar, timeline, action bar, caption, verdict, keys), Dock (Mission, Vehicle,
   Environment, View), Telemetry (rail, attitude ball, engine map, graphs), AnalysisPanel,
   Launch (opening overlay, phase banner, analysis intro), useEngine (workers, preview)
-web/src/components/stage/Entry.tsx  the entry scene: procedural globe (Earth-centred, turned so the
-                            ship is at the origin), atmosphere rim, stars, predicted ground track,
-                            ship at its angle of attack and bank, plasma wake, its own camera;
-                            NotInEntry hides the landing scenery meanwhile
+web/src/components/stage/Entry.tsx  a flight from orbit in the landing's own world (D-043): the round
+                            Earth placed under the tower frame (procedural globe, a regional
+                            ground continuing the painted coast, atmosphere rim) and the plasma
+                            wake; the ship, trail and cameras are the landing's own, fed the
+                            entry's state in the tower frame
 web/scripts/make-voice.mjs  renders phrases.ts to public/voice/*.mp3 (dev tool)
 web/e2e/console.spec.ts     opt-in Playwright tests of the page (catch, engine out, analysis, reset);
                             E2E_BASE_URL=http://localhost:3000 runs them against a dev server

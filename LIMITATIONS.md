@@ -37,7 +37,10 @@ What is simulated, and what is only shown:
   air), no attitude dynamics: the bank angle rolls at 15°/s toward what
   guidance asks. Entry guidance reads the true state (no entry
   navigation). At 25 km the 6-DoF flight takes over from the entry's
-  state; the attitude there is set belly down, not carried over.
+  position, velocity and attitude in the tower's frame (D-043); the
+  attitude during the entry is a schedule (about 60° angle of attack,
+  easing into the belly flop below Mach 5), not a dynamics result, and
+  the body rates start from zero at the hand-over.
 - **Heating matters in the entry, and only there.** Stagnation-point heat
   flux (Sutton–Graves, 4.5 m effective nose radius, *illustrative*) sets
   the tile temperature by radiative equilibrium (emissivity 0.85,
@@ -56,7 +59,10 @@ What is simulated, and what is only shown:
   short, outside the window (not a supported start).
 - **The globe is procedural**: noise land, sea, ice and clouds, not real
   geography. The site's coordinates (Starbase, Texas) only place the
-  ground track.
+  ground track. Around the site a 1 200 km regional ground continues the
+  painted coast and fades into the globe; the 120 km painted coast lies
+  flat on the tangent plane (150 m above the globe at its centre, about
+  430 m at its edge 60 km out, where it fades out).
 - **After the entry (and in every other start): flat ground, constant
   gravity, exponential atmosphere, no Mach effects.** The booster starts
   supersonic and the ship's 80 km start hypersonic with the same drag

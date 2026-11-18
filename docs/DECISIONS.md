@@ -633,3 +633,34 @@ Template:
   50 K of it or above); aiming the heading at the aim point instead of the
   tower (the ship arrived with 88 m/s sideways, which the belly flop
   cannot remove, and was lost); the hand-over aimed at 3 km and 25 km out.
+
+## D-043 — One continuous flight from orbit to the arms
+- Date: 2026-11-18
+- Status: accepted
+- Context: owner: "I don't like how the simulation from orbital entry to
+  next phase just switches". The entry was drawn in its own Earth-centred
+  scene and the landing in the tower's flat one; at the hand-over the
+  picture cut to a different world and camera, the ship's attitude was
+  reset to belly down, and time dropped from ×16 to ×1 at once.
+- Decision:
+  - One frame for both: the tower's frame on the round Earth
+    (`model::entry::EarthFrame`, exact 3D, x following the ship by a
+    fraction of a degree). During the entry the page is given the ship's
+    position, velocity and attitude in it; the 6-DoF flight starts from
+    exactly those numbers, attitude included.
+  - The entry attitude eases from about 60° angle of attack (hypersonic)
+    into the belly-flop pose (body level, belly down) between Mach 5 and
+    Mach 1.5, so the hand-over attitude is the one the belly flop flies.
+  - The page draws a round Earth whose top lies just under the flat
+    landing ground, a regional ground that continues the painted coast,
+    and a sky and haze that follow the true altitude and local vertical;
+    the flat horizon planes give way to it on flights from orbit.
+  - One camera through the hand-over: during the entry it rides beside
+    the ship (following it exactly, smoothing only its offset) and over
+    the last 10 km eases into the chase framing the landing starts with;
+    leaving the entry is never a cut, and the director holds the chase
+    shot for 30 s after.
+  - Time eases from ×16 to ×1 with altitude (55, 42, 34, 28 km).
+- Measured: the corridor sweep is unchanged (14 of 20); the nominal
+  flight from orbit is caught at 826 s; frames filmed across the
+  hand-over show the same ground, attitude and framing either side.
