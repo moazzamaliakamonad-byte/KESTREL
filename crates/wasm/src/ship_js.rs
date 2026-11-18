@@ -258,6 +258,10 @@ struct OptionDto {
     approach: Option<(f64, f64)>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     side_speed: Option<(f64, f64)>,
+    /// The wind the plan flies in (guidance's estimate, D-046); absent:
+    /// still air.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    wind: Option<Vec3>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -347,6 +351,7 @@ fn request_of(kind: Kind, scn: &Scenario, options: &[(Leg, ShipProblem)]) -> Req
                 upright_from: p.upright_from,
                 approach: Some(p.approach),
                 side_speed: Some(p.side_speed),
+                wind: Some(p.wind),
             })
             .collect(),
     }
@@ -401,6 +406,12 @@ fn problems_of(req: RequestDto) -> Option<Vec<(Leg, ShipProblem)>> {
                     return None;
                 }
                 p.side_speed = (a, b);
+            }
+            if let Some(w) = o.wind {
+                if !w.iter().all(|c| c.is_finite() && c.abs() <= 100.0) {
+                    return None;
+                }
+                p.wind = w;
             }
             Some((leg, p))
         })
@@ -900,6 +911,34 @@ mod tests {
         // Garbage is ignored.
         f.apply_replan("garbage", t);
         assert_eq!(parse(&f.snapshot())["guide"], "plan");
+    }
+
+    /// The page's planner runs in a worker: the estimated wind must cross
+    /// that boundary in the request, or the browser plans in still air
+    /// while every native test plans in the wind (found in review).
+    #[test]
+    fn the_estimated_wind_reaches_the_worker() {
+        let windy = r#"{"scenario":"booster","position":[900,0,14000],"velocity":[-30,0,-420],"noise":"low","wind":[0,-15]}"#;
+        let mut f = ShipFlightJs::create(windy).unwrap();
+        while !f.wants_replan() {
+            f.step(0.05);
+            assert!(f.inner.sim().t < 200.0, "never asked for a plan");
+        }
+        let flown = f.inner.air().wind;
+        assert!(flown[1] < -10.0, "flight flies {flown:?}");
+        let req = parse(&f.measure_request());
+        let dto: RequestDto = serde_json::from_value(req["request"].clone()).unwrap();
+        let problems = problems_of(dto).expect("problems");
+        for (_, p) in &problems {
+            assert_eq!(p.wind, flown, "the worker's problem lost the wind");
+        }
+        // A request without the field (an older page) plans in still air.
+        let mut old = req["request"].clone();
+        for o in old["options"].as_array_mut().unwrap() {
+            o.as_object_mut().unwrap().remove("wind");
+        }
+        let dto: RequestDto = serde_json::from_value(old).unwrap();
+        assert_eq!(problems_of(dto).unwrap()[0].1.wind, [0.0; 3]);
     }
 
     #[test]
