@@ -658,11 +658,16 @@ struct WindRun {
 }
 
 fn wind_run(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64) -> WindRun {
+    wind_run_with(kind, wind, noise, seed, true)
+}
+
+fn wind_run_with(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64, aware: bool) -> WindRun {
     let mut f = ShipFlight::new(ShipFlightConfig {
         seed,
         lag: 0.3,
         noise,
         wind,
+        wind_aware: aware,
         ..ShipFlightConfig::new(kind)
     })
     .unwrap();
@@ -760,4 +765,76 @@ fn wind_sweep() {
             );
         }
     }
+}
+
+/// With wind awareness off, guidance flies exactly the flight it flew
+/// before M4 (numbers read from that code, 2026-11-18): the estimate is
+/// made but used nowhere.
+#[test]
+fn unaware_flight_matches_today() {
+    for (kind, wind, t, left) in [
+        (
+            Kind::Earth,
+            [0.0, 0.0],
+            82.64333333333248,
+            19.43316637947771,
+        ),
+        (
+            Kind::Booster,
+            [0.0, -15.0],
+            73.74999999999964,
+            25.712377419400028,
+        ),
+    ] {
+        let r = wind_run_with(kind, wind, Noise::LOW, 7, false);
+        assert_eq!(r.outcome, Some(Outcome::Caught), "{kind:?}");
+        assert_eq!(r.t, t, "{kind:?}");
+        assert!((r.left - left).abs() < 1e-9, "{kind:?}: {} t left", r.left);
+    }
+}
+
+/// Falling in a 15 m/s crosswind with low noise, the estimate is within
+/// 2 m/s of the wind by the time the engines light.
+#[test]
+fn estimate_settles_in_flight() {
+    for kind in [Kind::Booster, Kind::Earth] {
+        let mut f = ShipFlight::new(ShipFlightConfig {
+            seed: 7,
+            noise: Noise::LOW,
+            wind: [0.0, -15.0],
+            ..ShipFlightConfig::new(kind)
+        })
+        .unwrap();
+        while f.phase() == Phase::BellyFlop && f.sim().t < 300.0 {
+            f.step(FRAME);
+        }
+        let e = f.wind_estimate();
+        let err = e.w[0].hypot(e.w[1] + 15.0);
+        eprintln!(
+            "{kind:?} at ignition (t {:.1}): {:?} ± {:?}",
+            f.sim().t,
+            e.w,
+            e.sigma
+        );
+        assert!(err < 2.0, "{kind:?}: error {err}");
+    }
+}
+
+/// Dragging the vehicle on the page resets navigation, not the wind.
+#[test]
+fn estimate_survives_grab() {
+    let mut f = ShipFlight::new(ShipFlightConfig {
+        seed: 7,
+        noise: Noise::LOW,
+        wind: [10.0, 0.0],
+        ..ShipFlightConfig::new(Kind::Booster)
+    })
+    .unwrap();
+    for _ in 0..600 {
+        f.step(FRAME);
+    }
+    let before = f.wind_estimate();
+    f.grab([500.0, 0.0, 9000.0]);
+    f.release();
+    assert_eq!(f.wind_estimate(), before);
 }

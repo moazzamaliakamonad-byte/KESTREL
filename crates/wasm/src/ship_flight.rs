@@ -22,7 +22,8 @@
 
 use guidance::GuidanceError;
 use guidance::scvx::{self, ShipPlan, ShipProblem};
-use guidance::ship_control::{self, Actuation};
+use guidance::ship_control::{self, Actuation, Air};
+use guidance::wind::{WindEstimate, WindFilter, WindInputs};
 use model::dynamics::{self, M, R, State, V};
 use model::quat::{self, Vec3};
 use model::{Scenario, Tuning, VehicleKind};
@@ -202,6 +203,9 @@ pub struct ShipFlightConfig {
     /// Start attitude (None: the vehicle's usual one). Set at the
     /// hand-over so the 6-DoF flight continues the entry's attitude.
     pub attitude: Option<quat::Quat>,
+    /// Guidance uses its wind estimate (D-046). Off: the estimate is still
+    /// made (and shown) but guidance flies as if the air were still.
+    pub wind_aware: bool,
 }
 
 /// An entry from orbit (*illustrative* numbers, chosen so guidance has
@@ -284,6 +288,7 @@ impl ShipFlightConfig {
             failed: Vec::new(),
             entry: None,
             attitude: None,
+            wind_aware: true,
         }
     }
 
@@ -373,6 +378,8 @@ pub struct ShipFlight {
     /// From orbit: the tower frame on the round Earth (following the ship
     /// during the entry, fixed from the hand-over on).
     earth: Option<model::entry::EarthFrame>,
+    /// Guidance's estimate of the wind, from what the vehicle senses.
+    wind: WindFilter,
 }
 
 impl ShipFlight {
@@ -447,6 +454,7 @@ impl ShipFlight {
             nav: None,
             imu_dv: [0.0; 3],
             imu_h: 0.0,
+            wind: WindFilter::new(),
         })
     }
 
@@ -946,6 +954,7 @@ impl ShipFlight {
         // did over the step. Taken as exact; real ones drift slowly.
         self.imu_dv = quat::sub(dynamics::velocity(&self.sim.x), v_before);
         self.imu_h = h;
+        self.update_wind();
         if self.sim.outcome.is_some() {
             self.phase = Phase::Done;
         }
@@ -1276,6 +1285,42 @@ impl ShipFlight {
             }
         }
         x
+    }
+
+    /// Feed the wind filter what the vehicle sensed over the step just
+    /// taken: the accelerometers, engine telemetry (the thrust delivered)
+    /// and the surfaces' positions, at the navigation estimate.
+    fn update_wind(&mut self) {
+        let x = self.estimate_now();
+        let att_sigma = self.att_sigma().0;
+        let inputs = WindInputs {
+            scn: &self.sim.scn,
+            x: &x,
+            dv: self.imu_dv,
+            h: self.imu_h,
+            thrust_body: self.sim.cluster.thrust,
+            surfaces: self.sim.flaps,
+            att_sigma,
+            vel_sigma: self.noise.vel_sigma,
+        };
+        self.wind.update(&inputs);
+    }
+
+    /// Guidance's wind estimate now.
+    pub fn wind_estimate(&self) -> WindEstimate {
+        self.wind.estimate()
+    }
+
+    /// The air as guidance models it: the estimate, or still air when wind
+    /// awareness is off.
+    pub fn air(&self) -> Air {
+        if self.config.wind_aware {
+            Air {
+                wind: self.wind.wind(),
+            }
+        } else {
+            Air::STILL
+        }
     }
 
     pub fn release(&mut self) {

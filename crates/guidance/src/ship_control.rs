@@ -32,6 +32,16 @@ pub struct Actuation {
     pub rcs: Vec3,
 }
 
+/// The air as guidance models it: the estimated wind (inertial, m/s).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Air {
+    pub wind: Vec3,
+}
+
+impl Air {
+    pub const STILL: Air = Air { wind: [0.0; 3] };
+}
+
 /// Neutral flap exposure.
 pub const FLAP_TRIM: f64 = 0.5;
 /// Largest belly-flop pitch offset, rad (12°).
