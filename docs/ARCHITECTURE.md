@@ -181,7 +181,8 @@ The page no longer uses the 3-DoF pieces above (`Flight`, `replan`,
 ```text
 crates/model      what truth and guidance must agree on (no dependencies)
   vehicle.rs   Ship (one struct, two vehicles: VehicleKind::Ship / Booster), GridFins,
-               Planet (Earth), Catch, Scenario::{earth, booster}, Tuning (physics options)
+               Planet (Earth), Catch, Scenario::{earth, booster}, Tuning (physics options),
+               Scenario::turned (the approach from another bearing, D-048)
   aero.rs      body force: crossflow drag + linear lift slope; flap_force (ship);
                fin_gain / fin_force / fin_allocate (booster's three grid fins)
   dynamics.rs  x' = f(x, T): state [m, r, v, q, w] (14), thrust at the gimbal point

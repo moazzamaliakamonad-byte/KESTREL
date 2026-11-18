@@ -830,3 +830,36 @@ Template:
   instead of 0.31-0.42 m/s sideways. Wind sweep 146 of 216 (144 before),
   no fewer at any wind speed. A sink cap that went negative below the
   rest height panicked in the sweep; fixed and tested.
+
+## D-048 — The ship chooses its approach bearing (M4.3)
+- Date: 2026-11-19
+- Status: accepted
+- Context: the owner: "it always falls the same way": every flight lined
+  up for the same +x approach (gate, aim, the ship's nose toward −x). And
+  M4.1 found the ship's crosswind loss: the belly flop steers along its
+  nose (the pitch slides it there) but cannot cross it (hull and flaps are
+  symmetric about the long axis), so a crosswind drifted it ~500 m across
+  its approach and no plan reached the +x gate.
+- Decision: `Scenario::turned(ψ)` turns the gate, its velocity and the aim
+  about the catch axis; the belly attitude turns with ψ (nose toward the
+  tower from that side) and its pitch slides along the bearing; the
+  burn's tower-side keep-out becomes the half-plane `b · r ≥ c`. The ship
+  chooses ψ once, below 6 km (when the wind estimate settles, or 70 % of
+  the way down): the drift across the +x track by ignition (its sideways
+  speed and the wind's, relaxing with the hull's drag; from thin air the
+  relaxation is slow, so the choice waits for 6 km), and if at least
+  400 m, ψ = atan2(drift, distance to the aim), within ±60° of the arms'
+  open side. Smaller drifts the burn takes up, as before. The booster
+  steers across its fall with its lean and keeps +x. At ψ = 0 everything
+  is exactly the old geometry (still-air flights bit for bit). The page
+  draws the gate at the bearing and records "Approach turned".
+- Tried: choosing ψ toward the unsteered landing point (the along-track
+  momentum made a still-air flight look like a far-side approach: +60°,
+  out of propellant); a 250 m threshold (a flight from orbit 193 m across
+  ran dry when it turned; and 10 m/s crosswinds, ~300 m, dropped from 16
+  to 14 of 18).
+- Consequences (`wind_sweep`): the ship in 15 m/s crosswinds is caught 11
+  of 18 (5 before), none fewer at any wind speed; sweep 152 of 216 (146
+  before). Still air is unchanged (the bearing stays +x). The ship at 20
+  m/s (4 of 18) and 25 m/s (0) is still mostly lost: at ±60° the bearing
+  is clamped and the drift is more than it absorbs.

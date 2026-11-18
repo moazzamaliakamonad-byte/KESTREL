@@ -131,11 +131,10 @@ Four sub-projects, each with its own spec, plan and measurement.
       board**, so it is an option, off; instead the terminal controller
       glides onto the arms in one movement: same catches, 2-3 s quicker,
       a quarter softer at contact
-- [ ] **4.3 A chosen approach**: each flight picks its approach bearing
-      within the arms' open side from where it comes from and the wind,
-      including the ship's belly-flop heading (4.1 found that a
-      crosswind drifts the ship ~500 m sideways: its belly flop can only
-      slide along its nose)
+- [x] **4.3 A chosen approach** (D-048): the ship turns its whole
+      approach (gate, aim, belly heading, keep-out) toward where a
+      crosswind carries it, within 60° of the arms' open side; 15 m/s
+      crosswinds caught 11 of 18 (5 before); still air unchanged
 - [ ] **4.4 Kestrel's own solver flies**: `crates/socp` faster (warm
       starts, centring) and the default; the 3-DoF guidance ported to it;
       Clarabel kept only as a test-time reference
@@ -189,3 +188,5 @@ Not a milestone: getting the finished project public (D-045).
   awareness done (D-046).
 - 2026-11-19 — 4.2 done: the glide onto the arms (D-047); the planned
   approach measured worse and kept as an option.
+- 2026-11-19 — 4.3 done: the ship chooses its approach bearing (D-048);
+  wind sweep 152 of 216.

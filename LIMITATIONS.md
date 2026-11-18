@@ -147,10 +147,13 @@ What is simulated, and what is only shown:
   crossflow drag (D-031), so its controller adds that part.
 - **The ship cannot cross a crosswind in its belly flop**: the hull and
   flaps are symmetric about the long axis, so a roll makes no sideways
-  force, and it can only slide along its nose (toward the tower). In a
-  15 m/s crosswind it drifts about 500 m sideways before ignition and
-  no plan reaches the gate from there (out of propellant). A heading
-  choice is M4.3.
+  force, and it can only slide along its nose. In a 15 m/s crosswind it
+  drifts about 500 m sideways before ignition. So it turns its whole
+  approach toward that drift (D-048: gate, aim, heading, keep-out;
+  within 60° of the arms' open side, for a predicted drift of 400 m or
+  more): 15 m/s crosswinds caught 11 of 18 (5 before). At 20 and 25 m/s
+  the drift outgrows the 60° and most are still lost (4 and 0 of 18).
+  The booster keeps the +x approach (its lean steers across its fall).
 - **Start envelope.** Booster: caught from 6–20 km at 300–600 m/s in the
   starts tried; from 25 km and above it reaches the tower area but the
   burn's plan fails and it runs out of propellant. A sideways divert of
@@ -492,6 +495,10 @@ sideways distance from the approach gate when the final approach began:
 | 15 m/s | 11 | 15 | 4.0 → 4.0 m | 1 | 5 | 4.1 → 3.9 m |
 | 20 m/s | 0 | 14 | 6.7 → 4.0 m | 0 | 4 | 5.5 → 4.3 m |
 | 25 m/s | 0 | 5 | 8.2 → 3.2 m | 0 | 0 | 9.0 → 3.4 m |
+
+After M4.2 and M4.3 (the glide, the chosen bearing; `wind_sweep`,
+2026-11-19): 152 of 216 (booster 18, 17, 16, 15, 15, 5; ship 18, 17, 16,
+11, 4, 0 at 0-25 m/s).
 
 110 of 216 caught before, 144 after (final guidance, 2026-11-19; a first
 version that flew the raw estimate caught 149 but lost still-air flights,
