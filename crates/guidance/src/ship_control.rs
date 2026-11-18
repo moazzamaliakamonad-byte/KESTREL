@@ -22,7 +22,7 @@
 use model::aero;
 use model::dynamics::{self, M, State};
 use model::quat::{self, Quat, Vec3};
-use model::{Scenario, VehicleKind};
+use model::{Scenario, Ship, VehicleKind};
 
 /// What the controller asks of the actuators (mirrors `sim::ship::Command`).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -159,10 +159,35 @@ fn rcs_request(scn: &Scenario, torque: Vec3) -> Vec3 {
     std::array::from_fn(|i| (torque[i] / arm[i]).clamp(-1.0, 1.0))
 }
 
-/// Body aerodynamic torque at the estimate (no wind known).
-fn aero_torque(scn: &Scenario, x: &State) -> Vec3 {
+/// Body aerodynamic torque at the estimate, in the estimated wind.
+fn aero_torque(scn: &Scenario, x: &State, air: &Air) -> Vec3 {
     let rho = scn.density(x[dynamics::R + 2]);
-    aero::body_force(&scn.ship, rho, dynamics::attitude(x), dynamics::velocity(x)).1
+    let v_air = quat::sub(dynamics::velocity(x), air.wind);
+    aero::body_force(&scn.ship, rho, dynamics::attitude(x), v_air).1
+}
+
+/// Force of the air on the body and on the surfaces at `surfaces`
+/// (inertial, N) for airspeed `v_air` at attitude `q`.
+fn air_force(ship: &Ship, rho: f64, q: Quat, v_air: Vec3, surfaces: [f64; 4]) -> Vec3 {
+    let body = aero::body_force(ship, rho, q, v_air).0;
+    let surf = match ship.kind {
+        VehicleKind::Ship => aero::flap_force(ship, rho, q, v_air, surfaces).0,
+        VehicleKind::Booster => aero::fin_force(ship, rho, q, v_air, surfaces).0,
+    };
+    quat::add(body, surf)
+}
+
+/// What the estimated wind adds to the air's force (inertial, N) at
+/// attitude `q`: the model in the wind minus the model in still air. Zero,
+/// exactly, in still air, so a wind-blind flight is unchanged (D-046).
+fn wind_force(ship: &Ship, rho: f64, q: Quat, v: Vec3, air: &Air, surfaces: [f64; 4]) -> Vec3 {
+    if air.wind == [0.0; 3] {
+        return [0.0; 3];
+    }
+    quat::sub(
+        air_force(ship, rho, q, quat::sub(v, air.wind), surfaces),
+        air_force(ship, rho, q, v, surfaces),
+    )
 }
 
 /// Engines-first attitude for a velocity: the axis straight into the wind
@@ -181,7 +206,7 @@ pub fn descent_attitude(v: Vec3) -> Quat {
 
 /// Booster, engines off: fall engines first toward `aim` (x, y) at the
 /// ignition altitude, steering with body lift and the grid fins.
-pub fn descent(scn: &Scenario, x: &State, aim: [f64; 2], ignition_z: f64) -> Actuation {
+pub fn descent(scn: &Scenario, x: &State, aim: [f64; 2], ignition_z: f64, air: &Air) -> Actuation {
     let r = dynamics::position(x);
     let v = dynamics::velocity(x);
     let m = x[M];
@@ -198,8 +223,12 @@ pub fn descent(scn: &Scenario, x: &State, aim: [f64; 2], ignition_z: f64) -> Act
     // point where the burn would bring it to rest was tried: it lit the
     // engines 200 m out, and a sideways divert at 400 m/s is fought by the
     // body's own lift.)
-    let a_want: [f64; 2] =
-        std::array::from_fn(|i| 6.0 * (aim[i] - r[i]) / (t_go * t_go) - 4.0 * v[i] / t_go);
+    // What the wind pushes, held engines first along the fall: the lean
+    // must make the rest (so it leans into a crosswind before it drifts).
+    let push = wind_force(&scn.ship, rho, descent_attitude(v), v, air, [0.0; 4]);
+    let a_want: [f64; 2] = std::array::from_fn(|i| {
+        6.0 * (aim[i] - r[i]) / (t_go * t_go) - 4.0 * v[i] / t_go - push[i] / m
+    });
     // Sideways acceleration per radian of lean, from the shared model
     // (negative: the lift points away from the lean).
     let eps = 0.05;
@@ -226,9 +255,14 @@ pub fn descent(scn: &Scenario, x: &State, aim: [f64; 2], ignition_z: f64) -> Act
     let q_des = turn([0.0, 0.0, 1.0], axis, std::f64::consts::PI);
 
     let tau = attitude_torque(scn, x, q_des, [0.0; 3], WN_FIN);
-    let body = aero_torque(scn, x);
+    let body = aero_torque(scn, x, air);
     let need: Vec3 = std::array::from_fn(|i| tau[i] - body[i]);
-    let gain = aero::fin_gain(&scn.ship, rho, dynamics::attitude(x), v);
+    let gain = aero::fin_gain(
+        &scn.ship,
+        rho,
+        dynamics::attitude(x),
+        quat::sub(v, air.wind),
+    );
     let (fins, made) = aero::fin_allocate(&scn.ship, gain, need);
     let rest = std::array::from_fn(|i| need[i] - made[i]);
     Actuation {
@@ -239,15 +273,21 @@ pub fn descent(scn: &Scenario, x: &State, aim: [f64; 2], ignition_z: f64) -> Act
 }
 
 /// The unpowered phase of either vehicle toward the scenario's aim point.
-pub fn unpowered(scn: &Scenario, x: &State, ignition_z: f64) -> Actuation {
+pub fn unpowered(scn: &Scenario, x: &State, ignition_z: f64, air: &Air) -> Actuation {
     match scn.ship.kind {
-        VehicleKind::Ship => belly_flop(scn, x, scn.aim[0], ignition_z),
-        VehicleKind::Booster => descent(scn, x, scn.aim, ignition_z),
+        VehicleKind::Ship => belly_flop(scn, x, scn.aim[0], ignition_z, air),
+        VehicleKind::Booster => descent(scn, x, scn.aim, ignition_z, air),
     }
 }
 
 /// Engines off: belly-flop toward `target_x` at the ignition altitude.
-pub fn belly_flop(scn: &Scenario, x: &State, target_x: f64, ignition_z: f64) -> Actuation {
+pub fn belly_flop(
+    scn: &Scenario,
+    x: &State,
+    target_x: f64,
+    ignition_z: f64,
+    air: &Air,
+) -> Actuation {
     let g = scn.planet.gravity();
     let r = dynamics::position(x);
     let v = dynamics::velocity(x);
@@ -265,8 +305,8 @@ pub fn belly_flop(scn: &Scenario, x: &State, target_x: f64, ignition_z: f64) -> 
     // What the body and the trimmed flaps do anyway.
     let q = dynamics::attitude(x);
     let rho = scn.density(r[2]);
-    let trim = aero::flap_force(&scn.ship, rho, q, v, [FLAP_TRIM; 4]).1;
-    let body = aero_torque(scn, x);
+    let trim = aero::flap_force(&scn.ship, rho, q, quat::sub(v, air.wind), [FLAP_TRIM; 4]).1;
+    let body = aero_torque(scn, x, air);
     tau = std::array::from_fn(|i| tau[i] - trim[i] - body[i]);
 
     // Per-unit-exposure torque of the flaps here.
@@ -309,9 +349,10 @@ fn fly_force(
     q_des: Quat,
     w_des: Vec3,
     limits: (f64, f64),
+    air: &Air,
 ) -> Actuation {
     let q = dynamics::attitude(x);
-    let body = aero_torque(scn, x);
+    let body = aero_torque(scn, x, air);
     let fb = quat::rotate_inv(q, force);
     let l = scn.ship.cm_height;
     let tz = fb[2].clamp(limits.0, limits.1);
@@ -340,6 +381,7 @@ pub fn powered(
     x: &State,
     reference: (&State, Vec3),
     limits: (f64, f64),
+    air: &Air,
 ) -> Actuation {
     let (xr, ur) = reference;
     let m = x[M];
@@ -364,14 +406,30 @@ pub fn powered(
         a[1] *= LATERAL_CAP * g / side;
     }
     a[2] = a[2].clamp(-VERTICAL_CAP * g, VERTICAL_CAP * g);
-    let force = quat::add(f_plan, quat::scale(a, m));
+    // The plan already flew in the estimated wind (D-046); add only what
+    // its model left out: the booster plans without crossflow drag.
+    let unplanned = if scn.ship.kind == VehicleKind::Booster && air.wind != [0.0; 3] {
+        let rho = scn.density(x[dynamics::R + 2]);
+        let q = dynamics::attitude(x);
+        let v = dynamics::velocity(x);
+        let mut planned = scn.ship.clone();
+        planned.c_n = 0.0;
+        let trim = [scn.ship.surface_trim(); 4];
+        quat::sub(
+            wind_force(&scn.ship, rho, q, v, air, trim),
+            wind_force(&planned, rho, q, v, air, trim),
+        )
+    } else {
+        [0.0; 3]
+    };
+    let force = quat::sub(quat::add(f_plan, quat::scale(a, m)), unplanned);
     // Turn the planned attitude so its thrust line meets the wanted force.
     let planned_dir = quat::rotate(qr, normalize(ur));
     let q_des = quat::normalize(quat::mul(
         turn(planned_dir, normalize(force), MAX_CORRECTION),
         qr,
     ));
-    fly_force(scn, x, force, q_des, dynamics::rates(xr), limits)
+    fly_force(scn, x, force, q_des, dynamics::rates(xr), limits, air)
 }
 
 /// Scale (≤ 1) for the sideways position loop so that it stays below the
@@ -401,7 +459,7 @@ fn bandwidth(scn: &Scenario, x: &State, tz: f64) -> f64 {
 
 /// The flip: every lit engine at minimum throttle along the body axis, the
 /// gimbal swinging the ship upright at no more than [`RATE_LIMIT`].
-pub fn flip(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
+pub fn flip(scn: &Scenario, x: &State, limits: (f64, f64), air: &Air) -> Actuation {
     let q = dynamics::attitude(x);
     let force = quat::rotate(q, [0.0, 0.0, limits.0]);
     fly_force(
@@ -411,6 +469,7 @@ pub fn flip(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
         crate::scvx::upright_like(q),
         [0.0; 3],
         limits,
+        air,
     )
 }
 
@@ -419,7 +478,13 @@ pub fn flip(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
 /// first plan. Close to what the plan will ask for, so the plan still
 /// fits when it arrives (braking flat out meanwhile did not: a 1.5 s solve
 /// in the browser left the booster stopped a kilometre up).
-pub fn steady_burn(scn: &Scenario, x: &State, thrust: f64, limits: (f64, f64)) -> Actuation {
+pub fn steady_burn(
+    scn: &Scenario,
+    x: &State,
+    thrust: f64,
+    limits: (f64, f64),
+    air: &Air,
+) -> Actuation {
     let q = dynamics::attitude(x);
     let t = thrust.clamp(limits.0, limits.1);
     let force = quat::rotate(q, [0.0, 0.0, t]);
@@ -430,11 +495,12 @@ pub fn steady_burn(scn: &Scenario, x: &State, thrust: f64, limits: (f64, f64)) -
         crate::scvx::upright_like(q),
         [0.0; 3],
         limits,
+        air,
     )
 }
 
 /// Upright; over the catch axis / pad (x = y = 0), then sinking at [`SINK`].
-pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
+pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64), air: &Air) -> Actuation {
     let m = x[M];
     let g = scn.planet.gravity();
     let r = dynamics::position(x);
@@ -515,14 +581,21 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64)) -> Actuation {
     } else {
         a
     };
-    let force = [m * a[0], m * a[1], m * (a[2] + g)];
     let q = dynamics::attitude(x);
+    // Lean into the estimated wind at once, before it has pushed (D-046).
+    let rho = scn.density(r[2]);
+    let push = wind_force(&scn.ship, rho, q, v, air, [scn.ship.surface_trim(); 4]);
+    let force = [
+        m * a[0] - push[0],
+        m * a[1] - push[1],
+        m * (a[2] + g) - push[2],
+    ];
     let up = crate::scvx::upright_like(q);
     let q_des = quat::normalize(quat::mul(
         turn([0.0, 0.0, 1.0], normalize(force), MAX_CORRECTION),
         up,
     ));
-    fly_force(scn, x, force, q_des, [0.0; 3], limits)
+    fly_force(scn, x, force, q_des, [0.0; 3], limits, air)
 }
 
 /// Seconds until the booster, falling engines first with drag, reaches
@@ -662,7 +735,18 @@ mod tests {
 
     /// Integrate the shared model with flaps and RCS as commanded (instant
     /// actuators): a stand-in for the simulator, which guidance can't use.
-    fn fly(scn: &Scenario, mut x: State, seconds: f64, ctl: impl Fn(&State) -> Actuation) -> State {
+    fn fly(scn: &Scenario, x: State, seconds: f64, ctl: impl Fn(&State) -> Actuation) -> State {
+        fly_in(scn, x, seconds, [0.0; 3], ctl)
+    }
+
+    /// As `fly`, in a steady `wind`.
+    fn fly_in(
+        scn: &Scenario,
+        mut x: State,
+        seconds: f64,
+        wind: Vec3,
+        ctl: impl Fn(&State) -> Actuation,
+    ) -> State {
         let h = 0.01;
         let s = &scn.ship;
         let arm = [
@@ -674,9 +758,10 @@ mod tests {
             let c = ctl(&x);
             let q = dynamics::attitude(&x);
             let rho = scn.density(x[R + 2]);
+            let air = quat::sub(dynamics::velocity(&x), wind);
             let (ff, ft) = match s.kind {
-                VehicleKind::Ship => aero::flap_force(s, rho, q, dynamics::velocity(&x), c.flaps),
-                VehicleKind::Booster => aero::fin_force(s, rho, q, dynamics::velocity(&x), c.flaps),
+                VehicleKind::Ship => aero::flap_force(s, rho, q, air, c.flaps),
+                VehicleKind::Booster => aero::fin_force(s, rho, q, air, c.flaps),
             };
             let rcs: Vec3 = std::array::from_fn(|i| {
                 if c.rcs[i].abs() > 0.2 {
@@ -688,7 +773,7 @@ mod tests {
             let extra = Extra {
                 force: ff,
                 torque: quat::add(ft, rcs),
-                wind: [0.0; 3],
+                wind,
             };
             let d = dynamics::f(scn, &x, c.thrust_body, &extra);
             for i in 0..x.len() {
@@ -710,7 +795,9 @@ mod tests {
             belly_attitude(0.05),
             [0.0, 0.02, 0.0],
         );
-        let x = fly(&scn, x0, 30.0, |x| belly_flop(&scn, x, 0.0, 600.0));
+        let x = fly(&scn, x0, 30.0, |x| {
+            belly_flop(&scn, x, 0.0, 600.0, &Air::STILL)
+        });
         let tilt = quat::tilt(dynamics::attitude(&x)).to_degrees();
         assert!((90.0 - tilt).abs() < 13.0, "tilt {tilt}");
         assert!(quat::norm(dynamics::rates(&x)) < 0.05);
@@ -726,7 +813,9 @@ mod tests {
             belly_attitude(0.0),
             [0.0; 3],
         );
-        let x = fly(&scn, x0, 60.0, |x| belly_flop(&scn, x, 0.0, 600.0));
+        let x = fly(&scn, x0, 60.0, |x| {
+            belly_flop(&scn, x, 0.0, 600.0, &Air::STILL)
+        });
         let r = dynamics::position(&x);
         assert!(r[0].abs() < 150.0, "x {} at z {}", r[0], r[2]);
     }
@@ -751,7 +840,9 @@ mod tests {
         let mut x = x0;
         // Fly until the ignition altitude.
         while x[R + 2] > ign {
-            x = fly(&scn, x, 0.5, |x| descent(&scn, x, scn.aim, ign));
+            x = fly(&scn, x, 0.5, |x| {
+                descent(&scn, x, scn.aim, ign, &Air::STILL)
+            });
         }
         let off = (x[R] - scn.aim[0]).hypot(x[R + 1] - scn.aim[1]);
         assert!(
@@ -769,6 +860,109 @@ mod tests {
         );
     }
 
+    /// Falling engines first through a 15 m/s crosswind: knowing the wind,
+    /// the booster leans into it at once and is blown off its line no more
+    /// than when it only corrects after the push (that feedback alone
+    /// already arrives within a few metres).
+    #[test]
+    fn descent_leans_into_a_crosswind() {
+        let scn = Scenario::booster();
+        let v0 = [0.0, 0.0, -380.0];
+        let x0 = dynamics::state(
+            scn.start_mass,
+            [scn.aim[0], scn.aim[1], 12_000.0],
+            v0,
+            descent_attitude(v0),
+            [0.0; 3],
+        );
+        let wind = [0.0, 15.0, 0.0];
+        let ign = 1800.0;
+        // (end miss, largest sideways error on the way down), m.
+        let miss = |air: Air| {
+            let mut x = x0;
+            let mut worst: f64 = 0.0;
+            while x[R + 2] > ign {
+                x = fly_in(&scn, x, 0.5, wind, |x| descent(&scn, x, scn.aim, ign, &air));
+                worst = worst.max((x[R] - scn.aim[0]).hypot(x[R + 1] - scn.aim[1]));
+            }
+            ((x[R] - scn.aim[0]).hypot(x[R + 1] - scn.aim[1]), worst)
+        };
+        let (blind, aware) = (miss(Air::STILL), miss(Air { wind }));
+        eprintln!("descent in a crosswind (end, worst): blind {blind:.1?} m, aware {aware:.1?} m");
+        assert!(aware.0 < 60.0, "aware missed by {} m", aware.0);
+        assert!(aware.1 <= blind.1, "aware {aware:?} vs blind {blind:?}");
+    }
+
+    /// The belly flop in a 10 m/s wind along its track: its feedback on the
+    /// predicted miss absorbs the wind; knowing the wind (in its torque
+    /// model) it ends no farther from the target. (A drift term that aimed
+    /// off for the wind was tried: 3 m worse.)
+    #[test]
+    fn belly_flop_no_worse_in_an_along_track_wind() {
+        let scn = Scenario::earth();
+        let x0 = dynamics::state(
+            scn.start_mass,
+            [-400.0, 0.0, 6000.0],
+            [0.0, 0.0, -80.0],
+            belly_attitude(0.0),
+            [0.0; 3],
+        );
+        let wind = [10.0, 0.0, 0.0];
+        let end = |air: Air| {
+            let x = fly_in(&scn, x0, 60.0, wind, |x| {
+                belly_flop(&scn, x, 0.0, 600.0, &air)
+            });
+            let tilt = quat::tilt(dynamics::attitude(&x)).to_degrees();
+            assert!((90.0 - tilt).abs() < 15.0, "tilt {tilt}");
+            x[R].abs()
+        };
+        let (blind, aware) = (end(Air::STILL), end(Air { wind }));
+        eprintln!("belly flop in an along-track wind: blind {blind:.0} m, aware {aware:.0} m");
+        assert!(
+            aware < 150.0 && aware <= blind + 1.0,
+            "aware {aware} m vs blind {blind} m"
+        );
+    }
+
+    /// Settling onto the arms in a 10 m/s wind toward +x: leaning into it
+    /// from the start, the ship is pushed off the axis less than when it
+    /// only corrects after being pushed.
+    #[test]
+    fn terminal_leans_into_the_wind_at_once() {
+        let scn = Scenario::earth();
+        let x0 = dynamics::state(
+            120e3,
+            [0.0, 0.0, scn.rest_cm_z() + 30.0],
+            [0.0; 3],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 3],
+        );
+        let lim = (0.98e6, 2.45e6);
+        let wind = [10.0, 0.0, 0.0];
+        // (largest offset, mean offset over the last 10 s), m.
+        let pushed = |air: Air| {
+            let mut x = x0;
+            let (mut worst, mut late): (f64, f64) = (0.0, 0.0);
+            for k in 0..200 {
+                x = fly_in(&scn, x, 0.1, wind, |s| terminal(&scn, s, lim, &air));
+                let off = x[R].hypot(x[R + 1]);
+                worst = worst.max(off);
+                if k >= 100 {
+                    late += off / 100.0;
+                }
+            }
+            (worst, late)
+        };
+        let (blind, aware) = (pushed(Air::STILL), pushed(Air { wind }));
+        eprintln!(
+            "terminal in a 10 m/s wind (worst, late mean): blind {blind:.2?} m, aware {aware:.2?} m"
+        );
+        assert!(
+            aware.1 < 0.7 * blind.1,
+            "aware {aware:?} m vs blind {blind:?} m"
+        );
+    }
+
     #[test]
     fn powered_zero_error_returns_plan_thrust() {
         let scn = Scenario::earth();
@@ -780,7 +974,7 @@ mod tests {
             [0.0; 3],
         );
         let u = [0.0, 0.0, 2.0e6];
-        let a = powered(&scn, &x, (&x, u), (0.98e6, 7.35e6));
+        let a = powered(&scn, &x, (&x, u), (0.98e6, 7.35e6), &Air::STILL);
         assert!(
             (a.thrust_body[2] - 2.0e6).abs() / 2.0e6 < 1e-3,
             "{:?}",
@@ -796,7 +990,7 @@ mod tests {
         let scn = Scenario::earth();
         let q = quat::from_axis_angle([0.0, 1.0, 0.0], 0.1);
         let x = dynamics::state(120e3, [0.0, 0.0, 300.0], [0.0; 3], q, [0.0; 3]);
-        let a = terminal(&scn, &x, (0.98e6, 7.35e6));
+        let a = terminal(&scn, &x, (0.98e6, 7.35e6), &Air::STILL);
         assert!(a.thrust_body[0] > 0.0, "{:?}", a.thrust_body);
     }
 
@@ -817,7 +1011,9 @@ mod tests {
         let mut x = x0;
         let mut t = 0.0;
         while x[R + 2] > rest && t < 12.0 {
-            x = fly(&scn, x, 0.1, |x| terminal(&scn, x, (0.98e6, 2.45e6)));
+            x = fly(&scn, x, 0.1, |x| {
+                terminal(&scn, x, (0.98e6, 2.45e6), &Air::STILL)
+            });
             t += 0.1;
         }
         let off = x[R].hypot(x[R + 1]);

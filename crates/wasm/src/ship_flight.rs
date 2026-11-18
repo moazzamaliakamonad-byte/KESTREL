@@ -890,6 +890,7 @@ impl ShipFlight {
         self.est = est;
         let scn = self.sim.scn.clone();
         let t = self.sim.t;
+        let air = self.air();
         let act = match self.phase {
             Phase::BellyFlop => {
                 let healthy = f64::from(self.sim.cluster.healthy()) * scn.ship.engine_max;
@@ -899,13 +900,13 @@ impl ShipFlight {
                     self.sim.cluster.ignite_all();
                     self.phase = Phase::Flip;
                 }
-                ship_control::unpowered(&scn, &est, self.ignition_z)
+                ship_control::unpowered(&scn, &est, self.ignition_z, &air)
             }
             Phase::Flip => {
                 let limits = self.command_limits();
                 if self.sim.cluster.running() == 0 {
                     // Spinning up: keep the flaps flying, ask for thrust.
-                    let mut a = ship_control::unpowered(&scn, &est, self.ignition_z);
+                    let mut a = ship_control::unpowered(&scn, &est, self.ignition_z, &air);
                     a.thrust_body = [0.0, 0.0, limits.0];
                     a
                 } else if let Guide::Plan { plan, t0 } = &self.guide {
@@ -917,7 +918,7 @@ impl ShipFlight {
                         self.phase = Phase::Burn;
                     }
                     self.follow_switch(t);
-                    ship_control::powered(&scn, &est, (&xr, ur), self.command_limits())
+                    ship_control::powered(&scn, &est, (&xr, ur), self.command_limits(), &air)
                 } else {
                     // No plan yet (or it failed): the scripted flip.
                     let done = quat::tilt(dynamics::attitude(&est)) < FLIP_DONE_TILT
@@ -926,7 +927,7 @@ impl ShipFlight {
                         self.phase = Phase::Burn;
                         self.guide = Guide::None;
                     }
-                    ship_control::flip(&scn, &est, limits)
+                    ship_control::flip(&scn, &est, limits, &air)
                 }
             }
             Phase::Burn => self.burn(&scn, &est, t),
@@ -938,7 +939,7 @@ impl ShipFlight {
                 if lit > 1 && self.command_limits().0 > HOVER_SHARE * weight {
                     self.sim.cluster.shutdown_to(lit - 1);
                 }
-                ship_control::terminal(&scn, &est, self.command_limits())
+                ship_control::terminal(&scn, &est, self.command_limits(), &air)
             }
             Phase::Entry | Phase::Done => self.last,
         };
@@ -962,6 +963,7 @@ impl ShipFlight {
     }
 
     fn burn(&mut self, scn: &Scenario, est: &State, t: f64) -> Actuation {
+        let air = self.air();
         match (&self.guide, self.leg) {
             (Guide::Plan { plan, t0 }, Some(leg)) => {
                 let tau = t - t0;
@@ -978,11 +980,11 @@ impl ShipFlight {
                         self.leg = Some(self.final_leg());
                         self.guide = Guide::None;
                     }
-                    return ship_control::terminal(scn, est, self.command_limits());
+                    return ship_control::terminal(scn, est, self.command_limits(), &air);
                 }
                 let (xr, ur) = plan.sample(tau);
                 self.follow_switch(t);
-                ship_control::powered(scn, est, (&xr, ur), self.command_limits())
+                ship_control::powered(scn, est, (&xr, ur), self.command_limits(), &air)
             }
             _ => {
                 // No plan (yet): brake upright toward the axis. Several lit
@@ -1005,9 +1007,15 @@ impl ShipFlight {
                     && est[V + 2] < -scn.mid_gate_speed;
                 if waiting {
                     let limits = self.command_limits();
-                    return ship_control::steady_burn(scn, est, WAIT_THROTTLE * limits.1, limits);
+                    return ship_control::steady_burn(
+                        scn,
+                        est,
+                        WAIT_THROTTLE * limits.1,
+                        limits,
+                        &air,
+                    );
                 }
-                ship_control::terminal(scn, est, self.command_limits())
+                ship_control::terminal(scn, est, self.command_limits(), &air)
             }
         }
     }
