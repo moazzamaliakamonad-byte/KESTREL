@@ -353,12 +353,14 @@ pub fn plan_ship(
             },
         })?;
         let mut step: f64 = (sub.sigma - sigma).abs();
-        for n in 0..xs.len() {
-            for i in 0..NX {
-                step = step.max((sub.xs[n][i] - xs[n][i]).abs());
+        for (sx, x) in sub.xs.iter().zip(&xs) {
+            for (a, b) in sx[..NX].iter().zip(&x[..NX]) {
+                step = step.max((a - b).abs());
             }
-            for j in 0..3 {
-                step = step.max((sub.us[n][j] - us[n][j]).abs());
+        }
+        for (su, u) in sub.us.iter().zip(&us) {
+            for (a, b) in su.iter().zip(u) {
+                step = step.max((a - b).abs());
             }
         }
         xs = sub.xs;

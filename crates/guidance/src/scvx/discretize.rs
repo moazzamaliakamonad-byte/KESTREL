@@ -247,6 +247,9 @@ fn add<const N: usize>(y: &[f64; N], d: &[f64; N], s: f64) -> [f64; N] {
 
 /// Integrate one interval of length `dtau` from `x0`, control linear from
 /// `u0` to `u1`.
+// Eight plain inputs of one integration step; a struct for them would only
+// rename the same values at every call.
+#[allow(clippy::too_many_arguments)]
 pub fn propagate_interval(
     scn: &Scenario,
     units: &Units,
