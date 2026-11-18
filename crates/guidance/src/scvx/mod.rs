@@ -79,6 +79,9 @@ pub struct ShipProblem {
     /// Sideways speed limit: m/s at the gate's height, and more per metre above.
     pub side_speed: (f64, f64),
     pub nodes: usize,
+    /// Steady wind the plan flies in, inertial, m/s (guidance's estimate,
+    /// D-046; zero: still air).
+    pub wind: Vec3,
 }
 
 /// The booster's largest planned tilt in the landing burn, rad (15°,
@@ -116,6 +119,7 @@ impl ShipProblem {
             approach: (APPROACH_RADIUS, APPROACH_TAN),
             side_speed: (SIDE_SPEED_0, SIDE_SPEED_SLOPE),
             nodes,
+            wind: [0.0; 3],
         }
     }
 
@@ -313,7 +317,7 @@ pub fn plan_ship(
     let mut converged = false;
     for it in 1..=max_iter {
         iterations = it;
-        let ivs = discretize::discretize(scn, &units, &xs, &us, sigma, SUBSTEPS);
+        let ivs = discretize::discretize(scn, p.wind, &units, &xs, &us, sigma, SUBSTEPS);
         let sub = subproblem::solve(&subproblem::Sub {
             xs: &xs,
             us: &us,
@@ -389,7 +393,7 @@ pub fn plan_ship(
     }
 
     // Accept only what the nonlinear dynamics agree with.
-    let flown = discretize::propagate(scn, &units, &x0, &us, sigma, 10);
+    let flown = discretize::propagate(scn, p.wind, &units, &x0, &us, sigma, 10);
     let end = units.x_si(flown.last().expect("nodes"));
     let gate_error = quat::norm(quat::sub(dynamics::position(&end), scn.gate));
     // Near the gate a miss of tens of metres is no plan at all: the

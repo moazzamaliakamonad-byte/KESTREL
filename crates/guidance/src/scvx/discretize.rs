@@ -63,9 +63,14 @@ impl Units {
     }
 }
 
-/// `f` in non-dimensional units (per unit of non-dimensional time).
-pub fn f_nd(scn: &Scenario, units: &Units, x: &State, u: Vec3) -> State {
-    let d = dynamics::f(scn, &units.x_si(x), units.u_si(u), &Extra::default());
+/// `f` in non-dimensional units (per unit of non-dimensional time), in a
+/// steady `wind` (inertial, m/s; the planner's estimate, D-046).
+pub fn f_nd(scn: &Scenario, wind: Vec3, units: &Units, x: &State, u: Vec3) -> State {
+    let extra = Extra {
+        wind,
+        ..Extra::default()
+    };
+    let d = dynamics::f(scn, &units.x_si(x), units.u_si(u), &extra);
     let s = units.state_scale();
     std::array::from_fn(|i| d[i] * units.t / s[i])
 }
@@ -73,6 +78,7 @@ pub fn f_nd(scn: &Scenario, units: &Units, x: &State, u: Vec3) -> State {
 /// Jacobians `∂f/∂x` (14×14) and `∂f/∂u` (14×3) by central differences.
 fn jacobians(
     scn: &Scenario,
+    wind: Vec3,
     units: &Units,
     x: &State,
     u: Vec3,
@@ -84,7 +90,10 @@ fn jacobians(
         let (mut xp, mut xm) = (*x, *x);
         xp[j] += H;
         xm[j] -= H;
-        let (fp, fm) = (f_nd(scn, units, &xp, u), f_nd(scn, units, &xm, u));
+        let (fp, fm) = (
+            f_nd(scn, wind, units, &xp, u),
+            f_nd(scn, wind, units, &xm, u),
+        );
         for i in 0..NX {
             a[i][j] = (fp[i] - fm[i]) / (2.0 * H);
         }
@@ -93,7 +102,7 @@ fn jacobians(
         let (mut up, mut um) = (u, u);
         up[j] += H;
         um[j] -= H;
-        let (fp, fm) = (f_nd(scn, units, x, up), f_nd(scn, units, x, um));
+        let (fp, fm) = (f_nd(scn, wind, units, x, up), f_nd(scn, wind, units, x, um));
         for i in 0..NX {
             b[i][j] = (fp[i] - fm[i]) / (2.0 * H);
         }
@@ -116,8 +125,10 @@ pub struct Interval {
 /// Augmented state: x, Φ, P⁻, P⁺, Pσ.
 const NAUG: usize = NX + NX * NX + 2 * NX * NU + NX;
 
+#[allow(clippy::too_many_arguments)]
 fn aug_deriv(
     scn: &Scenario,
+    wind: Vec3,
     units: &Units,
     y: &[f64; NAUG],
     u: Vec3,
@@ -126,8 +137,8 @@ fn aug_deriv(
     sigma: f64,
 ) -> [f64; NAUG] {
     let x: State = std::array::from_fn(|i| y[i]);
-    let fx = f_nd(scn, units, &x, u);
-    let (a, b) = jacobians(scn, units, &x, u);
+    let fx = f_nd(scn, wind, units, &x, u);
+    let (a, b) = jacobians(scn, wind, units, &x, u);
     let mut d = [0.0; NAUG];
     for i in 0..NX {
         d[i] = sigma * fx[i];
@@ -172,6 +183,7 @@ fn lerp(a: Vec3, b: Vec3, lm: f64, lp: f64) -> Vec3 {
 /// Discretize around the reference `(xs, us, sigma)` (non-dimensional).
 pub fn discretize(
     scn: &Scenario,
+    wind: Vec3,
     units: &Units,
     xs: &[State],
     us: &[Vec3],
@@ -194,7 +206,7 @@ pub fn discretize(
                 let stage = |t: f64, y: &[f64; NAUG]| {
                     let lp = t / dtau;
                     let lm = 1.0 - lp;
-                    aug_deriv(scn, units, y, lerp(u0, u1, lm, lp), lm, lp, sigma)
+                    aug_deriv(scn, wind, units, y, lerp(u0, u1, lm, lp), lm, lp, sigma)
                 };
                 let k1 = stage(t0, &y);
                 let k2 = stage(t0 + h / 2.0, &add(&y, &k1, h / 2.0));
@@ -247,11 +259,12 @@ fn add<const N: usize>(y: &[f64; N], d: &[f64; N], s: f64) -> [f64; N] {
 
 /// Integrate one interval of length `dtau` from `x0`, control linear from
 /// `u0` to `u1`.
-// Eight plain inputs of one integration step; a struct for them would only
+// Nine plain inputs of one integration step; a struct for them would only
 // rename the same values at every call.
 #[allow(clippy::too_many_arguments)]
 pub fn propagate_interval(
     scn: &Scenario,
+    wind: Vec3,
     units: &Units,
     x0: &State,
     u0: Vec3,
@@ -266,7 +279,7 @@ pub fn propagate_interval(
         let t0 = s as f64 * h;
         let g = |t: f64, x: &State| {
             let lp = t / dtau;
-            let f = f_nd(scn, units, x, lerp(u0, u1, 1.0 - lp, lp));
+            let f = f_nd(scn, wind, units, x, lerp(u0, u1, 1.0 - lp, lp));
             f.map(|c| c * sigma)
         };
         let k1 = g(t0, &x);
@@ -284,6 +297,7 @@ pub fn propagate_interval(
 /// first-order-hold controls (single shooting). Returns every node.
 pub fn propagate(
     scn: &Scenario,
+    wind: Vec3,
     units: &Units,
     x0: &State,
     us: &[Vec3],
@@ -295,6 +309,7 @@ pub fn propagate(
     for n in 0..us.len() - 1 {
         let next = propagate_interval(
             scn,
+            wind,
             units,
             out.last().expect("node"),
             us[n],
@@ -325,7 +340,7 @@ mod tests {
         );
         let us = vec![units.u_nd([2e5, 0.0, 5e6]); 5];
         let sigma = 4.0 / units.t;
-        let xs = propagate(scn, units, &units.x_nd(&x0), &us, sigma, 10);
+        let xs = propagate(scn, [0.0; 3], units, &units.x_nd(&x0), &us, sigma, 10);
         (xs, us, sigma)
     }
 
@@ -334,7 +349,7 @@ mod tests {
         let scn = Scenario::earth();
         let units = Units::new(&scn, scn.start_mass);
         let (xs, us, sigma) = reference(&scn, &units);
-        let ivs = discretize(&scn, &units, &xs, &us, sigma, 10);
+        let ivs = discretize(&scn, [0.0; 3], &units, &xs, &us, sigma, 10);
         // Perturb node, controls and time; the linear model must predict the
         // nonlinear result to second order.
         let eps = 1e-4;
@@ -346,8 +361,17 @@ mod tests {
             let u0: Vec3 = std::array::from_fn(|i| us[n][i] + du[i]);
             let u1: Vec3 = std::array::from_fn(|i| us[n + 1][i] - du[i]);
             let s = sigma + eps;
-            let truth =
-                propagate_interval(&scn, &units, &x, u0, u1, s, 1.0 / (xs.len() - 1) as f64, 40);
+            let truth = propagate_interval(
+                &scn,
+                [0.0; 3],
+                &units,
+                &x,
+                u0,
+                u1,
+                s,
+                1.0 / (xs.len() - 1) as f64,
+                40,
+            );
             for i in 0..NX {
                 let mut lin = iv.z[i] + iv.s[i] * s;
                 for j in 0..NX {

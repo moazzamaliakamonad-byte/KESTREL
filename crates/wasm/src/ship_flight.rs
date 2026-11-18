@@ -713,6 +713,7 @@ impl ShipFlight {
         scn.gate = leg.gate;
         scn.gate_velocity = leg.gate_velocity;
         let mut p = ShipProblem::new(scn, x, self.leg_limits(leg.engines));
+        p.wind = self.air().wind;
         p.max_tilt = Some(SHIP_BURN_TILT);
         // A narrow funnel into the arms gate: sideways braking is done high.
         p.approach = SHIP_FUNNEL;
@@ -1121,7 +1122,9 @@ impl ShipFlight {
                 let mut scn = self.sim.scn.clone();
                 scn.gate = leg.gate;
                 scn.gate_velocity = leg.gate_velocity;
-                (leg, ShipProblem::new(scn, x, self.leg_limits(leg.engines)))
+                let mut p = ShipProblem::new(scn, x, self.leg_limits(leg.engines));
+                p.wind = self.air().wind;
+                (leg, p)
             })
             .collect();
         (t, options)

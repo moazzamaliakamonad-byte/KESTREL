@@ -171,3 +171,47 @@ fn booster_divert_beyond_reach_is_refused() {
     let p = booster_burn_problem(356.0, -35.0, 0.03);
     assert!(plan_ship(&p, None, COLD_ITERATIONS).is_err());
 }
+
+/// The planner's model feels the wind it is given (the ship's broad belly
+/// in a 10 m/s crosswind is pushed sideways).
+#[test]
+fn wind_changes_the_dynamics() {
+    let p = earth_flip_problem(650.0, -90.0);
+    let units = discretize::Units::new(&p.scn, p.x0[M]);
+    let x = units.x_nd(&p.x0);
+    let still = discretize::f_nd(&p.scn, [0.0; 3], &units, &x, [0.0; 3]);
+    let windy = discretize::f_nd(&p.scn, [10.0, 0.0, 0.0], &units, &x, [0.0; 3]);
+    assert!(
+        (windy[V] - still[V]).abs() > 1e-3,
+        "{} vs {}",
+        windy[V],
+        still[V]
+    );
+    assert_eq!(windy[R], still[R]);
+}
+
+/// With no wind the plan is the one planned before the planner knew of
+/// wind (numbers read from that code, 2026-11-18).
+#[test]
+fn zero_wind_plan_is_unchanged() {
+    let p = earth_flip_problem(650.0, -90.0);
+    assert_eq!(p.wind, [0.0; 3]);
+    let plan = plan_ship(&p, None, COLD_ITERATIONS).expect("plan");
+    assert_eq!(plan.final_time, 11.983995238941155);
+    assert_eq!(plan.x.last().unwrap()[M], 129986.87391679233);
+    assert_eq!(plan.iterations, 4);
+}
+
+/// A crosswind plan still converges and meets its limits.
+#[test]
+fn crosswind_plan_converges() {
+    let mut p = earth_flip_problem(650.0, -90.0);
+    p.wind = [0.0, 12.0, 0.0];
+    let plan = plan_ship(&p, None, COLD_ITERATIONS).expect("plan");
+    eprintln!(
+        "crosswind: tf {:.2} s, {} it, gate err {:.2} m",
+        plan.final_time, plan.iterations, plan.gate_error
+    );
+    assert!(plan.converged && plan.gate_error < 1.0);
+    check_limits(&p, &plan);
+}
