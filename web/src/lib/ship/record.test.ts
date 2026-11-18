@@ -167,5 +167,7 @@ describe("wind readout", () => {
     expect(windReadout({ wind_est: [3, 4], wind_sigma: [9, 9], wind_aware: true })).toBe("estimating…");
     expect(windReadout({ wind_est: [3, 4], wind_sigma: [0.4, 0.3], wind_aware: true })).toBe("5.0 m/s ±0.4");
     expect(windReadout({ wind_est: [3, 4], wind_sigma: [0.4, 0.3], wind_aware: false })).toBe("5.0 m/s ±0.4 (not used)");
+    // Within two of its standard deviations of calm, guidance flies calm (D-046), and says so.
+    expect(windReadout({ wind_est: [1.2, 0], wind_sigma: [0.9, 0.9], wind_aware: true })).toBe("1.2 m/s ±0.9 · flown as calm");
   });
 });

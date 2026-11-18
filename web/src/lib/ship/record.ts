@@ -42,11 +42,15 @@ export function windWords(w: readonly [number, number] | readonly number[]): str
   return `${n(speed)} m/s from ${FROM[Math.round((((deg % 360) + 360) % 360) / 45) % 8]}`;
 }
 
-/** Guidance's wind for a readout: "estimating…", "12.0 m/s ±0.4", or "off" when guidance does not use it. */
+/** Guidance's wind for a readout: "estimating…", "12.0 m/s ±0.4", "· flown as calm" within 2σ of calm, "(not used)" when switched off. */
 export function windReadout(s: Pick<ShipSnapshot, "wind_est" | "wind_sigma" | "wind_aware">): string {
   const sigma = Math.max(s.wind_sigma[0], s.wind_sigma[1]);
-  const text = sigma < WIND_SETTLED ? `${n(Math.hypot(s.wind_est[0], s.wind_est[1]), 1)} m/s ±${n(sigma, 1)}` : "estimating…";
-  return s.wind_aware ? text : `${text} (not used)`;
+  const speed = Math.hypot(s.wind_est[0], s.wind_est[1]);
+  if (!(sigma < WIND_SETTLED)) return s.wind_aware ? "estimating…" : "estimating… (not used)";
+  const text = `${n(speed, 1)} m/s ±${n(sigma, 1)}`;
+  if (!s.wind_aware) return `${text} (not used)`;
+  // Guidance flies only a wind it can tell from calm (beyond 2σ; guidance::wind::SIGNIFICANT).
+  return speed < 2 * sigma ? `${text} · flown as calm` : text;
 }
 
 /** The estimate counts as settled once its 1σ is below this, m/s. */
