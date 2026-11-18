@@ -204,16 +204,11 @@ export interface FlightConfig {
   wind?: [number, number];
   gust_speed?: number;
   failed?: number[];
-  /** Which convex solver the planner uses (read by the worker, not by the flight). */
-  solver?: PlannerSolver;
   /** Guidance flies with its wind estimate (default true). */
   wind_aware?: boolean;
   /** Start from orbit (the ship only). */
   entry?: { range_km: number; gamma_deg: number };
 }
-
-/** Clarabel (the default) or Kestrel's own allocation-free solver (D-041). */
-export type PlannerSolver = "clarabel" | "kestrel";
 
 /** `ShipFlight.plan_json()`. */
 export interface PlanDraw {

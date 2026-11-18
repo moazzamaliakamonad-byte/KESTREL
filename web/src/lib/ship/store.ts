@@ -6,7 +6,6 @@ import type {
   Outcome,
   Preview,
   ScenarioInfo,
-  PlannerSolver,
   ScenarioKind,
   ShipPhase,
   Tuning,
@@ -57,8 +56,6 @@ export interface Options {
   noise: Noise;
   /** Fixed random seed, or null for a new one each flight. */
   seed: number | null;
-  /** The convex solver inside guidance. */
-  solver: PlannerSolver;
   /** Guidance flies with its wind estimate (D-046). */
   windAware: boolean;
 }
@@ -98,7 +95,6 @@ export const DEFAULT_OPTIONS: Options = {
   lag: 0.3,
   noise: "low",
   seed: null,
-  solver: "clarabel",
   windAware: true,
 };
 
@@ -206,7 +202,6 @@ export function configOf(s: Pick<ShipState, "scenario" | "start" | "options"> & 
     wind: [o.windSpeed * Math.cos(o.windDir * deg), o.windSpeed * Math.sin(o.windDir * deg)],
     gust_speed: o.gustSpeed,
     failed: o.failed,
-    solver: o.solver,
     wind_aware: o.windAware,
   };
   if (s.orbit && s.scenario === "earth") config.entry = { range_km: s.orbit.rangeKm, gamma_deg: s.orbit.gammaDeg };
@@ -398,7 +393,6 @@ function carried(o: Options): Partial<Options> {
     lag: o.lag,
     noise: o.noise,
     seed: o.seed,
-    solver: o.solver,
     windAware: o.windAware,
     propellant: null,
     failed: [],

@@ -10,8 +10,13 @@ authors.workspace = true
 name = "guidance"
 
 [dependencies]
-# Default features kept on: 0.11.1 fails to compile with them off (references serde_json).
-clarabel = "0.11.1"
 model = { path = "../model", package = "kestrel-model" }
 socp = { path = "../socp", package = "kestrel-socp" }
+# The reference solver, for comparisons in tests and benchmarks only (the
+# `reference-solver` feature); what flies is Kestrel's own (crates/socp).
+# Default features kept on: 0.11.1 fails to compile with them off (references serde_json).
+clarabel = { version = "0.11.1", optional = true }
+
+[features]
+reference-solver = ["dep:clarabel"]
 

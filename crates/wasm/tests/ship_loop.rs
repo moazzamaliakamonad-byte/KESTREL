@@ -808,9 +808,12 @@ fn wind_sweep() {
 
 /// With every M4 switch off (wind awareness, the planned approach, the
 /// glide, the chosen bearing), guidance flies exactly the flight it flew
-/// before M4 (numbers read from that code, 2026-11-18).
+/// before M4 (numbers read from that code, 2026-11-18). That code flew on
+/// Clarabel, so this test does too (the reference solver, tests only).
 #[test]
 fn unaware_flight_matches_today() {
+    use guidance::scvx::{Backend, set_backend};
+    set_backend(Backend::Clarabel);
     for (kind, wind, t, left) in [
         (
             Kind::Earth,

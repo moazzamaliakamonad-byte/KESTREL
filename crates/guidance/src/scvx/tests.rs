@@ -191,14 +191,18 @@ fn wind_changes_the_dynamics() {
 }
 
 /// With no wind the plan is the one planned before the planner knew of
-/// wind (numbers read from that code, 2026-11-18).
+/// wind. Read from that code on Clarabel (2026-11-18: final time
+/// 11.983995238941155 s, mass 129986.87391679233 kg), which then matched
+/// the wind code bit for bit; these are the same plan on Kestrel's own
+/// solver (2026-11-19, D-049), which differs from Clarabel's at its
+/// tolerance.
 #[test]
 fn zero_wind_plan_is_unchanged() {
     let p = earth_flip_problem(650.0, -90.0);
     assert_eq!(p.wind, [0.0; 3]);
     let plan = plan_ship(&p, None, COLD_ITERATIONS).expect("plan");
-    assert_eq!(plan.final_time, 11.983995238941155);
-    assert_eq!(plan.x.last().unwrap()[M], 129986.87391679233);
+    assert_eq!(plan.final_time, 11.983808912176874);
+    assert_eq!(plan.x.last().unwrap()[M], 129987.20647045899);
     assert_eq!(plan.iterations, 4);
 }
 
