@@ -32,8 +32,8 @@ Goal: one page that solves and animates one landing.
 - [x] Web page: Next.js static export + React Three Fiber (D-005, D-006)
 - [x] 3D view of booster, pad and planned trajectory line, plus drag-to-edit
       start, live re-planning, cameras, telemetry HUD
-- [~] Measure solve time in Chrome and Firefox; write it in LIMITATIONS.md
-      (Chromium measured; Firefox not yet)
+- [x] Measure solve time in Chrome and Firefox; write it in LIMITATIONS.md
+      (Chromium measured; Firefox dropped by the owner, 2026-11-18)
 - [x] Demo GIF in README; one-command run instructions
 - [x] `learn/` chapter for M1 (local only)
 

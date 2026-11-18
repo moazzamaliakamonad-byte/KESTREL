@@ -67,8 +67,7 @@ Notes:
   `npm run e2e`. `PW_GPU=1` makes Playwright use the real GPU (Windows,
   Direct3D); otherwise WebGL runs in software and is slow.
 - `E2E_BASE_URL=http://localhost:3000` runs the end-to-end tests against a
-  running dev server instead of a static build; `PW_BROWSER=firefox` runs
-  them in Firefox (`npx playwright install firefox` once).
+  running dev server instead of a static build.
 - `npm run measure` (browser; `MEASURE_SOLVER=kestrel` for Kestrel's own
   solver) and `cargo run --release -p kestrel-wasm --example
   bench_solvers` (native, both solvers) time the planner.

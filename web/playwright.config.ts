@@ -5,8 +5,6 @@ import { defineConfig } from "@playwright/test";
 // E2E_BASE_URL=http://localhost:3000 runs them against a running dev server
 // instead (no build, no server started here).
 const external = process.env.E2E_BASE_URL;
-// PW_BROWSER=firefox runs the tests in Firefox (Chromium's flags are left out).
-const firefox = process.env.PW_BROWSER === "firefox";
 
 export default defineConfig({
   testDir: "e2e",
@@ -17,8 +15,7 @@ export default defineConfig({
   use: {
     baseURL: external ?? "http://localhost:4174",
     viewport: { width: 1440, height: 900 },
-    browserName: firefox ? "firefox" : "chromium",
-    launchOptions: firefox ? {} : {
+    launchOptions: {
       // Default: software WebGL (works everywhere, slow). PW_GPU=1 uses the
       // machine's GPU via Direct3D (Windows) for realistic measurements.
       args: process.env.PW_GPU
