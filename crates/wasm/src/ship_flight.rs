@@ -111,8 +111,9 @@ pub const NAV_ERROR_HIGH: f64 = 1.1;
 /// rad (60°)...
 pub const BEARING_MAX: f64 = 1.047_197_551_196_597_6;
 /// ...and stays +x unless the predicted drift across the track is at least
-/// this, m (the burn takes up less).
-pub const ACROSS_MIN: f64 = 250.0;
+/// this, m: the burn takes up less (in 10 m/s crosswinds, drifts of about
+/// 300 m, the +x approach caught 16 of 18; turning at 250 m caught 14).
+pub const ACROSS_MIN: f64 = 400.0;
 /// The bearing is chosen below this height, m (or 70 % of the way down).
 pub const BEARING_BELOW: f64 = 6000.0;
 
