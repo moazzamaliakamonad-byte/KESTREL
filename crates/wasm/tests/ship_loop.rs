@@ -999,3 +999,35 @@ board                     aware off   aware on"
         eprintln!("{group:24}  {}       {}", count(false), count(true));
     }
 }
+
+/// How far the navigation estimate's position is from the truth in the
+/// final approach (RMS over the terminal phase), per vehicle and noise
+/// level, seeds 7-9: the approach plan's keep-out margin is built on it.
+/// `--ignored --nocapture`.
+#[test]
+#[ignore]
+fn nav_error_by_noise() {
+    for kind in [Kind::Earth, Kind::Booster] {
+        for (name, noise) in [("low", Noise::LOW), ("high", Noise::HIGH)] {
+            let (mut sum, mut n, mut worst) = (0.0, 0usize, 0.0f64);
+            for seed in [7u64, 8, 9] {
+                let mut f = ShipFlight::new(ShipFlightConfig { seed, lag: 0.3, noise, ..ShipFlightConfig::new(kind) }).unwrap();
+                let mut pending: Option<Pending> = None;
+                let mut last_request = f64::NEG_INFINITY;
+                while f.phase() != Phase::Done && f.sim().t < 400.0 {
+                    f.step(FRAME);
+                    deliver(&mut f, &mut pending);
+                    request(&mut f, &mut pending, &mut last_request);
+                    if f.phase() == Phase::Terminal {
+                        let (e, x) = (dynamics::position(f.estimate()), dynamics::position(&f.sim().x));
+                        let d = (e[0] - x[0]).hypot(e[1] - x[1]);
+                        sum += d * d;
+                        n += 1;
+                        worst = worst.max(d);
+                    }
+                }
+            }
+            eprintln!("NAV {kind:?} noise {name}: horizontal error RMS {:.2} m, worst {worst:.2} m ({n} steps)", (sum / n.max(1) as f64).sqrt());
+        }
+    }
+}
