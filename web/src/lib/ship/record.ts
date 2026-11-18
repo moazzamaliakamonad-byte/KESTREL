@@ -7,7 +7,7 @@
 
 import type { PlanDraw, ShipSnapshot } from "./types";
 
-export type DecisionKind = "phase" | "ignition" | "plan" | "plan-failed" | "engines" | "failure" | "relight" | "arms" | "outcome" | "event" | "wind" | "gust";
+export type DecisionKind = "phase" | "ignition" | "plan" | "plan-failed" | "engines" | "failure" | "relight" | "arms" | "outcome" | "event" | "wind" | "gust" | "approach";
 
 export interface Decision {
   /** Sim time, s. */
@@ -40,6 +40,14 @@ export function windWords(w: readonly [number, number] | readonly number[]): str
   // It comes from the opposite of where it blows.
   const deg = (Math.atan2(-w[1], -w[0]) * 180) / Math.PI;
   return `${n(speed)} m/s from ${FROM[Math.round((((deg % 360) + 360) % 360) / 45) % 8]}`;
+}
+
+/** The gate turned about the catch axis to the flight's approach bearing (rad; 0: the +x side). */
+export function gateAt(gate: readonly [number, number, number] | readonly number[], bearing: number): [number, number, number] {
+  if (bearing === 0) return [gate[0], gate[1], gate[2]];
+  const c = Math.cos(bearing);
+  const s = Math.sin(bearing);
+  return [c * gate[0] - s * gate[1], s * gate[0] + c * gate[1], gate[2]];
 }
 
 /** Guidance's wind for a readout: "estimating…", "12.0 m/s ±0.4", "· flown as calm" within 2σ of calm, "(not used)" when switched off. */
@@ -121,6 +129,16 @@ export function decisionsBetween(prev: ShipSnapshot | null, next: ShipSnapshot):
       facts: [...base(next), ["Ignition altitude (rule)", `${n(next.ignition_z)} m`]],
     });
     return out;
+  }
+  if (next.bearing_chosen && !prev.bearing_chosen && next.bearing !== 0) {
+    const deg = Math.round(Math.abs((next.bearing * 180) / Math.PI));
+    out.push({
+      t: next.t,
+      kind: "approach",
+      title: `Approach turned ${deg}° toward ${next.bearing < 0 ? "−y" : "+y"}`,
+      why: "The wind carries the ship across its approach farther than the landing burn can take up, and in the belly flop it can only slide along its nose: the approach now comes from where the fall is taking it.",
+      facts: [...base(next), ["Bearing", `${n((next.bearing * 180) / Math.PI, 1)}° from the sea side (+x)`]],
+    });
   }
   if (next.phase !== prev.phase && PHASE_WHY[next.phase]) {
     const [title, why] = PHASE_WHY[next.phase];

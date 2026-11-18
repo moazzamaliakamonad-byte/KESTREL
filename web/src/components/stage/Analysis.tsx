@@ -8,7 +8,7 @@ import * as THREE from "three";
 import { quatToScene, rotate, toScene, type Vec3 } from "@/lib/ship/frames";
 import { shipLive } from "@/lib/ship/live";
 import { partsOf } from "@/lib/ship/parts";
-import { windReadout } from "@/lib/ship/record";
+import { gateAt, windReadout } from "@/lib/ship/record";
 import { analysisOn, useShip } from "@/lib/ship/store";
 import { skin } from "./Blueprint";
 
@@ -163,7 +163,7 @@ export function Analysis() {
     }
     if (gate.current) {
       gate.current.visible = whole;
-      gate.current.position.set(...toScene(info.gate));
+      gate.current.position.set(...toScene(gateAt(info.gate, s.bearing)));
       gate.current.scale.setScalar(Math.max(1, camera.position.distanceTo(gate.current.position) * 0.012));
     }
     if (ignition.current) {
@@ -198,7 +198,7 @@ export function Analysis() {
       if (L[key].el) L[key].el!.style.display = arrows[key].group.visible ? "" : "none";
     }
     L.tilt.g?.position.copy(cm).addScaledVector(up, info.ship.length * 0.8);
-    L.gate.g?.position.set(...toScene(info.gate));
+    L.gate.g?.position.set(...toScene(gateAt(info.gate, s.bearing)));
     if (L.tilt.el) L.tilt.el.style.display = whole ? "" : "none";
     if (L.gate.el) L.gate.el.style.display = whole ? "" : "none";
     frame.current += 1;
@@ -214,7 +214,8 @@ export function Analysis() {
       set("windEst", `<b>wind</b> ${windReadout(s)} · guidance's estimate`);
       set("windTrue", `true ${fmt(Math.hypot(s.wind[0], s.wind[1]), 1)} m/s · not known to guidance`);
       set("tilt", `<b>θ</b> ${fmt(s.tilt_deg, 1)}° · |ω| ${fmt((Math.hypot(...s.omega) * 180) / Math.PI, 1)}°/s`);
-      set("gate", `<b>gate</b> ${fmt(Math.hypot(s.position[0] - info.gate[0], s.position[1] - info.gate[1], s.position[2] - info.gate[2]))} m`);
+      const g = gateAt(info.gate, s.bearing);
+      set("gate", `<b>gate</b> ${fmt(Math.hypot(s.position[0] - g[0], s.position[1] - g[1], s.position[2] - g[2]))} m`);
     }
   });
 

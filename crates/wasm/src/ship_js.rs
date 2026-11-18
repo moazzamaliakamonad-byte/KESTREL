@@ -824,6 +824,9 @@ impl ShipFlightJs {
         out["wind_est"] = json!(est.w);
         out["wind_sigma"] = json!(est.sigma);
         out["wind_aware"] = json!(f.wind_aware());
+        // The approach's bearing (M4.3, D-048).
+        out["bearing"] = json!(f.bearing());
+        out["bearing_chosen"] = json!(f.bearing_chosen());
         out["earth_frame"] = f.earth_frame().map_or(
             Value::Null,
             |fr| json!({"site": fr.site, "x": fr.x, "y": fr.y}),
@@ -1011,6 +1014,8 @@ mod tests {
         assert!((est[1].as_f64().unwrap() + 15.0).abs() < 2.0, "{est:?}");
         assert!(s["wind_sigma"][0].as_f64().unwrap() < 2.0);
         assert_eq!(s["wind_aware"], true);
+        assert_eq!(s["bearing"], 0.0);
+        assert_eq!(s["bearing_chosen"], false);
         let blind = r#"{"scenario":"booster","position":[900,0,14000],"velocity":[-30,0,-420],"wind":[0,-15],"wind_aware":false}"#;
         let f = ShipFlightJs::create(blind).unwrap();
         assert_eq!(parse(&f.snapshot())["wind_aware"], false);

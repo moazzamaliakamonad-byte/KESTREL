@@ -102,6 +102,9 @@ export interface ShipSnapshot {
   wind_sigma: [number, number];
   /** Guidance flies with its wind estimate. */
   wind_aware: boolean;
+  /** The bearing the approach comes from, rad (0: the +x side), and whether it has been chosen (M4.3). */
+  bearing: number;
+  bearing_chosen: boolean;
   guide: "plan" | "none" | "brake";
   leg_engines: number;
   ignition_z: number;

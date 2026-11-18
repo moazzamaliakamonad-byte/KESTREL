@@ -36,6 +36,8 @@ function snap(patch: Partial<ShipSnapshot>): ShipSnapshot {
     wind_est: [0, 0],
     wind_sigma: [15, 15],
     wind_aware: true,
+    bearing: 0,
+    bearing_chosen: false,
     guide: "none",
     leg_engines: 0,
     ignition_z: 2000,

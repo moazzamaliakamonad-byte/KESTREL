@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decisionsBetween, frameAt, planDecision, planPositionAt, pushFrame, replanReason, windReadout, windWords, WindWatch, FRAMES_MAX } from "./record";
+import { decisionsBetween, frameAt, gateAt, planDecision, planPositionAt, pushFrame, replanReason, windReadout, windWords, WindWatch, FRAMES_MAX } from "./record";
 import type { EngineState, PlanDraw, ShipSnapshot } from "./types";
 
 function snap(patch: Partial<ShipSnapshot>): ShipSnapshot {
@@ -35,6 +35,8 @@ function snap(patch: Partial<ShipSnapshot>): ShipSnapshot {
     wind_est: [0, 0],
     wind_sigma: [15, 15],
     wind_aware: true,
+    bearing: 0,
+    bearing_chosen: false,
     guide: "none",
     leg_engines: 0,
     ignition_z: 900,
@@ -169,5 +171,26 @@ describe("wind readout", () => {
     expect(windReadout({ wind_est: [3, 4], wind_sigma: [0.4, 0.3], wind_aware: false })).toBe("5.0 m/s ±0.4 (not used)");
     // Within two of its standard deviations of calm, guidance flies calm (D-046), and says so.
     expect(windReadout({ wind_est: [1.2, 0], wind_sigma: [0.9, 0.9], wind_aware: true })).toBe("1.2 m/s ±0.9 · flown as calm");
+  });
+});
+
+describe("the approach bearing", () => {
+  it("turns the gate about the catch axis, and leaves it at bearing 0", () => {
+    expect(gateAt([10, 0, 114], 0)).toEqual([10, 0, 114]);
+    const g = gateAt([10, 0, 114], Math.PI / 2);
+    expect(g[0]).toBeCloseTo(0, 9);
+    expect(g[1]).toBeCloseTo(10, 9);
+    expect(g[2]).toBe(114);
+  });
+
+  it("records the approach turned, once, when the bearing is chosen and not +x", () => {
+    const before = snap({ t: 5, bearing: 0, bearing_chosen: false });
+    const turned = snap({ t: 6, bearing: -0.82, bearing_chosen: true });
+    const out = decisionsBetween(before, turned).filter((d) => d.kind === "approach");
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("Approach turned 47° toward −y");
+    expect(decisionsBetween(turned, snap({ t: 7, bearing: -0.82, bearing_chosen: true })).filter((d) => d.kind === "approach")).toHaveLength(0);
+    // Chosen but kept on the +x side: nothing to say.
+    expect(decisionsBetween(before, snap({ t: 6, bearing: 0, bearing_chosen: true })).filter((d) => d.kind === "approach")).toHaveLength(0);
   });
 });
