@@ -32,8 +32,27 @@ pub const FUNNEL: (f64, f64) = (0.5, 1.2);
 pub const SINK_CONE: (f64, f64) = (1.0, 0.4);
 /// Sideways speed ≤ SIDE_CONE.0 + SIDE_CONE.1 · height, m/s.
 pub const SIDE_CONE: (f64, f64) = (1.0, 0.2);
+/// Largest rate of change of the planned tilt, rad/s (1.5°/s): the
+/// attitude loop of a vehicle near hover on its last engines is slow, and
+/// a plan that tilts faster than it can follow is overshot (seen: 3 m past
+/// the axis toward the mast).
+pub const TILT_RATE: f64 = 0.026_179_938_779_914_94;
 /// Weight of the change in acceleration between intervals (smoothness).
 pub const SMOOTH: f64 = 2.0;
+/// Weight of the sideways acceleration's square (effort). The plan is
+/// gentle rather than fuel-optimal: fuel-optimal means slide fast and brake
+/// hard at the limits, which a vehicle slow to tilt overshoots, and then no
+/// re-plan can stop it short of the mast (seen; both solvers agree such a
+/// problem is infeasible). Over a ten-second approach the propellant this
+/// costs is a few kilograms.
+pub const EFFORT: f64 = 4.0;
+/// Weight of the propellant (the magnitude of the acceleration over time).
+pub const FUEL: f64 = 0.1;
+/// Cost per unit of a comfort limit given up (the tilt rate, the funnel,
+/// the sink and side-speed cones are soft: a fuel-optimal plan rides its
+/// limits, and with hard ones a re-plan after the slightest drift had no
+/// solution). The mast keep-out, the thrust and the end stay hard.
+pub const SOFT: f64 = 300.0;
 /// Final times the first plan tries, s.
 pub const FINAL_TIMES: [f64; 5] = [5.0, 7.0, 9.0, 12.0, 15.0];
 
@@ -44,6 +63,9 @@ pub struct ApproachProblem {
     /// Start: the navigation estimate's position and velocity.
     pub r0: Vec3,
     pub v0: Vec3,
+    /// Sideways acceleration now (x, y), m/s²: the tilt the vehicle has
+    /// (thrust along its axis); the plan starts from it.
+    pub a0: [f64; 2],
     /// Height of the centre of mass when caught, m.
     pub z_catch: f64,
     /// Final time, s.
@@ -59,8 +81,12 @@ pub struct ApproachProblem {
     pub g: f64,
 }
 
-/// A planned approach: positions and velocities at `NODES + 1` nodes, the
-/// acceleration (thrust / mass) on each interval.
+/// A planned approach: positions, velocities and the commanded acceleration
+/// (thrust / mass) at `NODES + 1` nodes; the acceleration changes linearly
+/// between nodes (a first-order hold), so the plan starts from the tilt the
+/// vehicle has and moves away from it at once (a constant acceleration per
+/// interval, pinned to the present tilt and re-planned faster than an
+/// interval, never tilted at all).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApproachPlan {
     pub t_f: f64,
@@ -73,30 +99,52 @@ pub struct ApproachPlan {
     pub cost: f64,
     /// Interior-point iterations of the solve.
     pub iterations: usize,
+    /// The largest amount any comfort limit was given up by (0: none).
+    pub slack: f64,
 }
 
 impl ApproachPlan {
     /// Position, velocity and commanded acceleration `tau` seconds in
-    /// (exact for the plan's piecewise-constant acceleration); after the
-    /// end, the end.
+    /// (exact for the plan's linear acceleration); after the end, the end.
     pub fn sample(&self, tau: f64) -> (Vec3, Vec3, Vec3) {
-        let n = self.a.len();
+        let n = self.r.len() - 1;
         let dt = self.t_f / n as f64;
         if tau.is_nan() || tau <= 0.0 {
             return (self.r[0], self.v[0], self.a[0]);
         }
         if tau >= self.t_f {
-            return (self.r[n], self.v[n], self.a[n - 1]);
+            return (self.r[n], self.v[n], self.a[n]);
         }
         let k = ((tau / dt) as usize).min(n - 1);
         let s = tau - k as f64 * dt;
-        let (r, v, a) = (self.r[k], self.v[k], self.a[k]);
-        let acc = [a[0], a[1], a[2] - self.g];
+        let (r, v, a0, a1) = (self.r[k], self.v[k], self.a[k], self.a[k + 1]);
+        let gz = |i: usize| if i == 2 { self.g } else { 0.0 };
         (
-            std::array::from_fn(|i| r[i] + v[i] * s + 0.5 * acc[i] * s * s),
-            std::array::from_fn(|i| v[i] + acc[i] * s),
-            a,
+            std::array::from_fn(|i| {
+                r[i] + v[i] * s
+                    + 0.5 * (a0[i] - gz(i)) * s * s
+                    + (a1[i] - a0[i]) * s * s * s / (6.0 * dt)
+            }),
+            std::array::from_fn(|i| {
+                v[i] + (a0[i] - gz(i)) * s + (a1[i] - a0[i]) * s * s / (2.0 * dt)
+            }),
+            std::array::from_fn(|i| a0[i] + (a1[i] - a0[i]) * s / dt),
         )
+    }
+}
+
+impl ApproachPlan {
+    /// How fast the commanded acceleration changes `tau` seconds in, m/s³
+    /// (the slope of the linear acceleration; zero after the end). The tilt
+    /// changes at this over g: the attitude loop is told it (phase lead).
+    pub fn jerk(&self, tau: f64) -> Vec3 {
+        let n = self.r.len() - 1;
+        let dt = self.t_f / n as f64;
+        if tau.is_nan() || tau < 0.0 || tau >= self.t_f {
+            return [0.0; 3];
+        }
+        let k = ((tau / dt) as usize).min(n - 1);
+        std::array::from_fn(|i| (self.a[k + 1][i] - self.a[k][i]) / dt)
     }
 }
 
@@ -114,8 +162,8 @@ impl Default for ApproachPlanner {
 }
 
 /// Variable layout: positions and velocities at every node, then the
-/// acceleration and its bound per interval, then the change of
-/// acceleration between intervals.
+/// acceleration and its bound at every node, then the change of
+/// acceleration over every interval.
 struct Layout;
 impl Layout {
     fn r(k: usize) -> usize {
@@ -131,10 +179,15 @@ impl Layout {
         6 * (NODES + 1) + 4 * k + 3
     }
     fn j(k: usize) -> usize {
-        6 * (NODES + 1) + 4 * NODES + 3 * k
+        6 * (NODES + 1) + 4 * (NODES + 1) + 3 * k
+    }
+    /// Slack of comfort limit `f` (0 tilt rate, 1 funnel, 2 side cone,
+    /// 3 sink cone) on interval or node `k` (0..NODES).
+    fn eps(f: usize, k: usize) -> usize {
+        6 * (NODES + 1) + 4 * (NODES + 1) + 3 * NODES + 4 * k + f
     }
     fn n() -> usize {
-        6 * (NODES + 1) + 4 * NODES + 3 * (NODES - 1)
+        6 * (NODES + 1) + 4 * (NODES + 1) + 3 * NODES + 4 * NODES
     }
 }
 
@@ -177,20 +230,24 @@ fn assemble(p: &ApproachProblem) -> Assembled {
     for k in 0..n {
         for i in 0..3 {
             let gz = if i == 2 { p.g } else { 0.0 };
+            // r⁺ = r + v dt + dt² (a_k / 3 + a_k+1 / 6) − ½ g dt²
             rows.row(
                 &[
                     (Layout::r(k + 1) + i, 1.0),
                     (Layout::r(k) + i, -1.0),
                     (Layout::v(k) + i, -dt),
-                    (Layout::a(k) + i, -0.5 * dt * dt),
+                    (Layout::a(k) + i, -dt * dt / 3.0),
+                    (Layout::a(k + 1) + i, -dt * dt / 6.0),
                 ],
                 -0.5 * gz * dt * dt,
             );
+            // v⁺ = v + dt (a_k + a_k+1) / 2 − g dt
             rows.row(
                 &[
                     (Layout::v(k + 1) + i, 1.0),
                     (Layout::v(k) + i, -1.0),
-                    (Layout::a(k) + i, -dt),
+                    (Layout::a(k) + i, -0.5 * dt),
+                    (Layout::a(k + 1) + i, -0.5 * dt),
                 ],
                 -gz * dt,
             );
@@ -202,7 +259,10 @@ fn assemble(p: &ApproachProblem) -> Assembled {
         rows.row(&[(Layout::r(n) + i, 1.0)], end_r[i]);
         rows.row(&[(Layout::v(n) + i, 1.0)], end_v[i]);
     }
-    for k in 0..n - 1 {
+    // Start from the tilt the vehicle has.
+    rows.row(&[(Layout::a(0), 1.0)], p.a0[0]);
+    rows.row(&[(Layout::a(0) + 1, 1.0)], p.a0[1]);
+    for k in 0..n {
         for i in 0..3 {
             rows.row(
                 &[
@@ -216,7 +276,7 @@ fn assemble(p: &ApproachProblem) -> Assembled {
     }
     let zero = rows.b.len();
     // Inequalities (s = b − A x ≥ 0).
-    for k in 0..n {
+    for k in 0..=n {
         rows.row(&[(Layout::sigma(k), 1.0)], p.a_max);
         rows.row(&[(Layout::a(k) + 2, -1.0)], -p.a_min);
         // Base and nose off the mast: x − l_b a_x / g ≥ keep, x + l_n a_x / g ≥ keep.
@@ -230,16 +290,25 @@ fn assemble(p: &ApproachProblem) -> Assembled {
         );
     }
     for k in 1..=n {
-        // v_z ≥ −(c0 + c1 (z − z_c)).
+        // v_z ≥ −(c0 + c1 (z − z_c)) − ε.
         rows.row(
-            &[(Layout::v(k) + 2, -1.0), (Layout::r(k) + 2, -SINK_CONE.1)],
+            &[
+                (Layout::v(k) + 2, -1.0),
+                (Layout::r(k) + 2, -SINK_CONE.1),
+                (Layout::eps(3, k - 1), -1.0),
+            ],
             SINK_CONE.0 - SINK_CONE.1 * p.z_catch,
         );
+    }
+    for k in 0..n {
+        for f in 0..4 {
+            rows.row(&[(Layout::eps(f, k), -1.0)], 0.0);
+        }
     }
     let nonneg = rows.b.len() - zero;
     let mut cones = vec![Cone::Zero(zero), Cone::Nonneg(nonneg)];
     let tan = TILT.tan();
-    for k in 0..n {
+    for k in 0..=n {
         // σ ≥ ‖a‖.
         rows.row(&[(Layout::sigma(k), -1.0)], 0.0);
         for i in 0..3 {
@@ -252,10 +321,18 @@ fn assemble(p: &ApproachProblem) -> Assembled {
         rows.row(&[(Layout::a(k) + 1, -1.0)], 0.0);
         cones.push(Cone::Soc(3));
     }
+    let step = p.g * TILT_RATE * dt;
+    for k in 0..n {
+        // The tilt changes no faster than TILT_RATE: ‖Δ(a_x, a_y)‖ ≤ g · rate · dt + ε.
+        rows.row(&[(Layout::eps(0, k), -1.0)], step);
+        rows.row(&[(Layout::j(k), -1.0)], 0.0);
+        rows.row(&[(Layout::j(k) + 1, -1.0)], 0.0);
+        cones.push(Cone::Soc(3));
+    }
     for k in 1..=n {
         // The funnel onto the axis.
         rows.row(
-            &[(Layout::r(k) + 2, -FUNNEL.1)],
+            &[(Layout::r(k) + 2, -FUNNEL.1), (Layout::eps(1, k - 1), -1.0)],
             FUNNEL.0 - FUNNEL.1 * p.z_catch,
         );
         rows.row(&[(Layout::r(k), -1.0)], 0.0);
@@ -263,7 +340,10 @@ fn assemble(p: &ApproachProblem) -> Assembled {
         cones.push(Cone::Soc(3));
         // The side-speed cone.
         rows.row(
-            &[(Layout::r(k) + 2, -SIDE_CONE.1)],
+            &[
+                (Layout::r(k) + 2, -SIDE_CONE.1),
+                (Layout::eps(2, k - 1), -1.0),
+            ],
             SIDE_CONE.0 - SIDE_CONE.1 * p.z_catch,
         );
         rows.row(&[(Layout::v(k), -1.0)], 0.0);
@@ -274,12 +354,19 @@ fn assemble(p: &ApproachProblem) -> Assembled {
     let a = Csc::from_triplets(m, Layout::n(), &rows.ri, &rows.ci, &rows.vals);
     let mut q = vec![0.0; Layout::n()];
     let mut pd = vec![0.0; Layout::n()];
-    for k in 0..n {
-        q[Layout::sigma(k)] = dt;
+    for k in 0..=n {
+        // Trapezoid weights: the propellant of a linear acceleration.
+        let w = if k == 0 || k == n { 0.5 * dt } else { dt };
+        q[Layout::sigma(k)] = FUEL * w;
+        pd[Layout::a(k)] = EFFORT * w;
+        pd[Layout::a(k) + 1] = EFFORT * w;
     }
-    for k in 0..n - 1 {
+    for k in 0..n {
         for i in 0..3 {
             pd[Layout::j(k) + i] = SMOOTH;
+        }
+        for f in 0..4 {
+            q[Layout::eps(f, k)] = SOFT;
         }
     }
     (pd, q, a, rows.b, cones)
@@ -305,7 +392,7 @@ impl ApproachPlanner {
             && p.t_f > 0.0
             && p.a_max > p.a_min
             && p.a_min >= 0.0
-            && p.r0.iter().chain(&p.v0).all(|c| c.is_finite());
+            && p.r0.iter().chain(&p.v0).chain(&p.a0).all(|c| c.is_finite());
         if !ok {
             return Err(GuidanceError::InvalidProblem("bad approach problem"));
         }
@@ -344,10 +431,14 @@ impl ApproachPlanner {
             t_f: p.t_f,
             r: (0..=n).map(|k| get(Layout::r(k))).collect(),
             v: (0..=n).map(|k| get(Layout::v(k))).collect(),
-            a: (0..n).map(|k| get(Layout::a(k))).collect(),
+            a: (0..=n).map(|k| get(Layout::a(k))).collect(),
             g: p.g,
             cost,
             iterations: solver.iterations(),
+            slack: (0..n)
+                .flat_map(|k| (0..4).map(move |f| Layout::eps(f, k)))
+                .map(|i| x[i])
+                .fold(0.0, f64::max),
         })
     }
 
@@ -386,6 +477,7 @@ mod tests {
         ApproachProblem {
             r0: [10.0, 0.0, z_catch + 20.0],
             v0: [-1.0, 0.0, -2.0],
+            a0: [0.0, 0.0],
             z_catch,
             t_f: 9.0,
             a_min: 0.4 * 2.45e6 / 120e3 * 1.05,
@@ -398,8 +490,13 @@ mod tests {
     }
 
     fn check(p: &ApproachProblem, plan: &ApproachPlan) {
-        let n = plan.a.len();
-        assert_eq!(plan.r.len(), n + 1);
+        assert!(
+            plan.slack < 1e-4,
+            "gave up {} of a comfort limit",
+            plan.slack
+        );
+        let n = plan.r.len() - 1;
+        assert_eq!(plan.a.len(), n + 1);
         let end = plan.r[n];
         assert!(
             end[0].hypot(end[1]) < 1e-3 && (end[2] - p.z_catch).abs() < 1e-3,
@@ -410,7 +507,7 @@ mod tests {
             ve[0].hypot(ve[1]) < 1e-3 && (ve[2] + SINK_AT_CONTACT).abs() < 1e-3,
             "end v {ve:?}"
         );
-        for k in 0..n {
+        for k in 0..=n {
             let a = plan.a[k];
             let mag = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
             assert!(mag <= p.a_max * (1.0 + 1e-5), "node {k}: |a| {mag}");
@@ -425,6 +522,20 @@ mod tests {
             assert!(
                 base >= p.keep_x - 1e-5 && nose >= p.keep_x - 1e-5,
                 "node {k}: base {base} nose {nose}"
+            );
+        }
+        assert!(
+            (plan.a[0][0] - p.a0[0]).abs() < 1e-5 && (plan.a[0][1] - p.a0[1]).abs() < 1e-5,
+            "start {:?}",
+            plan.a[0]
+        );
+        let dt = plan.t_f / n as f64;
+        for k in 0..n {
+            let (a, b) = (plan.a[k], plan.a[k + 1]);
+            let step = (b[0] - a[0]).hypot(b[1] - a[1]);
+            assert!(
+                step <= p.g * TILT_RATE * dt * (1.0 + 1e-5) + 1e-6,
+                "node {k}: tilt rate"
             );
         }
         for k in 1..=n {
@@ -451,7 +562,7 @@ mod tests {
         let p = ship_gate();
         let mut planner = ApproachPlanner::new();
         let plan = planner.plan(&p).expect("plan");
-        let end = plan.r[plan.a.len()];
+        let end = plan.r[plan.r.len() - 1];
         eprintln!("ends at {end:?}, {} s", plan.t_f);
         assert!(end[0].hypot(end[1]) < 1e-3 && (end[2] - p.z_catch).abs() < 1e-3);
         assert_eq!(plan.t_f, p.t_f);
@@ -515,6 +626,36 @@ mod tests {
             }
         }
         check(&p, &best);
+    }
+
+    /// Already tilted (sideways acceleration −0.6 m/s² now): the plan
+    /// starts from it and unwinds it no faster than the tilt rate allows.
+    #[test]
+    fn starts_from_the_present_tilt() {
+        let mut p = ship_gate();
+        p.a0 = [-0.6, 0.2];
+        let plan = ApproachPlanner::new()
+            .plan_free(&p, &FINAL_TIMES)
+            .expect("plan");
+        check(&p, &plan);
+    }
+
+    /// A start that breaks a comfort limit (sliding sideways at 4 m/s, low,
+    /// against a 2.6 m/s cone) still gets a plan, which gives up as little
+    /// as it must and keeps the hard limits.
+    #[test]
+    fn bends_comfort_limits_rather_than_fail() {
+        let mut p = ship_gate();
+        p.r0 = [6.0, 0.0, p.z_catch + 8.0];
+        p.v0 = [-4.0, 0.0, -2.0];
+        p.t_f = 8.0;
+        let plan = ApproachPlanner::new().plan(&p).expect("a plan, bent");
+        assert!(plan.slack > 0.0);
+        for k in 0..=NODES {
+            let (r, a) = (plan.r[k], plan.a[k]);
+            assert!(r[0] - p.base_arm * a[0] / p.g >= p.keep_x - 1e-5);
+            assert!(r[0] + p.nose_arm * a[0] / p.g >= p.keep_x - 1e-5);
+        }
     }
 
     #[test]

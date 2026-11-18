@@ -598,6 +598,64 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64), air: &Air) -> Act
     fly_force(scn, x, force, q_des, [0.0; 3], limits, air)
 }
 
+/// Fly a planned approach (`guidance::approach`): `reference` is the plan's
+/// position, velocity, commanded acceleration (thrust / mass, inertial) and
+/// its rate of change now. The rate tells the attitude loop how fast the
+/// plan tilts (phase lead: a vehicle on its last engine near hover turns
+/// slowly, and without it fell half a second behind and overshot). The plan's acceleration plus critically damped position and
+/// velocity feedback, slowed and capped as in [`terminal`] so the attitude
+/// loop stays stable; the estimated wind's force fed forward (the plan is a
+/// point mass in still air).
+pub fn approach(
+    scn: &Scenario,
+    x: &State,
+    reference: (Vec3, Vec3, Vec3, Vec3),
+    limits: (f64, f64),
+    air: &Air,
+) -> Actuation {
+    let (rr, vr, ar, jr) = reference;
+    let m = x[M];
+    let g = scn.planet.gravity();
+    let r = dynamics::position(x);
+    let v = dynamics::velocity(x);
+    let k = (bandwidth(scn, x, m * g) / WN).min(translation_gain(scn, x, m * g));
+    let kd = APPROACH_KD * k;
+    let kp = 0.25 * kd * kd;
+    let mut fb = [
+        kp * (rr[0] - r[0]) + kd * (vr[0] - v[0]),
+        kp * (rr[1] - r[1]) + kd * (vr[1] - v[1]),
+        (APPROACH_KP_Z * (rr[2] - r[2]) + APPROACH_KD_Z * (vr[2] - v[2]))
+            .clamp(-VERTICAL_CAP * g, VERTICAL_CAP * g),
+    ];
+    let side = fb[0].hypot(fb[1]);
+    if side > LATERAL_ACCEL {
+        fb[0] *= LATERAL_ACCEL / side;
+        fb[1] *= LATERAL_ACCEL / side;
+    }
+    let q = dynamics::attitude(x);
+    let rho = scn.density(r[2]);
+    let push = wind_force(&scn.ship, rho, q, v, air, [scn.ship.surface_trim(); 4]);
+    let force: Vec3 = std::array::from_fn(|i| m * (ar[i] + fb[i]) - push[i]);
+    let up = crate::scvx::upright_like(q);
+    let q_des = quat::normalize(quat::mul(
+        turn([0.0, 0.0, 1.0], normalize(force), MAX_CORRECTION),
+        up,
+    ));
+    // The plan's tilt rate as a body rate (near upright: tilting the axis
+    // toward +x is a turn about +y).
+    let az = ar[2].max(1.0);
+    let w_des = quat::rotate_inv(q, [-jr[1] / az, jr[0] / az, 0.0]);
+    fly_force(scn, x, force, q_des, w_des, limits, air)
+}
+
+/// Sideways velocity gain while flying an approach plan, 1/s (half the
+/// terminal controller's: the plan feeds the tilt forward, and a stiffer
+/// loop through a slow attitude swung past the plan).
+pub const APPROACH_KD: f64 = 0.35;
+/// Vertical feedback gains while flying an approach plan, 1/s² and 1/s.
+pub const APPROACH_KP_Z: f64 = 1.0;
+pub const APPROACH_KD_Z: f64 = 2.0;
+
 /// Seconds until the booster, falling engines first with drag, reaches
 /// height `z_to` (1-D). At the present sink rate alone the estimate was
 /// half the truth high up, where the air has yet to slow the fall.
@@ -961,6 +1019,103 @@ mod tests {
             aware.1 < 0.7 * blind.1,
             "aware {aware:?} m vs blind {blind:?} m"
         );
+    }
+
+    /// From the ship's gate, flying a planned approach in the shared model
+    /// (no sensor error), re-planned every 0.25 s from where it is with the
+    /// same arrival time, as the flight does: it ends on the caught
+    /// position, inside every catch limit.
+    #[test]
+    fn tracks_an_approach_plan() {
+        use crate::approach::{ApproachPlanner, ApproachProblem, FINAL_TIMES};
+        let scn = Scenario::earth();
+        let m = 120e3;
+        let lim = scn.ship.thrust_limits(1);
+        let z_c = scn.rest_cm_z();
+        let g = scn.planet.gravity();
+        let c = scn.catch.expect("tower");
+        let mut x = dynamics::state(
+            m,
+            [10.0, 0.0, z_c + 20.0],
+            [-1.0, 0.0, -2.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0; 3],
+        );
+        // `a0`: the sideways acceleration to start from: the vehicle's own
+        // tilt for the first plan, the last plan's command after.
+        let problem = |x: &State, t_f: f64, a0: Option<[f64; 2]>| {
+            let axis = quat::rotate(dynamics::attitude(x), [0.0, 0.0, 1.0]);
+            ApproachProblem {
+                r0: dynamics::position(x),
+                v0: dynamics::velocity(x),
+                a0: a0.unwrap_or([g * axis[0], g * axis[1]]),
+                z_catch: z_c,
+                t_f,
+                a_min: lim.0 / x[M] * 1.05,
+                a_max: lim.1 / x[M] * 0.9,
+                keep_x: c.mast_x + c.mast_half + scn.ship.radius + 1.6,
+                base_arm: scn.ship.cm_height,
+                nose_arm: scn.ship.length - scn.ship.cm_height,
+                g,
+            }
+        };
+        let mut planner = ApproachPlanner::new();
+        let mut plan = planner
+            .plan_free(&problem(&x, 0.0, None), &FINAL_TIMES)
+            .expect("plan");
+        let mut arrival = plan.t_f;
+        let (mut t, mut since) = (0.0, 0.0);
+        let mut replans_free = 0;
+        let mut replans = 0;
+        // As the flight: re-plan when this far off the plan, m and m/s.
+        const REPLAN_OFF: f64 = 1.0;
+        const REPLAN_SLIP: f64 = 0.5;
+        let mut worst_tilt: f64 = 0.0;
+        while t < arrival {
+            x = fly(&scn, x, 0.05, |s| {
+                let (r, v, a) = plan.sample(since);
+                approach(&scn, s, (r, v, a, plan.jerk(since)), lim, &Air::STILL)
+            });
+            t += 0.05;
+            since += 0.05;
+            worst_tilt = worst_tilt.max(quat::tilt(dynamics::attitude(&x)).to_degrees());
+            // Re-plan only when it has drifted off the plan (as the burn
+            // does), keeping the arrival time; later if that cannot be kept.
+            let (rr, vr, cmd) = plan.sample(since);
+            let off = quat::norm(quat::sub(rr, dynamics::position(&x)));
+            let slip = quat::norm(quat::sub(vr, dynamics::velocity(&x)));
+            if (off > REPLAN_OFF || slip > REPLAN_SLIP) && arrival - t > 0.5 {
+                let a0 = Some([cmd[0], cmd[1]]);
+                let left = arrival - t;
+                let got = planner.plan(&problem(&x, left, a0)).or_else(|_| {
+                    planner.plan_free(&problem(&x, 0.0, a0), &[left + 1.0, left + 2.0, left + 4.0])
+                });
+                if let Ok(p) = got {
+                    if (p.t_f - left).abs() > 1e-9 {
+                        replans_free += 1;
+                        arrival = t + p.t_f;
+                    }
+                    plan = p;
+                    since = 0.0;
+                    replans += 1;
+                }
+            }
+        }
+        let (r, v) = (dynamics::position(&x), dynamics::velocity(&x));
+        let tilt = quat::tilt(dynamics::attitude(&x)).to_degrees();
+        eprintln!(
+            "approach over {arrival:.1} s ({replans} re-plans, {replans_free} new arrival times) ends at {r:.2?} moving {v:.2?}, tilt {tilt:.1} (worst {worst_tilt:.1}), {} solver set-up(s)",
+            planner.setups()
+        );
+        assert!(
+            r[0].hypot(r[1]) < 0.5,
+            "off the axis by {:.2} m",
+            r[0].hypot(r[1])
+        );
+        assert!((r[2] - z_c).abs() < 0.5, "height {:.2} m off", r[2] - z_c);
+        assert!(-v[2] < 2.0 && v[0].hypot(v[1]) < 1.0, "too fast: {v:?}");
+        assert!(tilt < 5.0, "tilt {tilt}");
+        assert_eq!(planner.setups(), 1);
     }
 
     #[test]
