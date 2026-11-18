@@ -645,3 +645,109 @@ fn orbit_sweep() {
         }
     }
 }
+
+/// One flight of the wind sweep.
+struct WindRun {
+    outcome: Option<Outcome>,
+    t: f64,
+    /// Propellant left, t.
+    left: f64,
+    /// Sideways distance from the approach gate and sideways speed when
+    /// the terminal phase began, m and m/s (None: it never began).
+    gate: Option<(f64, f64)>,
+}
+
+fn wind_run(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64) -> WindRun {
+    let mut f = ShipFlight::new(ShipFlightConfig {
+        seed,
+        lag: 0.3,
+        noise,
+        wind,
+        ..ShipFlightConfig::new(kind)
+    })
+    .unwrap();
+    let mut pending: Option<Pending> = None;
+    let mut last_request = f64::NEG_INFINITY;
+    let mut gate = None;
+    while f.phase() != Phase::Done && f.sim().t < 400.0 {
+        f.step(FRAME);
+        if gate.is_none() && f.phase() == Phase::Terminal {
+            let x = f.sim().x;
+            let (r, v) = (dynamics::position(&x), dynamics::velocity(&x));
+            let g = f.sim().scn.gate;
+            gate = Some(((r[0] - g[0]).hypot(r[1] - g[1]), v[0].hypot(v[1])));
+        }
+        deliver(&mut f, &mut pending);
+        request(&mut f, &mut pending, &mut last_request);
+    }
+    WindRun {
+        outcome: f.sim().outcome,
+        t: f.sim().t,
+        left: f.sim().propellant() / 1e3,
+        gate,
+    }
+}
+
+/// Steady wind against both vehicles: 0-25 m/s from +x, -x and +y, noise
+/// low and high, seeds 7-9. Prints one line per flight and the catches per
+/// wind speed. Slow (216 flights, threaded): `--ignored --nocapture`.
+#[test]
+#[ignore]
+fn wind_sweep() {
+    const SPEEDS: [f64; 6] = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0];
+    // Where the wind blows from: +x (from the sea side the vehicles come
+    // in from), -x (from behind the tower), +y (across).
+    const FROM: [(&str, [f64; 2]); 3] = [("+x", [1.0, 0.0]), ("-x", [-1.0, 0.0]), ("+y", [0.0, 1.0])];
+    let cells: Vec<(Kind, &str, Noise)> = [Kind::Booster, Kind::Earth]
+        .into_iter()
+        .flat_map(|k| [(k, "low", Noise::LOW), (k, "high", Noise::HIGH)])
+        .collect();
+    let mut lines: Vec<(String, Kind, f64, bool, Option<f64>)> = std::thread::scope(|s| {
+        let handles: Vec<_> = cells
+            .iter()
+            .map(|&(kind, noise_name, noise)| {
+                s.spawn(move || {
+                    let mut out = Vec::new();
+                    for speed in SPEEDS {
+                        for (from, d) in FROM {
+                            for seed in [7u64, 8, 9] {
+                                let wind = [-speed * d[0], -speed * d[1]];
+                                let r = wind_run(kind, wind, noise, seed);
+                                let caught = r.outcome == Some(Outcome::Caught);
+                                let gate = r.gate.map_or("     —      ".to_string(), |(e, v)| {
+                                    format!("{e:5.1} m {v:4.1} m/s")
+                                });
+                                out.push((
+                                    format!(
+                                        "{kind:?} {speed:4.0} m/s from {from} noise {noise_name:4} seed {seed}: {:?} t {:5.1} left {:5.1} t gate {gate}",
+                                        r.outcome, r.t, r.left
+                                    ),
+                                    kind,
+                                    speed,
+                                    caught,
+                                    r.gate.map(|g| g.0),
+                                ));
+                            }
+                        }
+                    }
+                    out
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+    });
+    lines.sort_by(|a, b| a.0.cmp(&b.0));
+    for l in &lines {
+        eprintln!("{}", l.0);
+    }
+    eprintln!("\nkind     wind  caught  mean gate error (m)");
+    for kind in [Kind::Booster, Kind::Earth] {
+        for speed in SPEEDS {
+            let cell: Vec<_> = lines.iter().filter(|l| l.1 == kind && l.2 == speed).collect();
+            let caught = cell.iter().filter(|l| l.3).count();
+            let errs: Vec<f64> = cell.iter().filter_map(|l| l.4).collect();
+            let mean = errs.iter().sum::<f64>() / errs.len().max(1) as f64;
+            eprintln!("{kind:?}  {speed:4.0}   {caught:2}/{}   {mean:5.1}", cell.len());
+        }
+    }
+}
