@@ -581,10 +581,22 @@ fn booster_engine_out_board() {
                             let r = booster_fail_run(set, at, seed, REPLAN_PERIOD, frame);
                             (
                                 format!(
-                                    "BOARD {name:11} at {at} s {fps} fps seed {seed:2}: {:?} t {:.1} plans {} failed {} prop {:.0} t",
-                                    r.0, r.1, r.2, r.3, r.4
+                                    "BOARD {name:11} at {at} s {fps} fps seed {seed:2}: {:?} t {:.1} plans {} failed {} prop {:.0} t, at hand-over {}",
+                                    r.outcome,
+                                    r.t,
+                                    r.plans,
+                                    r.failed,
+                                    r.prop,
+                                    r.handover_tilt.zip(r.handover_rate).map_or(
+                                        "—".to_string(),
+                                        |(a, w)| format!(
+                                            "tilt {:.1}° turning {:.1}°/s",
+                                            a.to_degrees(),
+                                            w.to_degrees()
+                                        )
+                                    )
                                 ),
-                                r.0 == Some(Outcome::Caught),
+                                r.outcome == Some(Outcome::Caught),
                             )
                         })
                         .collect::<Vec<_>>()
@@ -616,15 +628,23 @@ fn booster_engine_out_board() {
     eprintln!("BOARD caught {c} of {}", lines.len());
 }
 
+/// What one engine-out flight did.
+struct FailRun {
+    outcome: Option<Outcome>,
+    t: f64,
+    plans: usize,
+    failed: usize,
+    /// Propellant left, t.
+    prop: f64,
+    /// Tilt when it dropped to its last engines after the failure, rad.
+    handover_tilt: Option<f64>,
+    /// Turn rate then, rad/s.
+    handover_rate: Option<f64>,
+}
+
 /// One booster flight losing engines `set` at `at` s; the solver takes
-/// `latency` s; frames of `frame` s. (outcome, t, plans, failed, prop t).
-fn booster_fail_run(
-    set: &[usize],
-    at: f64,
-    seed: u64,
-    latency: f64,
-    frame: f64,
-) -> (Option<Outcome>, f64, usize, usize, f64) {
+/// `latency` s; frames of `frame` s.
+fn booster_fail_run(set: &[usize], at: f64, seed: u64, latency: f64, frame: f64) -> FailRun {
     let mut f = ShipFlight::new(ShipFlightConfig {
         seed,
         lag: 0.3,
@@ -638,8 +658,20 @@ fn booster_fail_run(
     let (mut ok, mut bad) = (0, 0);
     let mut fired = false;
     let verbose = std::env::var_os("BOARD_TRACE").is_some();
+    let mut handover_tilt = None;
+    let mut handover_rate = None;
     while f.phase() != Phase::Done && f.sim().t < 400.0 {
+        let lit_before = f.sim().cluster.lit();
         f.step(frame);
+        let final_engines = f.sim().scn.ship.final_engines;
+        if fired
+            && handover_tilt.is_none()
+            && lit_before > final_engines
+            && f.sim().cluster.lit() <= final_engines
+        {
+            handover_tilt = Some(model::quat::tilt(dynamics::attitude(&f.sim().x)));
+            handover_rate = Some(model::quat::norm(dynamics::rates(&f.sim().x)));
+        }
         if !fired && f.sim().t >= at {
             fired = true;
             let mut any = false;
@@ -699,9 +731,23 @@ fn booster_fail_run(
         if verbose && fired {
             let x = f.sim().x;
             let (r, v) = (dynamics::position(&x), dynamics::velocity(&x));
-            if (f.sim().t * 2.0).fract() < frame * 2.0 {
+            if (f.sim().t * 4.0).fract() < frame * 4.0 {
+                // Lean toward +x, degrees: the vehicle's, and the plan's now.
+                let lean = |x: &model::dynamics::State| {
+                    model::quat::rotate(dynamics::attitude(x), [0.0, 0.0, 1.0])[0]
+                        .asin()
+                        .to_degrees()
+                };
+                let (ref_lean, ref_x, ref_vx) = match f.guide() {
+                    Guide::Plan { plan, t0 } => {
+                        let (xr, _) = plan.sample(f.sim().t - t0);
+                        (lean(&xr), xr[1], xr[4])
+                    }
+                    _ => (f64::NAN, f64::NAN, f64::NAN),
+                };
+                let th = f.sim().cluster.thrust;
                 eprintln!(
-                    "t {:5.1} {:12} r ({:6.1},{:6.1},{:7.1}) v ({:5.1},{:5.1},{:6.1}) lit {} T {:.1} MN",
+                    "t {:5.2} {:12} r ({:6.1},{:6.1},{:7.1}) v ({:5.1},{:5.1},{:6.1}) lit {} T {:.1} MN | lean {:5.1} plan {:5.1} | ref x {:6.1} vx {:5.1} | gimbal {:5.1}",
                     f.sim().t,
                     f.phase().label(Kind::Booster),
                     r[0],
@@ -711,13 +757,26 @@ fn booster_fail_run(
                     v[1],
                     v[2],
                     f.sim().cluster.lit(),
-                    model::quat::norm(f.sim().cluster.thrust) / 1e6
+                    model::quat::norm(th) / 1e6,
+                    lean(&x),
+                    ref_lean,
+                    ref_x,
+                    ref_vx,
+                    th[0].atan2(th[2]).to_degrees()
                 );
             }
         }
     }
     let s = f.sim();
-    (s.outcome, s.t, ok, bad, s.propellant() / 1e3)
+    FailRun {
+        outcome: s.outcome,
+        t: s.t,
+        plans: ok,
+        failed: bad,
+        prop: s.propellant() / 1e3,
+        handover_tilt,
+        handover_rate,
+    }
 }
 
 /// Something happens (a gust, a failure, a changed setting): guidance asks
