@@ -618,6 +618,31 @@ but the lean (13°) still there. Coming upright first on the engines
 still lit was worse: at minimum throttle eleven engines leaning 11-14°
 pushed the booster sideways at about 8 m/s².
 
+### The booster's burn as one plan (M4, D-052)
+
+The booster now plans its landing burn as one: every lit engine, then
+the centre three from a planned node, to the catch gate; and its plans
+turn at most 10°/s. Same build, switch off and on, 2026-11-19 (boards:
+`booster_engine_out_board` 320 flights, `wind_sweep` booster half 108,
+`approach_board` booster row 40, `booster_browser_sweep` 33):
+
+| | Engine-out | Wind sweep booster (0, 5, 10, 15, 20, 25 m/s) | Approach (glide) | Browser |
+| --- | --- | --- | --- | --- |
+| Before | 313 | 86 (18, 17, 16, 14, 16, 5) | 40 | 33 |
+| After | 320 | 99 (18, 18, 18, 18, 16, 11) | 39 | 33 |
+
+Paired on the wind sweep: 15 booster flights caught only after, 2 only
+before. The approach board's loss is seed 27, high noise, into the tower.
+The ship's flights are the same flight for flight. The cost: in still
+air the booster's flight takes 67.1 s and lands with 31.1 t of
+propellant, against 61.6 s and 37.0 t (mean of 18). The plan switches to
+three engines higher (about 820 m against 557 m) and comes down slower:
+one time scale stretches both of the plan's phases, so the slow phase is
+a fixed share of the flight. A time scale per phase is open (ROADMAP).
+Parts measured on their own: the turn limit alone was worse in wind (79
+of 108); the one-burn plan at 40°/s, 320, 95, 40, 33. The engine-out
+board above (313) is the code before this change.
+
 ### Solve-time benchmark (M4.4, Kestrel's solver flying)
 
 Same method as the M3 benchmark below (native: `bench_solvers`, the

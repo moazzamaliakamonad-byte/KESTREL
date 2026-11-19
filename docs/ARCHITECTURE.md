@@ -246,7 +246,10 @@ crates/wasm
                control step, and air(): the estimate (or still air when wind
                awareness is off) that the plans, controllers and predictions use;
 
-               legs (full engine set to a mid gate, final engines to the approach gate),
+               the booster's options, in order: its final engines alone to the approach
+               gate; one plan for the whole burn (every lit engine, then the final
+               engines from a planned node, upright from there, D-052); every lit
+               engine to a mid gate; booster plans turn at most 10°/s;
                when to re-plan, prediction of the booster's first plan, options
   ship_js.rs   JS class ShipFlight; plan_ship / preview_ship (worker); ship_scenario
                (incl. the model's coefficients and the catch limits, for the page's formulas);

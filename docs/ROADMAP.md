@@ -149,7 +149,15 @@ Four sub-projects, each with its own spec, plan and measurement.
       the turn stopped measured 4 flights gained and 4 lost over four
       boards, so not kept. Open: a leg that short cannot be flown upright
       by the time it ends (the plan's attitude is right; the vehicle lags
-      it with the gimbal at its limit)
+      it with the gimbal at its limit); fixed by D-052
+- [x] **The booster's burn as one plan** (D-052): every lit engine, then
+      the centre three from a planned node, to the catch gate, as the real
+      booster drops from 13 to 3 within one burn; booster plans turn at most
+      10°/s (what it can follow). Engine-out board 320 of 320 (313),
+      wind sweep booster 99 of 108 (86); cost: the still-air flight 5.5 s
+      longer, 6 t more propellant
+- [ ] A time scale per phase in the planner (one scale stretches both
+      today, so the one-burn plan switches high and slow)
 
 ## Publishing on GitHub
 
@@ -204,3 +212,5 @@ Not a milestone: getting the finished project public (D-045).
 - 2026-11-19 — Booster engine-out mid-burn measured: 313 of 320 (D-050).
 - 2026-11-19 — The booster's sideways swing traced to the engine
   hand-over; a fix measured, no gain, not kept (D-051).
+- 2026-11-19 — The booster plans its burn as one, engine switch inside
+  (D-052): engine-out board 320 of 320, wind sweep booster 99 of 108.

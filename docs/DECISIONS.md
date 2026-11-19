@@ -958,3 +958,51 @@ Template:
   turn. What is open is the leg itself: one that short cannot be flown
   to an upright end by this vehicle (the plan's attitude is right; the
   vehicle lags it).
+
+## D-052 — The booster plans its landing burn as one, the engine switch inside it (M4)
+- Date: 2026-11-19
+- Status: accepted
+- Context: the booster losses of D-050 and D-051, after research and
+  a fresh look at the design. Research: Super
+  Heavy drops from 13 engines to 3 within one landing burn, not at a
+  separate stop; 6-DoF powered-descent work optimises one trajectory
+  split into phases at the thrust-switching times; guidance assumes the
+  vehicle can follow the plan's attitude (agility bounded in the
+  optimisation). Kestrel's booster instead flew two plans joined at an
+  intermediate gate, and after a late engine loss the first was about
+  3 s long, a manoeuvre it could not fly; and its plans could turn at
+  40°/s (the ship's limit) while its gimbal slews at 30°/s, so it flew
+  half a second, 5-7°, behind them.
+- Decision: (1) the booster's options are now: its final engines alone
+  to the approach gate; one plan for the whole burn (every lit engine,
+  then the final engines from a planned node, upright from there: the
+  ship's flip machinery, `late_limits` and `switch_node`, with a first
+  time guess `time_guess`); every lit engine to an intermediate gate.
+  The switch node: brake from the sink rate now to the intermediate
+  gate's speed at the rate that reaches that gate, clamped to what the
+  lit engines can do (10 % inside their least and most thrust: below the
+  least, the plan stops too high and none exists; found when every plan
+  after an early loss came back infeasible). (2) Booster plans turn at
+  most 10°/s (`BOOSTER_OMEGA_MAX`). Both behind one switch
+  (`switch_plan`, on); the pinned pre-M4 flight flies with it off.
+- Measured (same build; boards of 320, 108 booster, 40 and 33 flights):
+  today's code 313, 86, 40, 33; the turn limit alone 315, 79, 40, 33
+  (worse in wind); the one-burn plan before the switch-node clamp, at
+  40°/s: 240, 83, 21, 30; with the clamp at 40°/s: 320, 95, 40, 33; at
+  15°/s: 320, 93, 40, 33; at 10°/s: 320, 99, 39, 33 (kept). Paired on
+  the wind sweep: 15 booster flights caught only with it, 2 only
+  without; the ship's flights identical, flight for flight. The
+  booster's still-air flight: 67.1 s and 31.1 t left, against 61.6 s
+  and 37.0 t.
+- Tried, not kept: preferring the one-burn plan over the final engines
+  alone (every plan put the switch about 2 s ahead, so it never came,
+  and the booster hovered on twelve engines); preferring it only while
+  the switch was at least 1 s ahead (the still-air flight barely
+  changed: 66.8 s); a ceiling on the height at the switch node, to make
+  it brake late on every engine and recover the propellant (plans
+  failed: 12 on the nominal flight).
+- Consequences: the cost in propellant and time comes from the plan's
+  single time scale: the switch sits at a fixed node, so the slow phase
+  is a fixed share of the flight, and the plan brakes early and switches
+  high (about 820 m against 557 m). A time scale per phase would let it
+  brake late; open.
