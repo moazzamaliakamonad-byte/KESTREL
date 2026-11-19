@@ -170,7 +170,7 @@ Not a milestone: getting the finished project public (D-045).
 - [x] Clippy clean; `CLAUDE.md` no longer tracked
 - [x] History kept as it is (owner's call: the commit email and the
       two early commits that hold `CLAUDE.md` may be public)
-- [ ] Repository created and pushed; Pages source set to "GitHub Actions"
+- [x] Repository created and pushed; Pages source set to "GitHub Actions"
 - [x] Live link and CI badge at the top of the README; `repository` in
       `Cargo.toml`
 
