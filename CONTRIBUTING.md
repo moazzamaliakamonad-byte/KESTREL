@@ -73,7 +73,9 @@ same build:
   (which flights were gained, which were lost), not just the totals.
 - New behaviour goes behind a switch in `ShipFlightConfig`, on by
   default, so the test `unaware_flight_matches_today` can still fly the
-  older code exactly.
+  older code exactly (it runs on Windows only: its numbers come from
+  Windows' maths library, which rounds a little differently from
+  Linux's and macOS's).
 
 A change that does not improve the boards is still worth reporting: the
 project records what was tried and why it was dropped.

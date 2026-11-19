@@ -283,14 +283,22 @@ fn wind_changes_the_dynamics() {
 /// 11.983995238941155 s, mass 129986.87391679233 kg), which then matched
 /// the wind code bit for bit; these are the same plan on Kestrel's own
 /// solver (2026-11-19, D-049), which differs from Clarabel's at its
-/// tolerance.
+/// tolerance. Read on Windows; other platforms' maths libraries round
+/// exp, sin and the like a little differently (Linux CI: final time
+/// 11.983808912174556 s), so the match is to a relative 1e-9.
 #[test]
 fn zero_wind_plan_is_unchanged() {
     let p = earth_flip_problem(650.0, -90.0);
     assert_eq!(p.wind, [0.0; 3]);
     let plan = plan_ship(&p, None, COLD_ITERATIONS).expect("plan");
-    assert_eq!(plan.final_time, 11.983808912176874);
-    assert_eq!(plan.x.last().unwrap()[M], 129987.20647045899);
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs();
+    assert!(
+        close(plan.final_time, 11.983808912176874),
+        "tf {}",
+        plan.final_time
+    );
+    let m = plan.x.last().unwrap()[M];
+    assert!(close(m, 129987.20647045899), "mass {m}");
     assert_eq!(plan.iterations, 4);
 }
 
