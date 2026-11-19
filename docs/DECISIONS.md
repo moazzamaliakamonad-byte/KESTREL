@@ -929,3 +929,34 @@ Template:
 - Decision: guidance unchanged; the board stays as an ignored test; the
   swing is a separate item (the controller's lean), to be measured on
   every board before any change.
+
+## D-051 — The booster's sideways swing: traced to the hand-over; a fix measured, not kept (M4)
+- Date: 2026-11-19
+- Status: accepted
+- Context: D-050 left 7 losses of 320 on the engine-out board, from a
+  sideways swing on the booster's last legs. The owner: "complete it".
+- Traced: the short leg on the engines left after a loss (about 3 s for a
+  failure at 31 s) asks for leans of -12° to +3° in that time; the
+  booster follows a fraction of a second late with its gimbal at the
+  15° limit and ends the leg leaning about 11°, turning at 14-17°/s. It
+  then drops to its centre three, which have about a quarter of the
+  turning authority (l·tan(15°)·T/J: 8.8°/s² against 29°/s² on eleven
+  at minimum throttle), so the turn takes about 2 s and 16° more to stop
+  (26° seen), and every plan after that starts from the lean.
+- Tried: (1) come upright on the engines still lit before dropping to
+  the last ones: worse (eleven engines at minimum throttle, leaning
+  11-14°, pushed it sideways at about 8 m/s², and it did not level in
+  time). (2) Stop the turn on the engines still lit (hold attitude, below
+  6°/s, only while sinking faster than 15 m/s), then drop: the traced
+  flight is caught (61.6 s, was out of propellant), but against the same
+  build with it off, over four boards (engine-out, wind sweep, approach,
+  browser sweep): 4 flights caught only with it, 4 only without. It also
+  changed ordinary booster flights (it fired in a 15 m/s crosswind).
+- Decision: not kept (no measured gain). The engine-out board now prints
+  the tilt and turn rate at the hand-over. Why both ways: on fewer
+  engines both the turning authority and the sideways push scale with
+  thrust, so stopping a turn is best done on many engines and taking out
+  a lean on few; the losses that remain hand over with the lean, not the
+  turn. What is open is the leg itself: one that short cannot be flown
+  to an upright end by this vehicle (the plan's attitude is right; the
+  vehicle lags it).

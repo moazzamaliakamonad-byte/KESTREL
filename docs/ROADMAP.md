@@ -144,10 +144,13 @@ Four sub-projects, each with its own spec, plan and measurement.
       the page (two outer engines lost at 30 s) is caught in all 10
       flights of a 320-flight board; 313 of 320 in all (one to three
       outer engines or a centre one, lost at 26-33 s)
-- [ ] The booster's sideways swing on its last legs at 0.5 s solve
-      latency (the 7 losses on that board): the tracking controller
-      leans further than the plan; measure a gentler lean, then the
-      boards
+- [x] The booster's sideways swing on its last legs, traced (D-051): a
+      short leg after an engine loss ends leaning and turning, and three
+      engines cannot stop the turn in time; holding the attitude until
+      the turn stopped measured 4 flights gained and 4 lost over four
+      boards, so not kept. Open: a leg that short cannot be flown upright
+      by the time it ends (the plan's attitude is right; the vehicle lags
+      it with the gimbal at its limit)
 
 ## Publishing on GitHub
 
@@ -200,3 +203,5 @@ Not a milestone: getting the finished project public (D-045).
 - 2026-11-19 — 4.4 done: Kestrel's own solver is the only one that flies
   (D-049).
 - 2026-11-19 — Booster engine-out mid-burn measured: 313 of 320 (D-050).
+- 2026-11-19 — The booster's sideways swing traced to the engine
+  hand-over; a fix measured, no gain, not kept (D-051).

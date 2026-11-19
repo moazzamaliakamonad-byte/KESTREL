@@ -602,6 +602,22 @@ changed the plans it was meant to fix, so not a fix); the keep-out
 loosened when the start is inside it (302 of 320: the plans it made from
 there were poor, and the brake-to-the-axis fallback did better).
 
+Where the swing starts (traced, D-051): the short leg on the engines left
+after a loss (about 3 s, for a failure at 31 s) ends with the booster
+leaning about 11° and still turning at 14-17°/s, its gimbal at the limit.
+On its last three engines it has about a quarter of the turning authority
+(8.8°/s² against 29°/s² on eleven at minimum throttle), so stopping that
+turn takes about 2 s and 16° more lean (26° seen). Holding the attitude
+on the engines still lit until the turn stopped (below 6°/s) was tried
+and measured against the same build with it off: engine-out board 3
+flights caught only with it and 1 only without (counting each distinct
+flight once); wind sweep booster 1 and 2; approach board booster 0 and
+1; browser sweep 33 of 33 both ways. 4 and 4: no gain, not kept. The
+flights it still lost dropped to their last engines with the turn stopped
+but the lean (13°) still there. Coming upright first on the engines
+still lit was worse: at minimum throttle eleven engines leaning 11-14°
+pushed the booster sideways at about 8 m/s².
+
 ### Solve-time benchmark (M4.4, Kestrel's solver flying)
 
 Same method as the M3 benchmark below (native: `bench_solvers`, the
