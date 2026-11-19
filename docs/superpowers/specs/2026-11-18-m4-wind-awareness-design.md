@@ -17,9 +17,8 @@ Simulation only, like everything in Kestrel.
 
 ## Why
 
-The owner: guidance "is not as smart as it should be", naming the last
-approach, that "it always falls the same way", and that it does not react to
-wind. Today the simulator blows wind and gusts at the vehicle, but guidance
+Guidance was not smart enough in three ways: the last approach, every
+flight falling the same way, and no reaction to wind. Today the simulator blows wind and gusts at the vehicle, but guidance
 never knows: the planner's model is called with zero wind
 (`scvx/discretize.rs`, `Extra::default()`), the controllers model the air
 "no wind known" (`ship_control::aero_torque`), and the fall's steering aims

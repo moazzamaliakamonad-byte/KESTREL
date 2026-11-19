@@ -545,8 +545,8 @@ pub fn terminal(scn: &Scenario, x: &State, limits: (f64, f64), air: &Air) -> Act
 /// wait until centred: the height it may come down to falls with its
 /// distance from the axis ([`GLIDE_SLOPE`] metres per metre beyond
 /// [`GLIDE_FREE`]), so it slides in and comes down in one movement, over
-/// the axis by the time it is low (M4.2: the owner found the stop-and-wait
-/// robotic).
+/// the axis by the time it is low (M4.2: the stop-and-wait looked
+/// scripted).
 pub fn terminal_shaped(
     scn: &Scenario,
     x: &State,

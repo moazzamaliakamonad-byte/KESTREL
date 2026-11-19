@@ -1,6 +1,6 @@
 # M1 — Browser landing: design
 
-Date: 2026-11-12. Status: approved by owner ("go absolutely wild", decisions
+Date: 2026-11-12. Status: approved (decisions
 delegated). Roadmap: `docs/ROADMAP.md` M1.
 
 ## Goal

@@ -5,7 +5,7 @@ Sub-project 2 of M4 "smarter guidance" (ROADMAP.md). Simulation only.
 
 ## Why
 
-The owner: the last approach "looks robotic". Today the burn's plan ends at
+The last approach looked scripted. Today the burn's plan ends at
 a gate (ship: 10 m out from the catch axis, 20 m above the caught
 position; booster: 14 m out, 12 m up) and a hand-tuned controller
 (`ship_control::terminal`) flies the rest: slide over the axis at a capped

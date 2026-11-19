@@ -5,7 +5,7 @@ Sub-project 3 of M4 (ROADMAP.md). Simulation only.
 
 ## Why
 
-The owner: "it always falls the same way". Every flight lines up for the
+Every flight fell the same way: every flight lines up for the
 same final approach: the gate 10 m (ship) or 14 m (booster) out along +x,
 the fall aimed 450 m (ship) or 120 m (booster) out along +x, the ship's
 nose toward −x. And M4.1 found the ship's worst loss: in a crosswind it

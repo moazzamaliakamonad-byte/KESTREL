@@ -54,7 +54,7 @@ Goal: the demo that spreads.
 
 ## M3 — 6-DoF vehicles and flight-style solver
 
-Goal (owner, 2026-11-15): a Starship-class simulation, as realistic as a
+Goal (2026-11-15): a Starship-class simulation, as realistic as a
 simulation can be, on one page with a mission-control interface.
 
 - [x] 6-DoF rigid body with aerodynamics (`kestrel-model`, `sim::ship`)
@@ -109,9 +109,8 @@ simulation can be, on one page with a mission-control interface.
 
 ## M4 — Smarter guidance
 
-Goal (owner, 2026-11-18): guidance "is not as smart as it should be": the
-last approach looks scripted, every flight falls the same way, and it does
-not react to wind. And Kestrel's own solver must be the one that flies.
+Goal (2026-11-18): smarter guidance: the last approach looked scripted,
+every flight fell the same way, and it did not react to wind. And Kestrel's own solver must be the one that flies.
 Four sub-projects, each with its own spec, plan and measurement.
 
 - [x] **4.1 Wind awareness** (D-046): guidance estimates the wind in flight
