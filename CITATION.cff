@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use Kestrel, please cite it as below."
+title: "Kestrel: browser rocket-landing simulation with convex powered-descent guidance"
+type: software
+authors:
+  - given-names: Moazzam
+    family-names: Ali
+repository-code: "https://github.com/moazzamaliakamonad-byte/KESTREL"
+url: "https://moazzamaliakamonad-byte.github.io/KESTREL/"
+license: MIT
+keywords:
+  - rocket landing
+  - powered descent guidance
+  - successive convexification
+  - convex optimization
+  - second-order cone programming
+  - interior-point method
+  - Rust
+  - WebAssembly
+  - simulation
+references:
+  - type: article
+    title: "Successive Convexification for 6-DoF Mars Rocket Powered Landing with Free-Final-Time"
+    authors:
+      - family-names: Szmuk
+        given-names: Michael
+      - family-names: Açıkmeşe
+        given-names: Behçet
+    year: 2018
