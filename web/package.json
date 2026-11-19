@@ -2,6 +2,14 @@
   "name": "web",
   "version": "0.1.0",
   "private": true,
+  "description": "Kestrel: land a Starship-class rocket in your browser, with live convex landing guidance in Rust and WebAssembly",
+  "homepage": "https://moazzamaliakamonad-byte.github.io/KESTREL/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/moazzamaliakamonad-byte/KESTREL.git"
+  },
+  "license": "MIT",
+  "keywords": ["rocket", "starship", "rocket-landing", "guidance", "convex-optimization", "webassembly", "rust", "threejs", "simulation", "aerospace"],
   "scripts": {
     "wasm": "node ../scripts/build-wasm.mjs",
     "predev": "npm run wasm",

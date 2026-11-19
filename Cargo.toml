@@ -14,3 +14,7 @@ opt-level = 3
 edition = "2024"
 license = "MIT"
 authors = ["Moazzam Ali"]
+repository = "https://github.com/moazzamaliakamonad-byte/KESTREL"
+homepage = "https://moazzamaliakamonad-byte.github.io/KESTREL/"
+keywords = ["rocket", "guidance", "convex-optimization", "aerospace", "simulation"]
+categories = ["aerospace::simulation", "science", "mathematics", "simulation", "wasm"]
