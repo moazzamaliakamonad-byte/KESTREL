@@ -1,5 +1,5 @@
 //! Assemble the lossless-convexified landing problem as a second-order cone
-//! program for Clarabel, for one fixed final time.
+//! program for Kestrel's own solver (`crates/socp`), for one fixed final time.
 //!
 //! Formulation: Açıkmeşe & Ploen (2007); see also Malyuta et al. (2021),
 //! arXiv:2106.09125. Everything here is non-dimensional (see `scaling`).
@@ -15,8 +15,7 @@
 
 use std::ops::Range;
 
-use clarabel::algebra::CscMatrix;
-use clarabel::solver::SupportedConeT;
+use ::socp::{Cone, Csc};
 
 use crate::problem::{GuidanceError, LandingProblem};
 use crate::scaling::Scaling;
@@ -58,14 +57,16 @@ impl Layout {
     }
 }
 
-/// The assembled problem in Clarabel's form:
-/// minimize `½xᵀPx + qᵀx` subject to `A·x + s = b`, `s ∈ cones`.
+/// The assembled problem in the solver's form:
+/// minimize `½xᵀPx + qᵀx` (P diagonal, here zero) subject to
+/// `A·x + s = b`, `s ∈ cones`.
 pub(crate) struct Socp {
-    pub p: CscMatrix<f64>,
+    /// P's diagonal.
+    pub p: Vec<f64>,
     pub q: Vec<f64>,
-    pub a: CscMatrix<f64>,
+    pub a: Csc,
     pub b: Vec<f64>,
-    pub cones: Vec<SupportedConeT<f64>>,
+    pub cones: Vec<Cone>,
     pub layout: Layout,
     pub scaling: Scaling,
     /// Non-dimensional interval length.
@@ -91,7 +92,7 @@ impl Aff {
     }
 }
 
-/// Collects constraint rows. Clarabel's convention is `s = b − A·x ∈ K`.
+/// Collects constraint rows. The solver's convention is `s = b − A·x ∈ K`.
 #[derive(Default)]
 struct Rows {
     rows: Vec<usize>,
@@ -348,13 +349,10 @@ pub(crate) fn build_with(
         b.extend_from_slice(&block.b);
     }
     let nvars = if closest { lay.len() + 1 } else { lay.len() };
-    let a = CscMatrix::new_from_triplets(b.len(), nvars, rows, cols, vals);
+    let a = Csc::from_triplets(b.len(), nvars, &rows, &cols, &vals);
 
-    let mut cones = vec![
-        SupportedConeT::ZeroConeT(eq.len()),
-        SupportedConeT::NonnegativeConeT(ineq.len()),
-    ];
-    cones.extend(soc_dims.into_iter().map(SupportedConeT::SecondOrderConeT));
+    let mut cones = vec![Cone::Zero(eq.len()), Cone::Nonneg(ineq.len())];
+    cones.extend(soc_dims.into_iter().map(Cone::Soc));
 
     // Objective: maximize final log-mass ⇔ minimize −z_N.
     let mut q = vec![0.0; nvars];
@@ -364,7 +362,7 @@ pub(crate) fn build_with(
     }
 
     Ok(Socp {
-        p: CscMatrix::zeros((nvars, nvars)),
+        p: vec![0.0; nvars],
         q,
         a,
         b,
@@ -381,17 +379,14 @@ mod tests {
     use super::*;
     use crate::problem::LandingProblem;
 
-    fn cone_dim(c: &SupportedConeT<f64>) -> usize {
+    fn cone_dim(c: &Cone) -> usize {
         match c {
-            SupportedConeT::ZeroConeT(d)
-            | SupportedConeT::NonnegativeConeT(d)
-            | SupportedConeT::SecondOrderConeT(d) => *d,
-            other => panic!("unexpected cone {other:?}"),
+            Cone::Zero(d) | Cone::Nonneg(d) | Cone::Soc(d) => *d,
         }
     }
 
     /// y = A·x for a CSC matrix.
-    fn mat_vec(a: &CscMatrix<f64>, x: &[f64]) -> Vec<f64> {
+    fn mat_vec(a: &Csc, x: &[f64]) -> Vec<f64> {
         let mut y = vec![0.0; a.m];
         for col in 0..a.n {
             for idx in a.colptr[col]..a.colptr[col + 1] {

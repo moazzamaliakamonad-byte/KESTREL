@@ -218,3 +218,77 @@ fn update_reuses_the_pattern() {
         .fold(0.0, f64::max);
     assert!(dx < 1e-8, "{dx}");
 }
+
+#[test]
+fn infeasible_linear_program_is_proved_infeasible() {
+    // x ≥ 1 and x ≤ 0: no x. rows: 1 − x ≥ 0 reversed... s = b − A x:
+    // s0 = −1 + x ≥ 0 (x ≥ 1), s1 = 0 − x ≥ 0 (x ≤ 0).
+    let a = dense(2, 1, &[&[-1.0], &[1.0]]);
+    let (st, _) = solve(&[0.0], &[1.0], &a, &[-1.0, 0.0], &[Cone::Nonneg(2)]);
+    assert_eq!(st, Status::PrimalInfeasible);
+}
+
+#[test]
+fn infeasible_cone_program_is_proved_infeasible() {
+    // ‖(u, v)‖ ≤ t with t = 1, u = 2: no point. Variables (t, u, v).
+    let a = dense(
+        5,
+        3,
+        &[
+            &[1.0, 0.0, 0.0],
+            &[0.0, 1.0, 0.0],
+            &[-1.0, 0.0, 0.0],
+            &[0.0, -1.0, 0.0],
+            &[0.0, 0.0, -1.0],
+        ],
+    );
+    let (st, _) = solve(
+        &[0.0, 0.0, 0.0],
+        &[0.0, 0.0, 1.0],
+        &a,
+        &[1.0, 2.0, 0.0, 0.0, 0.0],
+        &[Cone::Zero(2), Cone::Soc(3)],
+    );
+    assert_eq!(st, Status::PrimalInfeasible);
+}
+
+#[test]
+fn a_cut_short_solve_returns_its_best_iterate_as_almost_solved() {
+    // The linear program above, stopped before full accuracy: the best
+    // iterate within the reduced tolerances comes back as AlmostSolved.
+    let a = dense(
+        4,
+        2,
+        &[&[1.0, 2.0], &[3.0, 1.0], &[-1.0, 0.0], &[0.0, -1.0]],
+    );
+    let mut almost = 0;
+    for max_iter in 1..30 {
+        let settings = Settings {
+            max_iter,
+            ..Settings::default()
+        };
+        let mut s = Solver::new(
+            &[0.0, 0.0],
+            &[-1.0, -1.0],
+            &a,
+            &[4.0, 6.0, 0.0, 0.0],
+            &[Cone::Nonneg(4)],
+            settings,
+        )
+        .unwrap();
+        match s.solve() {
+            Status::Solved => {}
+            Status::AlmostSolved => {
+                almost += 1;
+                let x = s.x();
+                assert!(
+                    (x[0] - 1.6).abs() < 1e-3 && (x[1] - 1.2).abs() < 1e-3,
+                    "max_iter {max_iter}: {x:?}"
+                );
+            }
+            Status::MaxIterations => {}
+            other => panic!("max_iter {max_iter}: {other:?}"),
+        }
+    }
+    assert!(almost > 0, "never cut short within the reduced tolerances");
+}

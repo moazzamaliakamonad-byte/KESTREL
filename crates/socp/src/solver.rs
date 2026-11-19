@@ -33,6 +33,19 @@ pub struct Settings {
     pub refine: usize,
     /// Fraction of the way to the cone boundary a step may go.
     pub step: f64,
+    /// Primal infeasibility: a dual iterate with `‖Aᵀy + Gᵀz‖ ≤ tol_infeas ·
+    /// (−bᵀy − hᵀz)` proves it (Farkas), unless every feasible point has a
+    /// (scaled) norm of at least `1 / tol_infeas`. The infeasible-start
+    /// iteration stalls near a least-infeasible point, where this ratio
+    /// stopped at 1e-7..1e-8 on the landing problems (feasible ones stay
+    /// above 1), so not tighter than 1e-6.
+    pub tol_infeas: f64,
+    /// Reduced tolerances: if the iteration stops short (the iteration cap,
+    /// or precision lost near the optimum), the best iterate that met these
+    /// comes back as `AlmostSolved`. Clarabel's defaults.
+    pub reduced_tol_feas: f64,
+    pub reduced_tol_gap_abs: f64,
+    pub reduced_tol_gap_rel: f64,
 }
 
 impl Default for Settings {
@@ -47,6 +60,10 @@ impl Default for Settings {
             dynamic_reg: 1e-7,
             refine: 3,
             step: 0.99,
+            tol_infeas: 1e-6,
+            reduced_tol_feas: 1e-4,
+            reduced_tol_gap_abs: 5e-5,
+            reduced_tol_gap_rel: 5e-5,
         }
     }
 }
@@ -55,8 +72,14 @@ impl Default for Settings {
 pub enum Status {
     Unsolved,
     Solved,
+    /// Stopped short (the iteration cap, or precision lost near the
+    /// optimum); `x()` is the best iterate, which met the reduced tolerances.
+    AlmostSolved,
     /// The iteration cap was reached first.
     MaxIterations,
+    /// No `x` satisfies the constraints: the dual iterate is a Farkas
+    /// certificate (`Settings::tol_infeas`).
+    PrimalInfeasible,
     /// The iterates grew without bound: most likely infeasible.
     Diverged,
     /// A step of zero length or non-finite numbers.
@@ -915,6 +938,9 @@ impl Solver {
         let norm_bh = norm(&self.b_eq).max(norm(&self.h)).max(1.0);
         self.status = Status::MaxIterations;
         self.iterations = 0;
+        // The best iterate within the reduced tolerances so far (its merit:
+        // the worst of its residuals over their tolerances), kept in x_out.
+        let mut best = f64::INFINITY;
         for it in 0..=st.max_iter {
             self.residuals();
             let gap = dot(&self.s, &self.z);
@@ -931,12 +957,37 @@ impl Solver {
                 self.status = Status::NumericalError;
                 break;
             }
+            let merit = (pres.max(dres) / st.reduced_tol_feas)
+                .max((gap / st.reduced_tol_gap_abs).min(relgap / st.reduced_tol_gap_rel));
+            if merit <= 1.0 && merit < best {
+                best = merit;
+                for j in 0..n {
+                    self.x_out[j] = self.d[j] * self.x[j];
+                }
+            }
             if pres <= st.tol_feas
                 && dres <= st.tol_feas
                 && (gap <= st.tol_gap_abs || relgap <= st.tol_gap_rel)
             {
                 self.status = Status::Solved;
                 break;
+            }
+            // Farkas: z ∈ K*, Aᵀy + Gᵀz ≈ 0 and bᵀy + hᵀz < 0 leave no
+            // feasible x (for one, bᵀy + hᵀz = xᵀ(Aᵀy + Gᵀz) + sᵀz ≥
+            // −‖x‖ ‖Aᵀy + Gᵀz‖). Aᵀy + Gᵀz = r_x − P x − q.
+            let by_hz = dot(&self.b_eq, &self.y) + dot(&self.h, &self.z);
+            if by_hz < 0.0 {
+                let r = (0..n)
+                    .map(|j| {
+                        let v = self.rx[j] - self.p_diag[j] * self.x[j] - self.q[j];
+                        v * v
+                    })
+                    .sum::<f64>()
+                    .sqrt();
+                if r <= st.tol_infeas * -by_hz {
+                    self.status = Status::PrimalInfeasible;
+                    break;
+                }
             }
             if norm(&self.x) > 1e12 || norm(&self.z) > 1e12 {
                 self.status = Status::Diverged;
@@ -996,9 +1047,18 @@ impl Solver {
                 self.z[i] += alpha * self.dz[i];
             }
         }
-        // Back to the caller's variables: x = D x̃.
-        for j in 0..n {
-            self.x_out[j] = self.d[j] * self.x[j];
+        match self.status {
+            // Back to the caller's variables: x = D x̃.
+            Status::Solved => {
+                for j in 0..n {
+                    self.x_out[j] = self.d[j] * self.x[j];
+                }
+            }
+            // Cut short: the best iterate is already in x_out.
+            Status::MaxIterations | Status::NumericalError if best.is_finite() => {
+                self.status = Status::AlmostSolved;
+            }
+            _ => {}
         }
         self.status
     }

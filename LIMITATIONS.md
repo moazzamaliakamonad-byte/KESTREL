@@ -105,8 +105,13 @@ What is simulated, and what is only shown:
   the gap alone takes more height than is left.
 
 - **The plan ends 10 m out and 20 m above the arms**; the last 20 m are
-  flown by a simple terminal controller (4-10 s). Plans ending on the arms
-  hit the mast under sensor noise (D-033).
+  flown by the terminal controller, which glides onto the arms (D-047:
+  slides in and comes down in one movement; 9-11 s from the gate). Plans
+  ending on the arms hit the mast under sensor noise (D-033), and a
+  separately planned approach from the gate (`planned_approach`, off)
+  caught fewer flights on every board (D-047: ship nominal 8/12, seeds
+  28/40, booster 33/40, engine-out 11/20, against 12/12, 38/40, 40/40,
+  20/20).
 - **The catch is a test, not contact dynamics**: within 4 m of the catch
   axis, at most 2 m/s down and 1 m/s sideways, tilt under 5°, turning
   slower than 5°/s (all *illustrative*; D-026). The arms are drawn closing
@@ -119,8 +124,36 @@ What is simulated, and what is only shown:
   Booster, seeds 11-30: 20 of 20 at high noise (11 raw), 20 of 20 at low
   (19 raw). Real accelerometers drift and have noise; these do not. One
   seed per cell: differences of one or two flights are noise.
-- **Wind** is the same at every height; a gust is a 4 s trapezoid. The
-  planner knows neither.
+- **Wind** is the same at every height; a gust is a 4 s trapezoid.
+  Guidance knows neither in advance: it **estimates** the wind in flight
+  (D-046) with a two-state Kalman filter on the air's force, made from
+  the accelerometers (taken as exact), engine telemetry (the thrust
+  delivered, taken as a 1 % reading, *illustrative*) and the surfaces'
+  positions, at the navigation estimate. In a 15 m/s crosswind it is
+  within 0.05 m/s of the truth after 10 s of noise-free fall (unit test)
+  and within 0.25 m/s (ship) and 0.13 m/s (booster) by ignition at low
+  noise (closed loop, seed 7), with a stated 1σ of 0.8-2.7 m/s (it is
+  least sure along the ship's nose, where the air's force hardly depends
+  on the wind). Correlated sensor errors count once per correlation
+  time, so its 1σ is honest (unit test with a drifting attitude error:
+  worst error 0.8σ). It follows a gust with a lag (unit test: within
+  3 m/s of a 10 m/s step within 4 s). It learns only while the engines
+  are off and holds its estimate through the burn (under thrust, errors
+  in the thrust line looked like up to 10 m/s of wind in still air): a
+  gust that begins in the burn is not tracked. Guidance flies only the
+  part beyond two standard deviations: winds under about 1-3 m/s are
+  flown as calm. The planner flies in the estimate; the
+  controllers lean into it; the booster's burn plan still has no
+  crossflow drag (D-031), so its controller adds that part.
+- **The ship cannot cross a crosswind in its belly flop**: the hull and
+  flaps are symmetric about the long axis, so a roll makes no sideways
+  force, and it can only slide along its nose. In a 15 m/s crosswind it
+  drifts about 500 m sideways before ignition. So it turns its whole
+  approach toward that drift (D-048: gate, aim, heading, keep-out;
+  within 60° of the arms' open side, for a predicted drift of 400 m or
+  more): 15 m/s crosswinds caught 11 of 18 (5 before). At 20 and 25 m/s
+  the drift outgrows the 60° and most are still lost (4 and 0 of 18).
+  The booster keeps the +x approach (its lean steers across its fall).
 - **Start envelope.** Booster: caught from 6–20 km at 300–600 m/s in the
   starts tried; from 25 km and above it reaches the tower area but the
   burn's plan fails and it runs out of propellant. A sideways divert of
@@ -441,6 +474,198 @@ Not measured: a benchmark of 6-DoF solve times; Firefox or Safari; phones
 (the layout was checked at phone width only as a screenshot); frame rates;
 any Monte Carlo of the M3 flights; ×2 and faster after the retune; how
 the blueprint view performs on a slow GPU.
+
+### Wind (M4.1)
+
+**Wind sweep** (`wind_sweep`, `--ignored`; before: 2026-11-18, after:
+2026-11-19): both vehicles,
+steady wind 0, 5, 10, 15, 20, 25 m/s blowing from +x (the sea), −x (the
+tower side) and +y (across), noise low and high, seeds 7, 8, 9, 0.3 s
+throttle lag, solve latency one re-plan period (0.5 s). Caught, of 18
+per cell (3 directions × 2 noise levels × 3 seeds), before M4.1 (the
+code before any change, which the wind-blind switch still flies bit for
+bit) and after; mean
+sideways distance from the approach gate when the final approach began:
+
+| Wind | Booster before | after | gate error | Ship before | after | gate error |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 m/s | 18 | 18 | 4.9 → 4.9 m | 18 | 18 | 4.0 → 4.0 m |
+| 5 m/s | 18 | 17 | 4.7 → 3.7 m | 15 | 17 | 5.0 → 5.0 m |
+| 10 m/s | 16 | 16 | 3.9 → 3.3 m | 13 | 15 | 5.8 → 4.4 m |
+| 15 m/s | 11 | 15 | 4.0 → 4.0 m | 1 | 5 | 4.1 → 3.9 m |
+| 20 m/s | 0 | 14 | 6.7 → 4.0 m | 0 | 4 | 5.5 → 4.3 m |
+| 25 m/s | 0 | 5 | 8.2 → 3.2 m | 0 | 0 | 9.0 → 3.4 m |
+
+After M4.2 and M4.3 (the glide, the chosen bearing; `wind_sweep`,
+2026-11-19): 152 of 216 (booster 18, 17, 16, 15, 15, 5; ship 18, 17, 16,
+11, 4, 0 at 0-25 m/s), on Clarabel.
+
+On Kestrel's own solver, which flies since M4.4 (D-049; same day, same
+build otherwise): 150 of 216 (booster 18, 17, 16, 14, 16, 5; ship 18, 16,
+17, 9, 4, 0). Paired flight by flight: 4 caught only on Clarabel, 2 only
+on Kestrel. The ship losses traced had the same plans and failures on
+both solvers and parted only in the last seconds (small numerical
+differences grow); one booster loss (15 m/s from +x, low noise, seed 9)
+had subproblems stopped at the 40-iteration cap with the primal residual
+stalled at 1e-4..1e-6, where Clarabel reports them infeasible.
+
+110 of 216 caught before, 144 after (final guidance, 2026-11-19; a first
+version that flew the raw estimate caught 149 but lost still-air flights,
+D-046). One flight was caught before and is lost now: the booster in a
+5 m/s wind from +y at high noise, seed 7 (before, a marginal catch 18.4 m
+off the gate at 7.6 m/s sideways; now it never reaches the gate and
+hits the tower). The criterion "at least as many at every wind speed" is
+missed by that one flight. Before, the booster in 20 m/s and
+more either hit the tower or reached the gate and ran out of
+propellant fighting the wind in the final slide; the ship lost most
+crosswind flights in its belly flop (above). Gate errors are means over
+the flights that reached the gate, so they mix different flights before
+and after. Three seeds per cell: not a statistical claim.
+
+**Robustness boards, wind awareness off and on, still air**
+(`wind_aware_board`, `--ignored`, same build; "off" is exactly the
+guidance before M4.1, checked bit for bit by `unaware_flight_matches_today`):
+
+| Board | Wind-blind | Wind-aware |
+| --- | --- | --- |
+| Ship nominal (seeds 7-10, noise off/low/high) | 12/12 | 12/12 |
+| Ship seeds 11-30 (noise low/high) | 38/40 | 38/40 |
+| Booster seeds 11-30 (noise low/high) | 40/40 | 40/40 |
+| Ship engine-out window (49-67 s, noise off/low) | 20/20 | 20/20 |
+
+The same two flights are lost either way (ship seed 17 at low noise and
+seed 24 at high: they hit the tower), with the same propellant left: in
+still air the wind guidance flies is zero (D-046). Single seeds per
+cell: not a statistical claim.
+
+**Controllers alone** (unit tests, the shared model as the truth, no
+noise): the booster's descent in a 15 m/s crosswind, largest sideways
+error on the way down 17.6 m without the estimate, 7.8 m with it (both
+arrive within 3 m); the ship over the arms in a 10 m/s wind, mean
+distance from the axis in the second 10 s 1.81 m without, 1.04 m with.
+Tried and removed: a belly-flop roll against a crosswind (no effect, see
+above) and a belly-flop drift term along the track (3 m worse).
+
+### The final approach (M4.2)
+
+`approach_board` (`--ignored`, 2026-11-19, same build, wind awareness
+on): the boards of the wind section, the terminal controller with its
+old stop-and-wait and with the glide (D-047). Mean over the caught
+flights of the time from the gate to the catch and of the contact speeds.
+
+| Board | Stop-and-wait | Glide |
+| --- | --- | --- |
+| Ship nominal (12) | 12/12 · 11.4 s · 1.50 down · 0.34 side | 12/12 · 9.1 s · 1.23 · 0.24 |
+| Ship seeds 11-30 (40) | 38/40 · 13.9 s · 1.42 · 0.42 | 38/40 · 10.9 s · 1.25 · 0.31 |
+| Booster seeds 11-30 (40) | 40/40 · 13.1 s · 1.61 · 0.40 | 40/40 · 10.3 s · 1.17 · 0.27 |
+| Ship engine-out window (20) | 20/20 · 11.4 s · 1.46 · 0.31 | 20/20 · 9.9 s · 1.11 · 0.28 |
+
+Speeds in m/s (the catch allows 2 down, 1 sideways). The same two ship
+flights are lost both ways (seed 17 low and seed 24 high: they hit the
+tower before the final approach). Wind sweep with the glide: 146 of 216
+(144 without), no fewer at any wind speed. The navigation filter's
+horizontal error in the final approach (`nav_error_by_noise`): ship 0.22
+/ 0.94 m RMS, booster 0.28 / 1.07 m, at low / high noise (seeds 7-9).
+
+### Booster engine-out mid-burn (M4)
+
+`booster_engine_out_board` (`crates/wasm/tests/ship_loop.rs`, ignored,
+threaded; 2026-11-19, Kestrel's solver): the booster loses engines as a
+click on the page does (`fail_engine`, then a plan at once) during its
+13-engine leg (about 25-33 s), noise low, throttle lag 0.3 s, solves
+taking 0.5 s of sim time; failure at 26-33 s in 1 s steps, seeds 7, 11,
+23, 31, 42, frames of 1/60 s and of 1/15 s (the page at sim speed 2 and
+30 fps). 40 flights per cell:
+
+| Engines lost | 60 fps | 15 fps |
+| --- | --- | --- |
+| One outer | 39 | 40 |
+| Two outer | 40 | 38 |
+| Three outer | 40 | 37 |
+| One centre | 39 | 40 |
+
+313 of 320. The case found on the page on 2026-11-18 (two outer at 30 s,
+on Clarabel and the M3 code) was caught in all 10 of its flights; the
+page itself was not flown again for this. The 7 losses (4 out of
+propellant, 3 into the tower) failed at 27 s or 31 s. Traced: the
+booster swings sideways on its last legs (out to 40 m past the gate's
+line and back toward the tower), plans start failing, and it either
+hovers until the tanks are empty or drifts into the mast. The swing is a
+loop of the tracking controller and the solve latency: the controller
+leans further than the plan (15° against a planned 5°), the next plan
+has to start from that lean, and so on. When the swing carries it past
+the keep-out (`x ≥ −1 m`), no plan can exist until it is back out.
+
+Tried and not kept (D-050): a price on sideways speed in the planner
+(316 of 320, 5 flights caught only with it and 2 only without; it hardly
+changed the plans it was meant to fix, so not a fix); the keep-out
+loosened when the start is inside it (302 of 320: the plans it made from
+there were poor, and the brake-to-the-axis fallback did better).
+
+Where the swing starts (traced, D-051): the short leg on the engines left
+after a loss (about 3 s, for a failure at 31 s) ends with the booster
+leaning about 11° and still turning at 14-17°/s, its gimbal at the limit.
+On its last three engines it has about a quarter of the turning authority
+(8.8°/s² against 29°/s² on eleven at minimum throttle), so stopping that
+turn takes about 2 s and 16° more lean (26° seen). Holding the attitude
+on the engines still lit until the turn stopped (below 6°/s) was tried
+and measured against the same build with it off: engine-out board 3
+flights caught only with it and 1 only without (counting each distinct
+flight once); wind sweep booster 1 and 2; approach board booster 0 and
+1; browser sweep 33 of 33 both ways. 4 and 4: no gain, not kept. The
+flights it still lost dropped to their last engines with the turn stopped
+but the lean (13°) still there. Coming upright first on the engines
+still lit was worse: at minimum throttle eleven engines leaning 11-14°
+pushed the booster sideways at about 8 m/s².
+
+### The booster's burn as one plan (M4, D-052)
+
+The booster now plans its landing burn as one: every lit engine, then
+the centre three from a planned node, to the catch gate; and its plans
+turn at most 10°/s. Same build, switch off and on, 2026-11-19 (boards:
+`booster_engine_out_board` 320 flights, `wind_sweep` booster half 108,
+`approach_board` booster row 40, `booster_browser_sweep` 33):
+
+| | Engine-out | Wind sweep booster (0, 5, 10, 15, 20, 25 m/s) | Approach (glide) | Browser |
+| --- | --- | --- | --- | --- |
+| Before | 313 | 86 (18, 17, 16, 14, 16, 5) | 40 | 33 |
+| After | 320 | 99 (18, 18, 18, 18, 16, 11) | 39 | 33 |
+
+Paired on the wind sweep: 15 booster flights caught only after, 2 only
+before. The whole sweep after: 163 of 216 (booster 99, ship 64: 18, 16,
+17, 9, 4, 0, unchanged). The approach board's loss is seed 27, high noise, into the tower.
+The ship's flights are the same flight for flight. The cost: in still
+air the booster's flight takes 67.1 s and lands with 31.1 t of
+propellant, against 61.6 s and 37.0 t (mean of 18). The plan switches to
+three engines higher (about 820 m against 557 m) and comes down slower:
+one time scale stretches both of the plan's phases, so the slow phase is
+a fixed share of the flight. A time scale per phase is open (ROADMAP).
+Parts measured on their own: the turn limit alone was worse in wind (79
+of 108); the one-burn plan at 40°/s, 320, 95, 40, 33. The engine-out
+board above (313) is the code before this change.
+
+### Solve-time benchmark (M4.4, Kestrel's solver flying)
+
+Same method as the M3 benchmark below (native: `bench_solvers`, the
+requests of one recorded flight per vehicle, each solved 5 times per
+solver, median kept), 2026-11-19, same laptop, one run; Kestrel's solver
+with the infeasibility certificate and best-iterate fallback (D-049):
+
+| Requests | Solver | Median | p90 | Max |
+| --- | --- | --- | --- | --- |
+| Booster, 13 | Clarabel | 49.5 ms | 69.3 ms | 70.4 ms |
+| Booster, 13 | Kestrel | 53.6 ms | 75.1 ms | 76.4 ms |
+| Ship, 17 | Clarabel | 35.6 ms | 56.9 ms | 57.9 ms |
+| Ship, 17 | Kestrel | 31.5 ms | 49.6 ms | 53.4 ms |
+
+All solved by both. In the browser (`E2E_BASE_URL=http://localhost:3000
+PW_GPU=1 npx playwright test e2e/measure.spec.ts`, dev build, headless
+Chromium 158, integrated GPU, one flight each): booster caught, 14 plans,
+median 217 ms, p90 432 ms, max 601 ms; ship caught, 14 plans, median
+173 ms, p90 452 ms, max 729 ms. Single runs on a different day from the
+M3 table: not a statistical claim, and not a like-for-like comparison
+with it. The 3-DoF closed-loop tests (`closed_loop`) took 53 s on
+Kestrel's solver against 85-90 s on Clarabel the same day.
 
 ### Solve-time benchmark (M3, both solvers)
 

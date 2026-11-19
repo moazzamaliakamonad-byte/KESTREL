@@ -3,7 +3,7 @@
 Status: approved by the owner's standing delegation (decisions are
 reported, not gated). Simulation only.
 
-## What the owner asked for (2026-11-15), in order
+## Requirements (2026-11-15), in order
 
 1. The **Super Heavy booster**, as realistic as a simulation can be: its
    return (falls engines-first, steers with grid fins, landing burn on 13

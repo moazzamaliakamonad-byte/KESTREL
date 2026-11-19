@@ -7,7 +7,7 @@
 
 import type { PlanDraw, ShipSnapshot } from "./types";
 
-export type DecisionKind = "phase" | "ignition" | "plan" | "plan-failed" | "engines" | "failure" | "relight" | "arms" | "outcome" | "event";
+export type DecisionKind = "phase" | "ignition" | "plan" | "plan-failed" | "engines" | "failure" | "relight" | "arms" | "outcome" | "event" | "wind" | "gust" | "approach";
 
 export interface Decision {
   /** Sim time, s. */
@@ -31,6 +31,85 @@ const PHASE_WHY: Record<string, [string, string]> = {
   terminal: ["Final approach", "The plan reached its gate above the arms: the terminal controller flies the last metres onto them."],
 };
 
+const FROM = ["the sea (+x)", "the north-east", "the north (+y)", "the north-west", "the tower side (−x)", "the south-west", "the south (−y)", "the south-east"];
+
+/** A wind (the air's velocity, x and y) in words: its speed and where it comes from. */
+export function windWords(w: readonly [number, number] | readonly number[]): string {
+  const speed = Math.hypot(w[0], w[1]);
+  if (speed < 0.5) return "calm";
+  // It comes from the opposite of where it blows.
+  const deg = (Math.atan2(-w[1], -w[0]) * 180) / Math.PI;
+  return `${n(speed)} m/s from ${FROM[Math.round((((deg % 360) + 360) % 360) / 45) % 8]}`;
+}
+
+/** The gate turned about the catch axis to the flight's approach bearing (rad; 0: the +x side). */
+export function gateAt(gate: readonly [number, number, number] | readonly number[], bearing: number): [number, number, number] {
+  if (bearing === 0) return [gate[0], gate[1], gate[2]];
+  const c = Math.cos(bearing);
+  const s = Math.sin(bearing);
+  return [c * gate[0] - s * gate[1], s * gate[0] + c * gate[1], gate[2]];
+}
+
+/** Guidance's wind for a readout: "estimating…", "12.0 m/s ±0.4", "· flown as calm" within 2σ of calm, "(not used)" when switched off. */
+export function windReadout(s: Pick<ShipSnapshot, "wind_est" | "wind_sigma" | "wind_aware">): string {
+  const sigma = Math.max(s.wind_sigma[0], s.wind_sigma[1]);
+  const speed = Math.hypot(s.wind_est[0], s.wind_est[1]);
+  if (!(sigma < WIND_SETTLED)) return s.wind_aware ? "estimating…" : "estimating… (not used)";
+  const text = `${n(speed, 1)} m/s ±${n(sigma, 1)}`;
+  if (!s.wind_aware) return `${text} (not used)`;
+  // Guidance flies only a wind it can tell from calm (beyond 2σ; guidance::wind::SIGNIFICANT).
+  return speed < 2 * sigma ? `${text} · flown as calm` : text;
+}
+
+/** The estimate counts as settled once its 1σ is below this, m/s. */
+export const WIND_SETTLED = 2;
+/** A gust: the estimate moves more than GUST_JUMP m/s within GUST_WINDOW s; at most one entry per GUST_GAP s. */
+export const GUST_JUMP = 4;
+export const GUST_WINDOW = 3;
+export const GUST_GAP = 4;
+
+/** Watches guidance's wind estimate and records when it settles and when it feels a gust (D-046). */
+export class WindWatch {
+  private settled = false;
+  private samples: { t: number; w: [number, number] }[] = [];
+  private lastGust = -Infinity;
+
+  update(s: ShipSnapshot): Decision[] {
+    const sigma = Math.max(s.wind_sigma[0], s.wind_sigma[1]);
+    const truth: [string, string] = ["True wind (the simulator's; guidance does not know it)", windWords([s.wind[0], s.wind[1]])];
+    if (!this.settled) {
+      if (!(sigma < WIND_SETTLED)) return [];
+      this.settled = true;
+      this.samples = [{ t: s.t, w: s.wind_est }];
+      return [
+        {
+          t: s.t,
+          kind: "wind",
+          title: `Wind estimated: ${windWords(s.wind_est)}`,
+          why: "The accelerometers' force, less gravity and the engines' thrust, is the air's push; the wind that explains it is now known to within 2 m/s. Guidance plans and steers with it from here.",
+          facts: [["Uncertainty (1σ)", `±${n(sigma, 1)} m/s`], truth, ["Used by guidance", s.wind_aware ? "yes" : "no (switched off)"]],
+        },
+      ];
+    }
+    this.samples = this.samples.filter((p) => s.t - p.t <= GUST_WINDOW);
+    this.samples.push({ t: s.t, w: s.wind_est });
+    if (s.t - this.lastGust < GUST_GAP) return [];
+    const jump = Math.max(...this.samples.map((p) => Math.hypot(s.wind_est[0] - p.w[0], s.wind_est[1] - p.w[1])));
+    if (!(jump > GUST_JUMP)) return [];
+    this.lastGust = s.t;
+    this.samples = [{ t: s.t, w: s.wind_est }];
+    return [
+      {
+        t: s.t,
+        kind: "gust",
+        title: `Gust felt: ${n(jump)} m/s change`,
+        why: "The air's push changed faster than a steady wind would: the estimate follows the gust, and the next plan flies in it.",
+        facts: [["Wind now (estimated)", windWords(s.wind_est)], truth],
+      },
+    ];
+  }
+}
+
 /** What changed between two consecutive snapshots that is worth recording. */
 export function decisionsBetween(prev: ShipSnapshot | null, next: ShipSnapshot): Decision[] {
   const out: Decision[] = [];
@@ -50,6 +129,16 @@ export function decisionsBetween(prev: ShipSnapshot | null, next: ShipSnapshot):
       facts: [...base(next), ["Ignition altitude (rule)", `${n(next.ignition_z)} m`]],
     });
     return out;
+  }
+  if (next.bearing_chosen && !prev.bearing_chosen && next.bearing !== 0) {
+    const deg = Math.round(Math.abs((next.bearing * 180) / Math.PI));
+    out.push({
+      t: next.t,
+      kind: "approach",
+      title: `Approach turned ${deg}° toward ${next.bearing < 0 ? "−y" : "+y"}`,
+      why: "The wind carries the ship across its approach farther than the landing burn can take up, and in the belly flop it can only slide along its nose: the approach now comes from where the fall is taking it.",
+      facts: [...base(next), ["Bearing", `${n((next.bearing * 180) / Math.PI, 1)}° from the sea side (+x)`]],
+    });
   }
   if (next.phase !== prev.phase && PHASE_WHY[next.phase]) {
     const [title, why] = PHASE_WHY[next.phase];

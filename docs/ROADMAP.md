@@ -54,7 +54,7 @@ Goal: the demo that spreads.
 
 ## M3 — 6-DoF vehicles and flight-style solver
 
-Goal (owner, 2026-11-15): a Starship-class simulation, as realistic as a
+Goal (2026-11-15): a Starship-class simulation, as realistic as a
 simulation can be, on one page with a mission-control interface.
 
 - [x] 6-DoF rigid body with aerodynamics (`kestrel-model`, `sim::ship`)
@@ -100,12 +100,64 @@ simulation can be, on one page with a mission-control interface.
       entry from 120 km and 7.5 km/s on a round Earth, tiles that can
       burn through, hand-over to the landing (D-042)
 - [x] Custom solver: no heap allocation in the loop, bounded iterations
-      (`crates/socp`; a choice on the page; Clarabel stays the default,
-      D-041)
+      (`crates/socp`; a choice on the page; Clarabel stayed the default,
+      D-041; since M4.4 the only solver that flies, D-049)
 - [x] Published benchmark of solve times, both solvers, native and in
       the browser (LIMITATIONS.md, method stated)
 - [x] Update the end-to-end tests and the demo recording for the new page
 - [x] `learn/` chapter for M3 (local only)
+
+## M4 — Smarter guidance
+
+Goal (2026-11-18): smarter guidance: the last approach looked scripted,
+every flight fell the same way, and it did not react to wind. And Kestrel's own solver must be the one that flies.
+Four sub-projects, each with its own spec, plan and measurement.
+
+- [x] **4.1 Wind awareness** (D-046): guidance estimates the wind in flight
+      from what it senses and plans, steers and predicts with it
+  - [x] Wind filter (`guidance::wind`): a 2-state Kalman filter on the
+        air's force (accelerometers, engine telemetry, surface positions)
+  - [x] The planner, the controllers and the predictions use it; with no
+        wind known guidance is exactly the old one
+  - [x] The page: telemetry, analysis-view arrows beside the true wind,
+        flight-record entries, an on/off switch
+  - [x] Wind sweep before/after: 110 → 144 flights of 216 caught
+  - [x] The robustness boards on/off on the same build (LIMITATIONS.md)
+  - [x] `learn/` chapter (local only)
+- [x] **4.2 The final approach without the stop-and-wait** (D-047): a
+      planned, re-planned approach onto the arms was built (Kestrel's
+      own solver, mast keep-out for base and nose) and **lost on every
+      board**, so it is an option, off; instead the terminal controller
+      glides onto the arms in one movement: same catches, 2-3 s quicker,
+      a quarter softer at contact
+- [x] **4.3 A chosen approach** (D-048): the ship turns its whole
+      approach (gate, aim, belly heading, keep-out) toward where a
+      crosswind carries it, within 60° of the arms' open side; 15 m/s
+      crosswinds caught 11 of 18 (5 before); still air unchanged
+- [x] **4.4 Kestrel's own solver flies** (D-049): the only solver in the
+      page (Clarabel only in tests and the benchmark); infeasibility
+      certificate and best-iterate fallback; the 3-DoF guidance ported;
+      boards measured the same (glide board flight for flight, sweep 150
+      against Clarabel's 152)
+- [x] Booster engine-out mid-burn, measured (D-050): the case found on
+      the page (two outer engines lost at 30 s) is caught in all 10
+      flights of a 320-flight board; 313 of 320 in all (one to three
+      outer engines or a centre one, lost at 26-33 s)
+- [x] The booster's sideways swing on its last legs, traced (D-051): a
+      short leg after an engine loss ends leaning and turning, and three
+      engines cannot stop the turn in time; holding the attitude until
+      the turn stopped measured 4 flights gained and 4 lost over four
+      boards, so not kept. Open: a leg that short cannot be flown upright
+      by the time it ends (the plan's attitude is right; the vehicle lags
+      it with the gimbal at its limit); fixed by D-052
+- [x] **The booster's burn as one plan** (D-052): every lit engine, then
+      the centre three from a planned node, to the catch gate, as the real
+      booster drops from 13 to 3 within one burn; booster plans turn at most
+      10°/s (what it can follow). Engine-out board 320 of 320 (313),
+      wind sweep booster 99 of 108 (86); cost: the still-air flight 5.5 s
+      longer, 6 t more propellant
+- [ ] A time scale per phase in the planner (one scale stretches both
+      today, so the one-burn plan switches high and slow)
 
 ## Publishing on GitHub
 
@@ -119,7 +171,7 @@ Not a milestone: getting the finished project public (D-045).
 - [x] History kept as it is (owner's call: the commit email and the
       two early commits that hold `CLAUDE.md` may be public)
 - [ ] Repository created and pushed; Pages source set to "GitHub Actions"
-- [ ] Live link and CI badge at the top of the README; `repository` in
+- [x] Live link and CI badge at the top of the README; `repository` in
       `Cargo.toml`
 
 ## Change log
@@ -149,3 +201,16 @@ Not a milestone: getting the finished project public (D-045).
   (D-044); the opening sequence stays an illustration.
 - 2026-11-18 — Prepared for GitHub: CI and a GitHub Pages deploy, clippy
   clean, the agent's rules file kept local (D-045).
+- 2026-11-18 — M4 begun: smarter guidance, four sub-projects. 4.1 wind
+  awareness done (D-046).
+- 2026-11-19 — 4.2 done: the glide onto the arms (D-047); the planned
+  approach measured worse and kept as an option.
+- 2026-11-19 — 4.3 done: the ship chooses its approach bearing (D-048);
+  wind sweep 152 of 216.
+- 2026-11-19 — 4.4 done: Kestrel's own solver is the only one that flies
+  (D-049).
+- 2026-11-19 — Booster engine-out mid-burn measured: 313 of 320 (D-050).
+- 2026-11-19 — The booster's sideways swing traced to the engine
+  hand-over; a fix measured, no gain, not kept (D-051).
+- 2026-11-19 — The booster plans its burn as one, engine switch inside
+  (D-052): engine-out board 320 of 320, wind sweep booster 99 of 108.

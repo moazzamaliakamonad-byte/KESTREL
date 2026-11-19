@@ -8,6 +8,7 @@ import * as THREE from "three";
 import { quatToScene, rotate, toScene, type Vec3 } from "@/lib/ship/frames";
 import { shipLive } from "@/lib/ship/live";
 import { partsOf } from "@/lib/ship/parts";
+import { gateAt, windReadout } from "@/lib/ship/record";
 import { analysisOn, useShip } from "@/lib/ship/store";
 import { skin } from "./Blueprint";
 
@@ -61,7 +62,7 @@ function setArrow(a: Arrow, origin: THREE.Vector3, vec: Vec3, length: number, w:
 }
 
 const fmt = (x: number, d = 0) => x.toFixed(d);
-const VECTORS = ["velocity", "thrust", "aero", "weight"] as const;
+const VECTORS = ["velocity", "thrust", "aero", "weight", "windEst", "windTrue"] as const;
 const noRay = () => {};
 
 export function Analysis() {
@@ -78,6 +79,9 @@ export function Analysis() {
       thrust: makeArrow("#ff9a2e"),
       aero: makeArrow("#ff4fc8"),
       weight: makeArrow("#ffffff"),
+      // Guidance's wind estimate, and the simulator's true wind beside it.
+      windEst: makeArrow("#9dffb0"),
+      windTrue: makeArrow("#8a96a8"),
     }),
     [],
   );
@@ -93,6 +97,8 @@ export function Analysis() {
     thrust: { g: null, el: null },
     aero: { g: null, el: null },
     weight: { g: null, el: null },
+    windEst: { g: null, el: null },
+    windTrue: { g: null, el: null },
     tilt: { g: null, el: null },
     gate: { g: null, el: null },
   });
@@ -125,6 +131,15 @@ export function Analysis() {
     setArrow(arrows.thrust, base, toScene(s.thrust_inertial), s.thrust_mag * forceScale, w * 1.3, whole || st.view.part === "engines");
     setArrow(arrows.aero, cm, toScene(s.aero_force), Math.hypot(...s.aero_force) * forceScale, w * 1.3, whole || st.view.part === "shield");
     setArrow(arrows.weight, cm, [0, -1, 0], s.weight * forceScale, w, whole || st.view.part === "tanks");
+    // The wind as guidance believes it, and as it is (horizontal, to one scale).
+    // Drawn from just above and just below the centre of mass, so the two
+    // labels can be read when the estimate is close to the truth.
+    const windScale = unit * 0.028;
+    const est: Vec3 = [s.wind_est[0], s.wind_est[1], 0];
+    const above = cm.clone().add(new THREE.Vector3(0, unit * 0.09, 0));
+    const below = cm.clone().add(new THREE.Vector3(0, -unit * 0.09, 0));
+    setArrow(arrows.windEst, above, toScene(est), Math.hypot(...est) * windScale, w * 1.1, whole);
+    setArrow(arrows.windTrue, below, toScene(s.wind), Math.hypot(s.wind[0], s.wind[1]) * windScale, w * 0.7, whole);
 
     // The body axis and the vertical through the centre of mass.
     const up = new THREE.Vector3(...toScene(rotate(s.quat, [0, 0, 1])));
@@ -148,7 +163,7 @@ export function Analysis() {
     }
     if (gate.current) {
       gate.current.visible = whole;
-      gate.current.position.set(...toScene(info.gate));
+      gate.current.position.set(...toScene(gateAt(info.gate, s.bearing)));
       gate.current.scale.setScalar(Math.max(1, camera.position.distanceTo(gate.current.position) * 0.012));
     }
     if (ignition.current) {
@@ -183,7 +198,7 @@ export function Analysis() {
       if (L[key].el) L[key].el!.style.display = arrows[key].group.visible ? "" : "none";
     }
     L.tilt.g?.position.copy(cm).addScaledVector(up, info.ship.length * 0.8);
-    L.gate.g?.position.set(...toScene(info.gate));
+    L.gate.g?.position.set(...toScene(gateAt(info.gate, s.bearing)));
     if (L.tilt.el) L.tilt.el.style.display = whole ? "" : "none";
     if (L.gate.el) L.gate.el.style.display = whole ? "" : "none";
     frame.current += 1;
@@ -196,8 +211,11 @@ export function Analysis() {
       set("thrust", `<b>T</b> ${fmt(s.thrust_mag / 1e6, 2)} MN · δ ${fmt(s.gimbal_deg, 1)}°`);
       set("aero", `<b>F<sub>aero</sub></b> ${fmt(Math.hypot(...s.aero_force) / 1e6, 2)} MN · q ${fmt(s.q_dyn / 1000, 1)} kPa`);
       set("weight", `<b>m·g</b> ${fmt(s.weight / 1e6, 2)} MN · m ${fmt(s.mass / 1000, 0)} t`);
+      set("windEst", `<b>wind</b> ${windReadout(s)} · guidance's estimate`);
+      set("windTrue", `true ${fmt(Math.hypot(s.wind[0], s.wind[1]), 1)} m/s · not known to guidance`);
       set("tilt", `<b>θ</b> ${fmt(s.tilt_deg, 1)}° · |ω| ${fmt((Math.hypot(...s.omega) * 180) / Math.PI, 1)}°/s`);
-      set("gate", `<b>gate</b> ${fmt(Math.hypot(s.position[0] - info.gate[0], s.position[1] - info.gate[1], s.position[2] - info.gate[2]))} m`);
+      const g = gateAt(info.gate, s.bearing);
+      set("gate", `<b>gate</b> ${fmt(Math.hypot(s.position[0] - g[0], s.position[1] - g[1], s.position[2] - g[2]))} m`);
     }
   });
 
@@ -218,6 +236,8 @@ export function Analysis() {
       <primitive object={arrows.thrust.group} />
       <primitive object={arrows.aero.group} />
       <primitive object={arrows.weight.group} />
+      <primitive object={arrows.windEst.group} />
+      <primitive object={arrows.windTrue.group} />
       <mesh ref={axis} renderOrder={29} raycast={noRay}>
         <cylinderGeometry args={[1, 1, 1, 6]} />
         <meshBasicMaterial {...line} opacity={0.5} />
@@ -252,6 +272,8 @@ export function Analysis() {
       {label("thrust")}
       {label("aero")}
       {label("weight")}
+      {label("windEst")}
+      {label("windTrue")}
       {label("tilt")}
       {label("gate")}
       {parts.map((p, i) => (

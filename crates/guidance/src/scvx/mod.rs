@@ -79,7 +79,21 @@ pub struct ShipProblem {
     /// Sideways speed limit: m/s at the gate's height, and more per metre above.
     pub side_speed: (f64, f64),
     pub nodes: usize,
+    /// Steady wind the plan flies in, inertial, m/s (guidance's estimate,
+    /// D-046; zero: still air).
+    pub wind: Vec3,
+    /// First guess of the flight time, s (None: [`cold_time_guess`], which
+    /// assumes the first thrust range throughout).
+    pub time_guess: Option<f64>,
+    /// Largest planned body rate, rad/s.
+    pub omega_max: f64,
 }
+
+/// The booster's largest planned body rate when it plans its burn as one
+/// (rad/s, 10°/s): what it can follow. At the ship's 40°/s its plans asked
+/// for turns its gimbal (30°/s slew) and attitude loop delivered half a
+/// second late, 5-7° behind the plan (M4, D-052).
+pub const BOOSTER_OMEGA_MAX: f64 = 0.174_532_925_199_432_95;
 
 /// The booster's largest planned tilt in the landing burn, rad (15°,
 /// *illustrative*). Without it the optimizer turns the booster broadside
@@ -116,6 +130,9 @@ impl ShipProblem {
             approach: (APPROACH_RADIUS, APPROACH_TAN),
             side_speed: (SIDE_SPEED_0, SIDE_SPEED_SLOPE),
             nodes,
+            wind: [0.0; 3],
+            time_guess: None,
+            omega_max: OMEGA_MAX,
         }
     }
 
@@ -235,7 +252,7 @@ fn cold_reference(p: &ShipProblem) -> (Vec<State>, Vec<Vec3>, f64) {
     let g = scn.planet.gravity();
     let r0 = dynamics::position(&x0);
     let v0 = dynamics::velocity(&x0);
-    let tf = cold_time_guess(p);
+    let tf = p.time_guess.unwrap_or_else(|| cold_time_guess(p));
     let q0 = dynamics::attitude(&x0);
     let qf = upright_like(q0);
     let k = p.nodes;
@@ -313,7 +330,7 @@ pub fn plan_ship(
     let mut converged = false;
     for it in 1..=max_iter {
         iterations = it;
-        let ivs = discretize::discretize(scn, &units, &xs, &us, sigma, SUBSTEPS);
+        let ivs = discretize::discretize(scn, p.wind, &units, &xs, &us, sigma, SUBSTEPS);
         let sub = subproblem::solve(&subproblem::Sub {
             xs: &xs,
             us: &us,
@@ -325,9 +342,10 @@ pub fn plan_ship(
             m_dry: scn.dry_mass / units.m,
             t_bounds: &t_bounds,
             tan_gimbal: scn.ship.gimbal_max.tan(),
-            w_max: OMEGA_MAX * units.t,
+            w_max: p.omega_max * units.t,
             floor_z: scn.floor_z / units.l,
             clearance_x: scn.clearance_x.map(|c| c / units.l),
+            clearance_dir: scn.approach_dir(),
             approach: (p.approach.0 / units.l, p.approach.1),
             // Upright before dropping to one engine (the flip is done on all
             // of them), else for the last part of the burn.
@@ -389,7 +407,7 @@ pub fn plan_ship(
     }
 
     // Accept only what the nonlinear dynamics agree with.
-    let flown = discretize::propagate(scn, &units, &x0, &us, sigma, 10);
+    let flown = discretize::propagate(scn, p.wind, &units, &x0, &us, sigma, 10);
     let end = units.x_si(flown.last().expect("nodes"));
     let gate_error = quat::norm(quat::sub(dynamics::position(&end), scn.gate));
     // Near the gate a miss of tens of metres is no plan at all: the

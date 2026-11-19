@@ -1,6 +1,5 @@
-//! Solve the landing SOCP with Clarabel and convert the answer back to SI.
-
-use clarabel::solver::{DefaultSettings, DefaultSolver, IPSolver, SolverStatus};
+//! Solve the landing SOCP with Kestrel's own solver (`crates/socp`) and
+//! convert the answer back to SI.
 
 use crate::params::Vec3;
 use crate::problem::{GuidanceError, LandingProblem, Trajectory};
@@ -95,11 +94,20 @@ pub(crate) fn solve_counted(
             }
         }
     }
-    // Apply the propellant limit at the best time found.
-    let solves = search.solves + 1;
-    let result = search
-        .finish()
-        .and_then(|best| solve_fixed_time(problem, best.final_time));
+    // Apply the propellant limit at the best time found. The search left
+    // out only `final mass ≥ dry mass`, so the limited problem there is
+    // feasible exactly when the most mass left (the search's best) is above
+    // the dry mass: decided here, not by asking the solver to prove a
+    // marginal infeasibility (an infeasible-start method cannot, D-049).
+    let mut solves = search.solves;
+    let dry = problem.vehicle.dry_mass;
+    let result = search.finish().and_then(|best| {
+        if best.mass.last().is_some_and(|&m| m < dry) {
+            return Err(GuidanceError::Infeasible);
+        }
+        solves += 1;
+        solve_fixed_time(problem, best.final_time)
+    });
     (result, solves)
 }
 
@@ -183,6 +191,9 @@ enum DryMass {
     Ignore,
 }
 
+/// Most interior-point iterations per landing SOCP.
+const IPM_ITERATIONS: usize = 100;
+
 /// Relative gap between thrust paid for (σ) and delivered (‖u‖) above which
 /// the relaxation counts as loose.
 const LOSSLESS_TOLERANCE: f64 = 1e-4;
@@ -194,20 +205,19 @@ fn solve_at(
     target: Target,
 ) -> Result<Trajectory, GuidanceError> {
     let s = socp::build_with(problem, final_time, matches!(dry, DryMass::Enforce), target)?;
-    let settings = DefaultSettings {
-        verbose: false,
+    let settings = ::socp::Settings {
+        max_iter: IPM_ITERATIONS,
         ..Default::default()
     };
-    let mut solver = DefaultSolver::new(&s.p, &s.q, &s.a, &s.b, &s.cones, settings)
-        .map_err(|e| GuidanceError::SolverFailed(format!("setup: {e:?}")))?;
-    solver.solve();
-    match solver.solution.status {
-        SolverStatus::Solved => {
-            let x = &solver.solution.x;
+    let mut solver = ::socp::Solver::new(&s.p, &s.q, &s.a, &s.b, &s.cones, settings)
+        .map_err(|e| GuidanceError::SolverFailed(format!("setup: {e}")))?;
+    match solver.solve() {
+        ::socp::Status::Solved => {
+            let x = solver.x();
             check_lossless(&s, x)?;
             Ok(to_trajectory(problem, &s, x))
         }
-        SolverStatus::PrimalInfeasible | SolverStatus::AlmostPrimalInfeasible => {
+        ::socp::Status::PrimalInfeasible | ::socp::Status::Diverged => {
             Err(GuidanceError::Infeasible)
         }
         other => Err(GuidanceError::SolverFailed(format!("{other:?}"))),

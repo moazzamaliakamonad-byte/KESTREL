@@ -1,4 +1,5 @@
-//! One convex subproblem of successive convexification, as a Clarabel SOCP.
+//! One convex subproblem of successive convexification, as an SOCP for
+//! Kestrel's own solver (`crates/socp`).
 //!
 //! Variables (non-dimensional), for K nodes:
 //! `x_k` (14 each), `u_k` (3 each), `σ`, virtual control `ν_k` (14 per
@@ -8,8 +9,6 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use clarabel::algebra::CscMatrix;
-use clarabel::solver::{DefaultSettings, DefaultSolver, IPSolver, SolverStatus, SupportedConeT};
 use model::dynamics::{M, Q, R, V, W};
 use model::{State, Vec3};
 
@@ -32,6 +31,9 @@ pub struct Sub<'a> {
     pub w_max: f64,
     pub floor_z: f64,
     pub clearance_x: Option<f64>,
+    /// Direction the approach comes from (the keep-out is `dir · r ≥
+    /// clearance_x`; (1, 0) for the +x approach, M4.3).
+    pub clearance_dir: [f64; 2],
     /// Approach cone around the gate axis: horizontal distance
     /// `≤ r0 + tan_gamma · (z − gate_z)` at every node after the first.
     pub approach: (f64, f64),
@@ -107,41 +109,48 @@ impl Block {
 /// Which interior-point solver answers the subproblems.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
-    /// `kestrel-socp`: allocation-free iterations, bounded iteration count.
+    /// `kestrel-socp`, Kestrel's own: what flies.
     Kestrel,
-    /// Clarabel, the reference.
+    /// Clarabel, the reference (tests and benchmarks only: the
+    /// `reference-solver` feature).
+    #[cfg(feature = "reference-solver")]
     Clarabel,
 }
 
-/// 0: not chosen yet (read `KESTREL_SOLVER` once), 1: Clarabel, 2: Kestrel.
-static BACKEND: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+thread_local! {
+    /// 0: not chosen yet, 1: Clarabel, 2: Kestrel. Per thread, so a test
+    /// flying on the reference solver leaves the others alone.
+    static BACKEND: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
 
-/// The solver answering subproblems: Clarabel by default (faster on the
-/// booster's plans, D-041); `set_backend` or `KESTREL_SOLVER=kestrel`
-/// (native) chooses Kestrel's own.
+/// The solver answering subproblems on this thread: Kestrel's own (D-049).
+/// With the `reference-solver` feature, `set_backend` or
+/// `KESTREL_SOLVER=clarabel` chooses Clarabel instead, for comparisons.
 pub fn backend() -> Backend {
-    use std::sync::atomic::Ordering;
-    match BACKEND.load(Ordering::Relaxed) {
+    match BACKEND.with(|b| b.get()) {
+        #[cfg(feature = "reference-solver")]
         1 => Backend::Clarabel,
         2 => Backend::Kestrel,
         _ => {
-            let b = match std::env::var("KESTREL_SOLVER").as_deref() {
-                Ok("kestrel") => Backend::Kestrel,
-                _ => Backend::Clarabel,
-            };
-            set_backend(b);
-            b
+            #[cfg(feature = "reference-solver")]
+            if std::env::var("KESTREL_SOLVER").as_deref() == Ok("clarabel") {
+                set_backend(Backend::Clarabel);
+                return Backend::Clarabel;
+            }
+            set_backend(Backend::Kestrel);
+            Backend::Kestrel
         }
     }
 }
 
-/// Choose the solver for every later subproblem (this process / worker).
+/// Choose the solver for every later subproblem on this thread.
 pub fn set_backend(b: Backend) {
     let v = match b {
+        #[cfg(feature = "reference-solver")]
         Backend::Clarabel => 1,
         Backend::Kestrel => 2,
     };
-    BACKEND.store(v, std::sync::atomic::Ordering::Relaxed);
+    BACKEND.with(|b| b.set(v));
 }
 
 /// Most interior-point iterations per subproblem with `kestrel-socp`; with
@@ -210,8 +219,12 @@ fn solve_kestrel(
             );
         }
         match st {
-            socp::Status::Solved => Ok(s.x().to_vec()),
-            socp::Status::Diverged => Err(GuidanceError::Infeasible),
+            // As with Clarabel's AlmostSolved: the best iterate within the
+            // reduced tolerances (precision ran out near the optimum).
+            socp::Status::Solved | socp::Status::AlmostSolved => Ok(s.x().to_vec()),
+            socp::Status::Diverged | socp::Status::PrimalInfeasible => {
+                Err(GuidanceError::Infeasible)
+            }
             other => Err(GuidanceError::SolverFailed(format!("{other:?}"))),
         }
     })
@@ -277,7 +290,15 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
             nonneg.push(vec![(l.x(m, R + 2), 1.0)], -p.floor_z);
         }
         if let Some(cx) = p.clearance_x {
-            nonneg.push(vec![(l.x(m, R), 1.0)], -cx);
+            // (At bearing 0 exactly the old row, so the old plans are
+            // unchanged bit for bit.)
+            let d = p.clearance_dir;
+            let row = if d[1] == 0.0 {
+                vec![(l.x(m, R), d[0])]
+            } else {
+                vec![(l.x(m, R), d[0]), (l.x(m, R + 1), d[1])]
+            };
+            nonneg.push(row, -cx);
         }
         // Lower thrust bound, linearized around the reference direction.
         let ub = p.us[m];
@@ -413,26 +434,16 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
         }
     };
     emit(&zero, &mut ri, &mut ci, &mut vv, &mut bv);
-    cones.push(SupportedConeT::ZeroConeT(zero.rows.len()));
+    cones.push(socp::Cone::Zero(zero.rows.len()));
     emit(&nonneg, &mut ri, &mut ci, &mut vv, &mut bv);
-    cones.push(SupportedConeT::NonnegativeConeT(nonneg.rows.len()));
+    cones.push(socp::Cone::Nonneg(nonneg.rows.len()));
     for b in &socs {
         emit(b, &mut ri, &mut ci, &mut vv, &mut bv);
-        cones.push(SupportedConeT::SecondOrderConeT(b.rows.len()));
+        cones.push(socp::Cone::Soc(b.rows.len()));
     }
     let x = match backend() {
         Backend::Kestrel => {
             let a = socp::Csc::from_triplets(bv.len(), n, &ri, &ci, &vv);
-            let clarabel_cones = &cones;
-            let cones: Vec<socp::Cone> = cones
-                .iter()
-                .map(|c| match c {
-                    SupportedConeT::ZeroConeT(k) => socp::Cone::Zero(*k),
-                    SupportedConeT::NonnegativeConeT(k) => socp::Cone::Nonneg(*k),
-                    SupportedConeT::SecondOrderConeT(k) => socp::Cone::Soc(*k),
-                    _ => unreachable!("only these cones are built"),
-                })
-                .collect();
             let settings = socp::Settings {
                 max_iter: IPM_ITERATIONS,
                 tol_feas: p.tolerance,
@@ -442,42 +453,25 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
                 ..Default::default()
             };
             let mine = solve_kestrel(&pdiag, &q, &a, &bv, &cones, settings)?;
+            #[cfg(feature = "reference-solver")]
             if std::env::var_os("SOCP_COMPARE").is_some() {
-                let obj = |x: &[f64]| -> f64 {
-                    (0..x.len())
-                        .map(|j| 0.5 * pdiag[j] * x[j] * x[j] + q[j] * x[j])
-                        .sum()
-                };
-                match solve_clarabel(
+                reference::compare(
+                    &mine,
                     n,
-                    pdiag.clone(),
+                    &pdiag,
                     &q,
-                    ri.clone(),
-                    ci.clone(),
-                    vv.clone(),
+                    &ri,
+                    &ci,
+                    &vv,
                     &bv,
-                    clarabel_cones,
+                    &cones,
                     p.tolerance,
-                ) {
-                    Ok(xc) => {
-                        let dx = mine
-                            .iter()
-                            .zip(&xc)
-                            .map(|(u, v)| (u - v).abs())
-                            .fold(0.0, f64::max);
-                        eprintln!(
-                            "compare obj {:.6e} vs {:.6e} (rel {:.1e}) max dx {dx:.1e}",
-                            obj(&mine),
-                            obj(&xc),
-                            (obj(&mine) - obj(&xc)).abs() / (1.0 + obj(&xc).abs())
-                        );
-                    }
-                    Err(e) => eprintln!("compare clarabel {e:?}"),
-                }
+                );
             }
             mine
         }
-        Backend::Clarabel => solve_clarabel(n, pdiag, &q, ri, ci, vv, &bv, &cones, p.tolerance)?,
+        #[cfg(feature = "reference-solver")]
+        Backend::Clarabel => reference::solve(n, pdiag, &q, ri, ci, vv, &bv, &cones, p.tolerance)?,
     };
     let x = &x;
     let xs = (0..k)
@@ -498,38 +492,105 @@ pub fn solve(p: &Sub) -> Result<SubSolution, GuidanceError> {
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn solve_clarabel(
-    n: usize,
-    pdiag: Vec<f64>,
-    q: &[f64],
-    ri: Vec<usize>,
-    ci: Vec<usize>,
-    vv: Vec<f64>,
-    bv: &[f64],
-    cones: &[SupportedConeT<f64>],
-    tolerance: f64,
-) -> Result<Vec<f64>, GuidanceError> {
-    let a = CscMatrix::new_from_triplets(bv.len(), n, ri, ci, vv);
-    let idx: Vec<usize> = (0..n).collect();
-    let pm = CscMatrix::new_from_triplets(n, n, idx.clone(), idx, pdiag);
-    let settings = DefaultSettings {
-        verbose: false,
-        max_iter: 100,
-        tol_gap_abs: tolerance,
-        tol_gap_rel: tolerance,
-        tol_feas: tolerance,
-        tol_ktratio: tolerance.max(1e-6),
-        ..Default::default()
+/// Clarabel, the reference solver (tests and benchmarks only).
+#[cfg(feature = "reference-solver")]
+mod reference {
+    use clarabel::algebra::CscMatrix;
+    use clarabel::solver::{
+        DefaultSettings, DefaultSolver, IPSolver, SolverStatus, SupportedConeT,
     };
-    let mut solver = DefaultSolver::new(&pm, q, &a, bv, cones, settings)
-        .map_err(|e| GuidanceError::SolverFailed(format!("setup: {e:?}")))?;
-    solver.solve();
-    match solver.solution.status {
-        SolverStatus::Solved | SolverStatus::AlmostSolved => Ok(solver.solution.x.clone()),
-        SolverStatus::PrimalInfeasible | SolverStatus::AlmostPrimalInfeasible => {
-            Err(GuidanceError::Infeasible)
+
+    use crate::GuidanceError;
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn solve(
+        n: usize,
+        pdiag: Vec<f64>,
+        q: &[f64],
+        ri: Vec<usize>,
+        ci: Vec<usize>,
+        vv: Vec<f64>,
+        bv: &[f64],
+        cones: &[socp::Cone],
+        tolerance: f64,
+    ) -> Result<Vec<f64>, GuidanceError> {
+        let cones: Vec<SupportedConeT<f64>> = cones
+            .iter()
+            .map(|c| match *c {
+                socp::Cone::Zero(k) => SupportedConeT::ZeroConeT(k),
+                socp::Cone::Nonneg(k) => SupportedConeT::NonnegativeConeT(k),
+                socp::Cone::Soc(k) => SupportedConeT::SecondOrderConeT(k),
+            })
+            .collect();
+        let a = CscMatrix::new_from_triplets(bv.len(), n, ri, ci, vv);
+        let idx: Vec<usize> = (0..n).collect();
+        let pm = CscMatrix::new_from_triplets(n, n, idx.clone(), idx, pdiag);
+        let settings = DefaultSettings {
+            verbose: false,
+            max_iter: 100,
+            tol_gap_abs: tolerance,
+            tol_gap_rel: tolerance,
+            tol_feas: tolerance,
+            tol_ktratio: tolerance.max(1e-6),
+            ..Default::default()
+        };
+        let mut solver = DefaultSolver::new(&pm, q, &a, bv, &cones, settings)
+            .map_err(|e| GuidanceError::SolverFailed(format!("setup: {e:?}")))?;
+        solver.solve();
+        match solver.solution.status {
+            SolverStatus::Solved | SolverStatus::AlmostSolved => Ok(solver.solution.x.clone()),
+            SolverStatus::PrimalInfeasible | SolverStatus::AlmostPrimalInfeasible => {
+                Err(GuidanceError::Infeasible)
+            }
+            other => Err(GuidanceError::SolverFailed(format!("{other:?}"))),
         }
-        other => Err(GuidanceError::SolverFailed(format!("{other:?}"))),
+    }
+
+    /// `SOCP_COMPARE`: print how far Kestrel's answer is from Clarabel's.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn compare(
+        mine: &[f64],
+        n: usize,
+        pdiag: &[f64],
+        q: &[f64],
+        ri: &[usize],
+        ci: &[usize],
+        vv: &[f64],
+        bv: &[f64],
+        cones: &[socp::Cone],
+        tolerance: f64,
+    ) {
+        let obj = |x: &[f64]| -> f64 {
+            (0..x.len())
+                .map(|j| 0.5 * pdiag[j] * x[j] * x[j] + q[j] * x[j])
+                .sum()
+        };
+        let r = solve(
+            n,
+            pdiag.to_vec(),
+            q,
+            ri.to_vec(),
+            ci.to_vec(),
+            vv.to_vec(),
+            bv,
+            cones,
+            tolerance,
+        );
+        match r {
+            Ok(xc) => {
+                let dx = mine
+                    .iter()
+                    .zip(&xc)
+                    .map(|(u, v)| (u - v).abs())
+                    .fold(0.0, f64::max);
+                eprintln!(
+                    "compare obj {:.6e} vs {:.6e} (rel {:.1e}) max dx {dx:.1e}",
+                    obj(mine),
+                    obj(&xc),
+                    (obj(mine) - obj(&xc)).abs() / (1.0 + obj(&xc).abs())
+                );
+            }
+            Err(e) => eprintln!("compare clarabel {e:?}"),
+        }
     }
 }

@@ -49,6 +49,9 @@ struct ConfigDto {
     /// Start from orbit (the ship only).
     #[serde(default)]
     entry: Option<EntryDto>,
+    /// Guidance uses its wind estimate (default true; D-046).
+    #[serde(default)]
+    wind_aware: Option<bool>,
 }
 
 /// An entry from orbit as the page sends it.
@@ -197,6 +200,7 @@ fn config(json: &str) -> Option<ShipFlightConfig> {
             gamma: e.gamma_deg.to_radians(),
             ..Default::default()
         }),
+        wind_aware: c.wind_aware.unwrap_or(true),
         ..base
     })
 }
@@ -254,6 +258,10 @@ struct OptionDto {
     approach: Option<(f64, f64)>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     side_speed: Option<(f64, f64)>,
+    /// The wind the plan flies in (guidance's estimate, D-046); absent:
+    /// still air.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    wind: Option<Vec3>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -343,6 +351,7 @@ fn request_of(kind: Kind, scn: &Scenario, options: &[(Leg, ShipProblem)]) -> Req
                 upright_from: p.upright_from,
                 approach: Some(p.approach),
                 side_speed: Some(p.side_speed),
+                wind: Some(p.wind),
             })
             .collect(),
     }
@@ -398,6 +407,12 @@ fn problems_of(req: RequestDto) -> Option<Vec<(Leg, ShipProblem)>> {
                 }
                 p.side_speed = (a, b);
             }
+            if let Some(w) = o.wind {
+                if !w.iter().all(|c| c.is_finite() && c.abs() <= 100.0) {
+                    return None;
+                }
+                p.wind = w;
+            }
             Some((leg, p))
         })
         .collect()
@@ -431,20 +446,6 @@ fn outcome_str(o: Option<Outcome>) -> (Value, Value) {
         Some(Outcome::Caught) => (json!("caught"), Value::Null),
         Some(Outcome::Crashed(r)) => (json!("crashed"), json!(r.as_str())),
     }
-}
-
-/// Choose the convex solver inside guidance for this worker: "clarabel"
-/// (default) or "kestrel" (`kestrel-socp`, D-041). Returns false for an
-/// unknown name (nothing changes).
-#[wasm_bindgen]
-pub fn set_planner_solver(name: &str) -> bool {
-    let b = match name {
-        "clarabel" => guidance::scvx::Backend::Clarabel,
-        "kestrel" => guidance::scvx::Backend::Kestrel,
-        _ => return false,
-    };
-    guidance::scvx::set_backend(b);
-    true
 }
 
 /// Solve one representative problem (the booster's first landing-burn
@@ -804,6 +805,14 @@ impl ShipFlightJs {
             "entry_summary": entry_summary_json(f),
             "engine_out_margin": f.engine_out_margin(),
         });
+        // Guidance's own view of the air (D-046).
+        let est = f.wind_estimate();
+        out["wind_est"] = json!(est.w);
+        out["wind_sigma"] = json!(est.sigma);
+        out["wind_aware"] = json!(f.wind_aware());
+        // The approach's bearing (M4.3, D-048).
+        out["bearing"] = json!(f.bearing());
+        out["bearing_chosen"] = json!(f.bearing_chosen());
         out["earth_frame"] = f.earth_frame().map_or(
             Value::Null,
             |fr| json!({"site": fr.site, "x": fr.x, "y": fr.y}),
@@ -893,6 +902,34 @@ mod tests {
         assert_eq!(parse(&f.snapshot())["guide"], "plan");
     }
 
+    /// The page's planner runs in a worker: the estimated wind must cross
+    /// that boundary in the request, or the browser plans in still air
+    /// while every native test plans in the wind (found in review).
+    #[test]
+    fn the_estimated_wind_reaches_the_worker() {
+        let windy = r#"{"scenario":"booster","position":[900,0,14000],"velocity":[-30,0,-420],"noise":"low","wind":[0,-15]}"#;
+        let mut f = ShipFlightJs::create(windy).unwrap();
+        while !f.wants_replan() {
+            f.step(0.05);
+            assert!(f.inner.sim().t < 200.0, "never asked for a plan");
+        }
+        let flown = f.inner.air().wind;
+        assert!(flown[1] < -10.0, "flight flies {flown:?}");
+        let req = parse(&f.measure_request());
+        let dto: RequestDto = serde_json::from_value(req["request"].clone()).unwrap();
+        let problems = problems_of(dto).expect("problems");
+        for (_, p) in &problems {
+            assert_eq!(p.wind, flown, "the worker's problem lost the wind");
+        }
+        // A request without the field (an older page) plans in still air.
+        let mut old = req["request"].clone();
+        for o in old["options"].as_array_mut().unwrap() {
+            o.as_object_mut().unwrap().remove("wind");
+        }
+        let dto: RequestDto = serde_json::from_value(old).unwrap();
+        assert_eq!(problems_of(dto).unwrap()[0].1.wind, [0.0; 3]);
+    }
+
     #[test]
     fn booster_config_options_reach_the_flight_and_the_worker() {
         let cfg = r#"{"scenario":"booster","position":[1200,0,14000],"velocity":[-30,0,-420],
@@ -947,5 +984,26 @@ mod tests {
         }
         assert_eq!(s["phase"], "belly-flop");
         assert_eq!(parse(&ship_scenario("mars"))["ok"], false);
+    }
+
+    /// Guidance's wind estimate reaches the page, with its 1-sigma and
+    /// whether guidance uses it; the page can switch that off.
+    #[test]
+    fn snapshot_carries_the_wind_estimate() {
+        let windy = r#"{"scenario":"booster","position":[900,0,14000],"velocity":[-30,0,-420],"noise":"low","wind":[0,-15]}"#;
+        let mut f = ShipFlightJs::create(windy).unwrap();
+        for _ in 0..600 {
+            f.step(1.0 / 60.0);
+        }
+        let s = parse(&f.snapshot());
+        let est = s["wind_est"].as_array().expect("wind_est");
+        assert!((est[1].as_f64().unwrap() + 15.0).abs() < 2.0, "{est:?}");
+        assert!(s["wind_sigma"][0].as_f64().unwrap() < 2.0);
+        assert_eq!(s["wind_aware"], true);
+        assert_eq!(s["bearing"], 0.0);
+        assert_eq!(s["bearing_chosen"], false);
+        let blind = r#"{"scenario":"booster","position":[900,0,14000],"velocity":[-30,0,-420],"wind":[0,-15],"wind_aware":false}"#;
+        let f = ShipFlightJs::create(blind).unwrap();
+        assert_eq!(parse(&f.snapshot())["wind_aware"], false);
     }
 }

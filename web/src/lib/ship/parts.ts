@@ -8,6 +8,7 @@
  */
 
 import { rotateInv, type Vec3 } from "./frames";
+import { gateAt } from "./record";
 import type { PlanDraw, ScenarioInfo, ShipSnapshot, Vehicle } from "./types";
 
 export interface PartDef {
@@ -262,7 +263,8 @@ function avionics(s: ShipSnapshot, info: ScenarioInfo, plan: PlanDraw | null, so
   const fy = s.thrust_inertial[1] + s.aero_force[1];
   const fz = s.thrust_inertial[2] + s.aero_force[2] - s.weight;
   const acc = Math.hypot(fx, fy, fz) / s.mass;
-  const gate = Math.hypot(s.position[0] - info.gate[0], s.position[1] - info.gate[1], s.position[2] - info.gate[2]);
+  const g = gateAt(info.gate, s.bearing ?? 0);
+  const gate = Math.hypot(s.position[0] - g[0], s.position[1] - g[1], s.position[2] - g[2]);
   const left = plan ? Math.max(0, plan.t0 + plan.final_time - s.t) : null;
   return {
     title: "Guidance and attitude",

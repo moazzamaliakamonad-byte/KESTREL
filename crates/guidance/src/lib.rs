@@ -4,6 +4,7 @@
 //!
 //! Simulation only. Not flight software.
 
+pub mod approach;
 pub mod entry;
 pub mod envelope;
 pub mod params;
@@ -15,6 +16,7 @@ pub mod ship_control;
 mod socp;
 mod solve;
 pub mod track;
+pub mod wind;
 
 pub use params::{ParamError, Vec3, Vehicle};
 pub use problem::{GuidanceError, LandingProblem, Trajectory};

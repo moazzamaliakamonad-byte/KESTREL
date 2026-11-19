@@ -52,7 +52,7 @@ Template:
 
 ## D-004 — Small, frequent commits with conventional prefixes
 - Date: 2026-11-11
-- Status: accepted (owner's request)
+- Status: accepted
 - Decision: One logical change per commit. Prefixes: `feat`, `fix`, `docs`,
   `test`, `refactor`, `chore`, `perf`. Docs updated in the same or the next
   commit as the code they describe.
@@ -61,8 +61,8 @@ Template:
 
 ## D-005 — Next.js for the web front end
 - Date: 2026-11-12
-- Status: accepted (owner's choice: "top tier")
-- Context: M1 needs a browser page; the owner preferred Next.js over Vite or plain HTML.
+- Status: accepted
+- Context: M1 needs a browser page; Next.js was chosen over Vite or plain HTML.
 - Decision: Next.js 16 (App Router, TypeScript) with `output: 'export'` (static files, no server).
 - Alternatives: Vite + TypeScript (lighter; equally capable for a client-only app); plain HTML (too manual for M2).
 - Consequences: 3D and WASM must be client components loaded with `ssr: false`; deploys to any static host.
@@ -191,7 +191,7 @@ Template:
 ## D-018 — Three grid fins, not four
 - Date: 2026-11-15
 - Status: accepted
-- Context: the owner's brief said four grid fins. The current (Block 3)
+- Context: the first brief said four grid fins. The current (Block 3)
   vehicle has three in a 90/90/180° arrangement (Wikipedia, read
   2026-11-15); Blocks 1 and 2 had four.
 - Decision: model the current vehicle: three fins at body +y, −y, +x.
@@ -261,7 +261,7 @@ Template:
 ## D-023 — Commentary from a fixed phrase list, rendered once by a neural voice
 - Date: 2026-11-16
 - Status: accepted
-- Context: the browser's built-in speech voices sounded robotic (owner).
+- Context: the browser's built-in speech voices sounded robotic.
 - Decision: every line comes from a finite list (`phrases.ts`); each is
   rendered once to an MP3 clip by Kokoro-82M (Apache-2.0, run locally with
   `kokoro-js`; `web/scripts/make-voice.mjs`) and played back instantly; the
@@ -287,7 +287,7 @@ Template:
 ## D-025 — Mars removed
 - Date: 2026-11-16
 - Status: accepted (supersedes the Mars part of the M3 ship spec)
-- Context: the owner asked for Mars to be removed completely. It also did
+- Context: Mars was out of scope (Earth catches only). It also did
   not work on the page (plans took 2–3 s to solve in the browser and the
   flight ran out of propellant).
 - Decision: the Mars scenario, the legs, the `landed` outcome and the
@@ -301,8 +301,7 @@ Template:
 ## D-026 — A quick final approach: slide in while descending, arms take metres
 - Date: 2026-11-16
 - Status: accepted
-- Context: the owner: close to the tower "it takes so much time to be
-  caught while in real life it is very fast". Measured: about 35 s between
+- Context: the catch took far longer than a real one. Measured: about 35 s between
   the approach gate and the catch for both vehicles. The terminal law
   hovered 20 m up until the axis was within 3 m, then crept to within 1 m
   at a few tenths of a metre per second.
@@ -328,7 +327,7 @@ Template:
 ## D-027 — The ship still drops to one engine right after the flip
 - Date: 2026-11-16
 - Status: accepted for now (open on the roadmap)
-- Context: the owner: the ship "turns down to 1 or 2 engines too quickly".
+- Context: the ship dropped to one or two engines too early.
   Cause: at 870 m and 90 m/s three engines at minimum throttle push a
   nearly empty ship at about 2 g, more than the burn needs, so the first
   plan that fits is the one-engine plan.
@@ -342,9 +341,9 @@ Template:
 ## D-028 — Analysis view: the scene becomes the drawing
 - Date: 2026-11-16
 - Status: accepted (replaces the screen-space "blueprint" filter of D-022's page)
-- Context: the owner wanted everything but the vehicle to disappear, the
-  vehicle as a wireframe blueprint on blue, any part clickable with a zoom,
-  and detailed calculations on the left.
+- Context: the analysis view was to show the vehicle alone, as a
+  wireframe blueprint on blue, any part clickable with a zoom, and
+  detailed calculations on the left.
 - Decision: swap materials in the scene instead of filtering the picture
   (see ARCHITECTURE.md). Per-part numbers use the model's own formulas:
   Rust sends its coefficients with the scenario and `parts.ts` evaluates
@@ -357,8 +356,8 @@ Template:
 ## D-029 — One clock for the countdown
 - Date: 2026-11-16
 - Status: accepted
-- Context: the owner: countdown, counter and voice did not align, and the
-  opening sequence's text came too quickly. The count was one clip
+- Context: countdown, counter and voice did not align, and the opening
+  sequence's text came too quickly. The count was one clip
   ("Five. Four. …") played beside a display dividing 6.5 s by five.
 - Decision: `launchState()` gives the count, the mission clock and the
   engine power from one elapsed time; each number is its own clip, cued on
@@ -378,9 +377,9 @@ Template:
 ## D-031 — Engine-out: relight a spare (supersedes D-027's open question)
 - Date: 2026-11-17
 - Status: accepted
-- Context: the owner asked for the ship to stay on two engines "till the
-  last stages of final approach", and then explained the goal: "if the
-  running engine fails the ship will just fall". Two engines were tried at
+- Context: the goal: a ship whose one running engine fails late should
+  not simply fall. Keeping two engines lit to the last stages was the
+  first idea. Two engines were tried at
   length (D-027 and since): at their 40 % minimum throttle two Raptors push
   a nearly empty ship at about 1.6 times its weight, so they cannot fly the
   slow end of a landing at all; every 2-engine plan near the gate was
@@ -401,7 +400,7 @@ Template:
 ## D-032 — The ship's flip is planned and flown by guidance
 - Date: 2026-11-17
 - Status: accepted (replaces the scripted flip of the M3 ship plan)
-- Context: owner: "starship's guidance don't work until it flips". The flip
+- Context: guidance did not fly the flip. The flip
   was a scripted manoeuvre; guidance planned only from the end of it. The
   M3 build ledger records why: a planned engine switch inside one plan
   "made re-plans infeasible".
@@ -420,8 +419,8 @@ Template:
 ## D-033 — Ship approach: plan to 10 m out, 20 m up (supersedes D-026's gate)
 - Date: 2026-11-17
 - Status: accepted
-- Context: owner: "instead of slide in it should just come in optimised way
-  to the chopsticks". Plans ending on the arms (2 m out, 5 m up) were tried
+- Context: the goal: an optimised approach onto the arms instead of a
+  slide in. Plans ending on the arms (2 m out, 5 m up) were tried
   first and caught 9 of 12 nominal flights: any sideways braking next to
   the tower tilts the ship, and a tilted ship's base swings into the mast
   (5 m from the hull at the catch axis).
@@ -459,7 +458,7 @@ Template:
 ## D-035 — Events ask for a plan at once
 - Date: 2026-11-17
 - Status: accepted
-- Context: owner: "replan extremely fast as soon as something happens".
+- Context: guidance should re-plan at once when something happens.
   Re-plans were triggered by drift (5 m, 2 m/s) or age (3 s), at most every
   0.5 s of sim time.
 - Decision: a gust, an engine failure, a relight, or a changed wind, lag or
@@ -637,8 +636,8 @@ Template:
 ## D-043 — One continuous flight from orbit to the arms
 - Date: 2026-11-18
 - Status: accepted
-- Context: owner: "I don't like how the simulation from orbital entry to
-  next phase just switches". The entry was drawn in its own Earth-centred
+- Context: the view cut abruptly from the orbital entry to the next
+  phase. The entry was drawn in its own Earth-centred
   scene and the landing in the tower's flat one; at the hand-over the
   picture cut to a different world and camera, the ship's attitude was
   reset to belly down, and time dropped from ×16 to ×1 at once.
@@ -669,8 +668,8 @@ Template:
 - Date: 2026-11-18
 - Status: accepted
 - Context: the M3 roadmap still listed a simulated ascent, hot staging and
-  boostback ("the full mission"). Owner: "remove the simulated ascent we
-  only made the landing guide system that's it".
+  boostback ("the full mission"), which is outside what Kestrel is: the
+  landing guidance.
 - Decision: the item is removed from the roadmap. Kestrel simulates and
   guides the return: from a start in the air (or from orbit, D-042) to the
   catch or loss. The opening sequence (countdown, liftoff, stage
@@ -683,8 +682,8 @@ Template:
 - Status: accepted
 - Context: the project goes public on GitHub. Most visitors will not
   clone and build a Rust + WebAssembly project, so it needs a live page;
-  nothing checked the code except the owner's machine. The owner: the
-  coding agent's rules file (`CLAUDE.md`) "should not be pushed".
+  nothing checked the code except one machine. The coding agent's rules
+  file (`CLAUDE.md`) stays private.
 - Decision:
   - One workflow (`.github/workflows/ci.yml`) on every push and pull
     request: `cargo fmt --check`, `cargo clippy -D warnings`,
@@ -704,3 +703,306 @@ Template:
   on this machine's build so far: the base-path build was served under
   `/Kestrel/` and flown in Chromium (page, solver worker and landing burn
   ran, no load errors); the Linux runner itself is unproven until the first push.
+
+## D-046 — Guidance estimates the wind and flies with it (M4.1)
+- Date: 2026-11-18
+- Status: accepted
+- Context: guidance did not react to wind. The simulator blew
+  wind and gusts, but guidance modelled still air everywhere: the
+  planner's dynamics were called with zero wind, the controllers'
+  torque model had "no wind known", and guidance only fought the wind
+  after being pushed off its plan. Measured before the change (wind
+  sweep, LIMITATIONS.md): 110 of 216 flights caught; none of either
+  vehicle at 20 m/s or more.
+- Decision:
+  - `guidance::wind`, a two-state extended Kalman filter on the
+    horizontal wind. Measurement: the air's force, from the
+    accelerometers less gravity and the engines' delivered thrust
+    (engine telemetry: chamber pressure and gimbal angle, which real
+    engines report; a 1 % reading, *illustrative*). Prediction: the
+    shared aerodynamic model (body and surfaces at their measured
+    positions) at the airspeed `v − w`. Its noise comes from the
+    readings' own errors (attitude and velocity through the model's
+    sensitivities, the thrust line, a floor), so it trusts the air at
+    speed and coasts near hover with no special case. A random walk lets
+    it follow gusts; innovations beyond a 3-degree-of-freedom gate are
+    set aside unless they persist 0.3 s (a glitch, not a gust).
+  - It learns while the engines are off and holds its estimate while
+    they give thrust. Running through the burn (the first design) it
+    wandered up to 10 m/s in still air at high noise and 4.9 m/s with no
+    noise at all: beside meganewtons of thrust the air's kilonewtons are
+    lost, and the thrust line's own errors (the vehicle turning within a
+    step, the attitude estimate) are correlated, so the filter grew sure
+    of wind that was not there, and the still-air boards lost flights
+    (ship seeds 38 → 36 of 40, booster 40 → 39, engine-out window 20 →
+    18). The simulator's wind is the same at every height, so the fall's
+    estimate stays valid; a gust that begins in the burn is not tracked.
+  - Errors that stay alike over time count once per correlation time,
+    not once per step (their variance times 2τ/h: the attitude reading's
+    2 s, the navigation velocity's time constant). Counting every 10 ms
+    reading as new evidence, the ship's belly-flop estimate wandered by
+    5 m/s while claiming ±1 (unit test: worst error 3.6σ before, 0.8σ
+    after).
+  - Guidance flies only the **significant** wind: the estimate shrunk by
+    two of its standard deviations along it, and none when it cannot be
+    told from calm. Without this the knife-edge flights flipped on noise:
+    an engine-out flight with no sensor noise at all was lost with an
+    estimate of 0.02 m/s. With it, a still-air flight is (almost always)
+    the wind-blind one, and winds under about 2σ (1-3 m/s) are not flown.
+  - One rule everywhere: the wind enters as *the model in the estimated
+    wind minus the model in still air*, so a zero estimate is exactly
+    the old guidance. A switch (`wind_aware`, the page's "Guidance uses
+    its wind estimate") flies the old guidance on the same build, bit for
+    bit (`unaware_flight_matches_today`).
+  - Where it is used: the planner's dynamics (`ShipProblem.wind`); the
+    booster's descent (it leans into a crosswind before being pushed);
+    the final approach (a feed-forward of the wind's force); the
+    booster's burn tracking adds only the crossflow its plan leaves out
+    (D-031: the burn is planned without it; the ship's plan models it
+    all); every torque model; the short predictions (the booster's first
+    plan, a spare's spin-up). Not used: the ignition height and fall time
+    (vertical), the engine-out envelope, the entry.
+  - On the page: a telemetry row, two arrows in the analysis view (the
+    estimate and the true wind, labelled as not known to guidance), and
+    flight-record entries when the estimate settles (1σ under 2 m/s) and
+    when a gust is felt (more than 4 m/s within 3 s, at most every 4 s).
+    No spoken lines: the voice model could not be fetched on this
+    network, and the fallback voice would not match.
+- Tried and removed: a belly-flop roll against a crosswind (no effect:
+  hull and flaps are symmetric about the long axis, so a roll makes no
+  sideways force) and a belly-flop drift term along the track (3 m
+  worse than the feedback alone).
+- Consequences: the wind sweep catches 144 of 216 (110 before; the
+  booster at 20 m/s 14 of 18, none before), with a lower gate error at
+  10 m/s and above; one marginal flight (booster, 5 m/s, high noise) is
+  lost that was caught. The still-air boards are identical with and
+  without the estimate (same flights lost, same propellant left), so
+  nothing that worked in still air changed (LIMITATIONS.md has the
+  tables). The ship still
+  loses most strong crosswinds: it drifts ~500 m sideways in the belly
+  flop, which only a heading choice can fix (M4.3). The default test
+  suite stays under a minute.
+
+## D-047 — The final approach: a glide, not a plan (M4.2)
+- Date: 2026-11-19
+- Status: accepted
+- Context: the last approach looked scripted. From the burn's
+  gate (D-033) the terminal controller slid over the catch axis, stopped
+  5 m above the arms until centred, then sank. The goal was a planned,
+  re-planned approach onto the arms instead.
+- Tried first, and kept as an option: `guidance::approach`, a 3-DoF
+  point-mass SOCP from the estimate onto the caught position (20
+  intervals, Kestrel's own solver set up once and updated after), keeping the base and nose off the mast (the
+  tilt linearised at hover), with a margin of 1 m plus twice the
+  navigation error (measured: 0.2-0.3 m RMS at low noise, 0.9-1.1 m at
+  high). Getting a vehicle on its last engine near hover to follow it
+  took, from traces: an acceleration linear between nodes (constant per
+  interval and re-planned faster than an interval, it never tilted), a
+  tilt-rate limit, starting from the last command (not the measured
+  tilt), soft comfort limits (fuel-optimal plans ride their limits and
+  re-plans failed; Clarabel agreed those problems were infeasible), a
+  gentle objective, slower toward the mast near the axis, re-planning
+  only on drift and at most every 0.5 s (many re-plans a second fed back
+  on themselves: 18 degrees of tilt), and flying it by commanded velocity
+  like the terminal controller (feeding its acceleration and tilt rate
+  forward swung 5 m across the axis in the closed loop).
+- Measured (`approach_board`, same build): it lost on every board.
+  Scripted / planned: ship nominal 12/12 / 8/12 (gate to catch 11.4 s /
+  22.9 s), ship seeds 11-30 38/40 / 28/40, booster seeds 11-30 40/40 /
+  33/40, ship engine-out window 20/20 / 11/20. Most losses followed the
+  planner giving up mid-way and handing a half-flown state to the
+  scripted fallback. It stays (`planned_approach`, off by default, not on
+  the page).
+- Decision: the terminal controller **glides**. While still off the axis
+  the height it may come down to falls with the distance from the axis
+  (1.5 m per metre beyond 1 m, at most the old 5 m), so it slides in and
+  comes down in one movement; held a few metres off but steady (a strong
+  crosswind) it creeps down as before; the final settle slides in at most
+  0.4 m/s and arrives at 1.0 m/s (1.3 before). Each of those three came
+  from a measured loss: two high-noise touchdowns too fast (one sideways,
+  one down), and 25 m/s crosswinds hovering dry.
+- Consequences (`approach_board`, then `wind_sweep`): every board catches
+  what it did (ship 12/12, 38/40, booster 40/40, engine-out 20/20, the
+  same two flights lost); gate to catch 9.1-10.9 s instead of 11.4-13.9
+  s; at contact 1.11-1.25 instead of 1.42-1.61 m/s down and 0.24-0.31
+  instead of 0.31-0.42 m/s sideways. Wind sweep 146 of 216 (144 before),
+  no fewer at any wind speed. A sink cap that went negative below the
+  rest height panicked in the sweep; fixed and tested.
+
+## D-048 — The ship chooses its approach bearing (M4.3)
+- Date: 2026-11-19
+- Status: accepted
+- Context: every flight fell the same way: every flight lined
+  up for the same +x approach (gate, aim, the ship's nose toward −x). And
+  M4.1 found the ship's crosswind loss: the belly flop steers along its
+  nose (the pitch slides it there) but cannot cross it (hull and flaps are
+  symmetric about the long axis), so a crosswind drifted it ~500 m across
+  its approach and no plan reached the +x gate.
+- Decision: `Scenario::turned(ψ)` turns the gate, its velocity and the aim
+  about the catch axis; the belly attitude turns with ψ (nose toward the
+  tower from that side) and its pitch slides along the bearing; the
+  burn's tower-side keep-out becomes the half-plane `b · r ≥ c`. The ship
+  chooses ψ once, below 6 km (when the wind estimate settles, or 70 % of
+  the way down): the drift across the +x track by ignition (its sideways
+  speed and the wind's, relaxing with the hull's drag; from thin air the
+  relaxation is slow, so the choice waits for 6 km), and if at least
+  400 m, ψ = atan2(drift, distance to the aim), within ±60° of the arms'
+  open side. Smaller drifts the burn takes up, as before. The booster
+  steers across its fall with its lean and keeps +x. At ψ = 0 everything
+  is exactly the old geometry (still-air flights bit for bit). The page
+  draws the gate at the bearing and records "Approach turned".
+- Tried: choosing ψ toward the unsteered landing point (the along-track
+  momentum made a still-air flight look like a far-side approach: +60°,
+  out of propellant); a 250 m threshold (a flight from orbit 193 m across
+  ran dry when it turned; and 10 m/s crosswinds, ~300 m, dropped from 16
+  to 14 of 18).
+- Consequences (`wind_sweep`): the ship in 15 m/s crosswinds is caught 11
+  of 18 (5 before), none fewer at any wind speed; sweep 152 of 216 (146
+  before). Still air is unchanged (the bearing stays +x). The ship at 20
+  m/s (4 of 18) and 25 m/s (0) is still mostly lost: at ±60° the bearing
+  is clamped and the drift is more than it absorbs.
+
+## D-049 — Kestrel's own solver is the only one that flies (M4.4)
+- Date: 2026-11-19
+- Status: accepted
+- Context: Kestrel's own solver is the point of the project, so it
+  should be the one that flies, with no other solver in the page. Since D-041
+  Clarabel flew by default and the 3-DoF guidance called it directly.
+  Flying the boards on Kestrel's solver as it was found two gaps:
+  infeasible 3-DoF problems ran to the iteration cap instead of being
+  reported infeasible, and booster plans at 1e-8 lost precision near the
+  optimum (an iterate at 2e-8 relative gap, then a 5e-6 step, the
+  residual from 1e-10 to 1e-5, then NaN), so one booster flight got no
+  plan at all and ran dry.
+- Decision: `crates/socp` gains (1) a primal infeasibility certificate
+  (Farkas: `‖Aᵀy + Gᵀz‖ ≤ 1e-6 (−bᵀy − hᵀz)`, sound unless every
+  feasible point has a scaled norm of 1e6 or more; measured: feasible
+  landing problems kept the ratio above 1, infeasible ones stalled at
+  1e-7..1e-8) and (2) `AlmostSolved`, the best iterate within Clarabel's
+  default reduced tolerances when the iteration stops short. The 3-DoF
+  guidance is built in the solver's own types and solved by it; its
+  propellant limit is decided from the landing-time search (the only
+  constraint the search leaves out is final mass ≥ dry mass), since a
+  marginally short propellant load left no certificate strong enough.
+  Clarabel becomes optional (`reference-solver` feature), enabled only by
+  kestrel-wasm's dev-dependencies: the benchmark, `SOCP_COMPARE`, and the
+  test that the switches-off flight equals the pre-M4 code (flown on
+  Clarabel). The solver choice is per thread. The page's solver switch
+  is removed.
+- Also found on the way: the glide could settle into the arms while
+  sliding back across the axis (a prediction, 1.02 m/s sideways); below
+  its funnel floor and still sliding it now climbs back (GLIDE_RISE).
+- Consequences: the page's WebAssembly is 0.80 MB (1.13 MB with
+  Clarabel). Glide board unchanged flight for flight (12/12, 38/40,
+  40/40, 20/20); wind sweep 150 of 216 (152 on Clarabel the same day;
+  4 flights caught only on Clarabel, 2 only on Kestrel: not significant).
+  Native plan times: booster median 53.6 ms (Clarabel 49.5), ship 31.5 ms
+  (35.6). On the page both vehicles were caught. Open: some booster
+  subproblems stall with the primal residual at 1e-4..1e-6 at the
+  40-iteration cap, where Clarabel reports infeasible; telling marginal
+  infeasibility from near-optimality reliably needs a homogeneous
+  embedding (Clarabel's method), not looser tolerances.
+
+## D-050 — Booster engine-out mid-burn: measured, guidance unchanged (M4)
+- Date: 2026-11-19
+- Status: accepted
+- Context: ROADMAP: "two outer engines lost at 30 s hit the tower" (seen
+  on the page on 2026-11-18, M3 code on Clarabel). Measure, then fix.
+- Measured: a 320-flight board (`booster_engine_out_board`: one, two or
+  three outer engines or one centre engine lost at 26-33 s, five seeds,
+  0.5 s solves, frames of 1/60 and 1/15 s): 313 caught; that case caught
+  in all 10 of its flights. The 7 losses come from a sideways swing on the
+  last legs: the tracking controller leans further than the plan, the
+  next plan starts from that lean, and with half a second of latency the
+  swing grows; carried past the tower-side keep-out, no plan can exist.
+- Tried, measured, not kept: (1) a quadratic price on sideways speed in
+  the booster's planner, 316 of 320 (5 flights caught only with it, 2 only
+  without), and isolated plans from the traced states barely changed even
+  at 100 times the weight: the plans are bound by attitude and constraints,
+  not under-priced, so this was noise, not a fix. (2) The keep-out
+  loosened (node slack, comfort price) when the start is inside it or
+  within 1 m of its edge, so a plan always exists: 302 of 320. Those
+  plans were poor (one 39 s long, unconverged), and with no plan the
+  existing fallback (brake upright toward the axis) did better.
+- Decision: guidance unchanged; the board stays as an ignored test; the
+  swing is a separate item (the controller's lean), to be measured on
+  every board before any change.
+
+## D-051 — The booster's sideways swing: traced to the hand-over; a fix measured, not kept (M4)
+- Date: 2026-11-19
+- Status: accepted
+- Context: D-050 left 7 losses of 320 on the engine-out board, from a
+  sideways swing on the booster's last legs.
+- Traced: the short leg on the engines left after a loss (about 3 s for a
+  failure at 31 s) asks for leans of -12° to +3° in that time; the
+  booster follows a fraction of a second late with its gimbal at the
+  15° limit and ends the leg leaning about 11°, turning at 14-17°/s. It
+  then drops to its centre three, which have about a quarter of the
+  turning authority (l·tan(15°)·T/J: 8.8°/s² against 29°/s² on eleven
+  at minimum throttle), so the turn takes about 2 s and 16° more to stop
+  (26° seen), and every plan after that starts from the lean.
+- Tried: (1) come upright on the engines still lit before dropping to
+  the last ones: worse (eleven engines at minimum throttle, leaning
+  11-14°, pushed it sideways at about 8 m/s², and it did not level in
+  time). (2) Stop the turn on the engines still lit (hold attitude, below
+  6°/s, only while sinking faster than 15 m/s), then drop: the traced
+  flight is caught (61.6 s, was out of propellant), but against the same
+  build with it off, over four boards (engine-out, wind sweep, approach,
+  browser sweep): 4 flights caught only with it, 4 only without. It also
+  changed ordinary booster flights (it fired in a 15 m/s crosswind).
+- Decision: not kept (no measured gain). The engine-out board now prints
+  the tilt and turn rate at the hand-over. Why both ways: on fewer
+  engines both the turning authority and the sideways push scale with
+  thrust, so stopping a turn is best done on many engines and taking out
+  a lean on few; the losses that remain hand over with the lean, not the
+  turn. What is open is the leg itself: one that short cannot be flown
+  to an upright end by this vehicle (the plan's attitude is right; the
+  vehicle lags it).
+
+## D-052 — The booster plans its landing burn as one, the engine switch inside it (M4)
+- Date: 2026-11-19
+- Status: accepted
+- Context: the booster losses of D-050 and D-051, after research and
+  a fresh look at the design. Research: Super
+  Heavy drops from 13 engines to 3 within one landing burn, not at a
+  separate stop; 6-DoF powered-descent work optimises one trajectory
+  split into phases at the thrust-switching times; guidance assumes the
+  vehicle can follow the plan's attitude (agility bounded in the
+  optimisation). Kestrel's booster instead flew two plans joined at an
+  intermediate gate, and after a late engine loss the first was about
+  3 s long, a manoeuvre it could not fly; and its plans could turn at
+  40°/s (the ship's limit) while its gimbal slews at 30°/s, so it flew
+  half a second, 5-7°, behind them.
+- Decision: (1) the booster's options are now: its final engines alone
+  to the approach gate; one plan for the whole burn (every lit engine,
+  then the final engines from a planned node, upright from there: the
+  ship's flip machinery, `late_limits` and `switch_node`, with a first
+  time guess `time_guess`); every lit engine to an intermediate gate.
+  The switch node: brake from the sink rate now to the intermediate
+  gate's speed at the rate that reaches that gate, clamped to what the
+  lit engines can do (10 % inside their least and most thrust: below the
+  least, the plan stops too high and none exists; found when every plan
+  after an early loss came back infeasible). (2) Booster plans turn at
+  most 10°/s (`BOOSTER_OMEGA_MAX`). Both behind one switch
+  (`switch_plan`, on); the pinned pre-M4 flight flies with it off.
+- Measured (same build; boards of 320, 108 booster, 40 and 33 flights):
+  today's code 313, 86, 40, 33; the turn limit alone 315, 79, 40, 33
+  (worse in wind); the one-burn plan before the switch-node clamp, at
+  40°/s: 240, 83, 21, 30; with the clamp at 40°/s: 320, 95, 40, 33; at
+  15°/s: 320, 93, 40, 33; at 10°/s: 320, 99, 39, 33 (kept). Paired on
+  the wind sweep: 15 booster flights caught only with it, 2 only
+  without; the ship's flights identical, flight for flight. The
+  booster's still-air flight: 67.1 s and 31.1 t left, against 61.6 s
+  and 37.0 t.
+- Tried, not kept: preferring the one-burn plan over the final engines
+  alone (every plan put the switch about 2 s ahead, so it never came,
+  and the booster hovered on twelve engines); preferring it only while
+  the switch was at least 1 s ahead (the still-air flight barely
+  changed: 66.8 s); a ceiling on the height at the switch node, to make
+  it brake late on every engine and recover the propellant (plans
+  failed: 12 on the nominal flight).
+- Consequences: the cost in propellant and time comes from the plan's
+  single time scale: the switch sits at a fixed node, so the slow phase
+  is a fixed share of the flight, and the plan brakes early and switches
+  high (about 820 m against 557 m). A time scale per phase would let it
+  brake late; open.

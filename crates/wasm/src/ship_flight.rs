@@ -21,8 +21,10 @@
 //! Simulation only.
 
 use guidance::GuidanceError;
+use guidance::approach::{self, ApproachPlan, ApproachPlanner, ApproachProblem};
 use guidance::scvx::{self, ShipPlan, ShipProblem};
-use guidance::ship_control::{self, Actuation};
+use guidance::ship_control::{self, Actuation, Air};
+use guidance::wind::{WindEstimate, WindFilter, WindInputs};
 use model::dynamics::{self, M, R, State, V};
 use model::quat::{self, Vec3};
 use model::{Scenario, Tuning, VehicleKind};
@@ -100,6 +102,21 @@ pub const ENVELOPE_FLOOR: f64 = 0.0;
 /// (booster) each (D-040):
 /// (position, velocity).
 pub const NAV_SHIP: (f64, f64) = (1.0, 0.5);
+/// The navigation estimate's horizontal error in the final approach, m
+/// (RMS, measured: `nav_error_by_noise`, ship 0.22 / 0.94, booster 0.28 /
+/// 1.07 at low / high noise); the approach's mast margin is 1 m plus twice it.
+pub const NAV_ERROR_LOW: f64 = 0.3;
+pub const NAV_ERROR_HIGH: f64 = 1.1;
+/// The approach's bearing stays within this of the arms' open side (+x),
+/// rad (60°)...
+pub const BEARING_MAX: f64 = 1.047_197_551_196_597_6;
+/// ...and stays +x unless the predicted drift across the track is at least
+/// this, m: the burn takes up less (in 10 m/s crosswinds, drifts of about
+/// 300 m, the +x approach caught 16 of 18; turning at 250 m caught 14).
+pub const ACROSS_MIN: f64 = 400.0;
+/// The bearing is chosen below this height, m (or 70 % of the way down).
+pub const BEARING_BELOW: f64 = 6000.0;
+
 pub const NAV_BOOSTER: (f64, f64) = (4.0, 2.0);
 
 /// Default wind gust speed, m/s.
@@ -202,6 +219,25 @@ pub struct ShipFlightConfig {
     /// Start attitude (None: the vehicle's usual one). Set at the
     /// hand-over so the 6-DoF flight continues the entry's attitude.
     pub attitude: Option<quat::Quat>,
+    /// Guidance uses its wind estimate (D-046). Off: the estimate is still
+    /// made (and shown) but guidance flies as if the air were still.
+    pub wind_aware: bool,
+    /// From the gate onto the arms, fly a re-planned approach (D-047,
+    /// experimental: off by default; on the boards it caught fewer flights
+    /// than the terminal controller).
+    pub planned_approach: bool,
+    /// The terminal controller glides down a funnel onto the arms instead of
+    /// stopping 5 m above them until centred (M4.2, D-047; on: same catches
+    /// on every board, 1-2.5 s quicker, a quarter softer at contact).
+    pub glide_terminal: bool,
+    /// Choose the bearing the approach comes from, toward where the fall is
+    /// taking the vehicle (M4.3, D-048).
+    pub chosen_bearing: bool,
+    /// The booster plans its landing burn as one: every lit engine, then
+    /// its last ones from a planned node, to the catch gate, before trying
+    /// an intermediate gate; and plans only turns it can follow
+    /// ([`scvx::BOOSTER_OMEGA_MAX`]) (M4, D-052).
+    pub switch_plan: bool,
 }
 
 /// An entry from orbit (*illustrative* numbers, chosen so guidance has
@@ -284,6 +320,11 @@ impl ShipFlightConfig {
             failed: Vec::new(),
             entry: None,
             attitude: None,
+            wind_aware: true,
+            planned_approach: false,
+            glide_terminal: true,
+            chosen_bearing: true,
+            switch_plan: true,
         }
     }
 
@@ -373,6 +414,18 @@ pub struct ShipFlight {
     /// From orbit: the tower frame on the round Earth (following the ship
     /// during the entry, fixed from the hand-over on).
     earth: Option<model::entry::EarthFrame>,
+    /// Guidance's estimate of the wind, from what the vehicle senses.
+    wind: WindFilter,
+    /// The final approach: its planner (one set-up solver), the plan being
+    /// flown and the sim time it starts at, and whether planning gave up
+    /// for this flight (the scripted controller flies the rest).
+    approach_planner: ApproachPlanner,
+    approach: Option<(ApproachPlan, f64)>,
+    approach_given_up: bool,
+    approach_plans: u32,
+    /// The approach's bearing (rad, 0 = +x) and whether it was chosen yet.
+    bearing: f64,
+    bearing_chosen: bool,
 }
 
 impl ShipFlight {
@@ -447,6 +500,13 @@ impl ShipFlight {
             nav: None,
             imu_dv: [0.0; 3],
             imu_h: 0.0,
+            wind: WindFilter::new(),
+            approach_planner: ApproachPlanner::new(),
+            approach: None,
+            approach_given_up: false,
+            approach_plans: 0,
+            bearing: 0.0,
+            bearing_chosen: false,
         })
     }
 
@@ -705,6 +765,7 @@ impl ShipFlight {
         scn.gate = leg.gate;
         scn.gate_velocity = leg.gate_velocity;
         let mut p = ShipProblem::new(scn, x, self.leg_limits(leg.engines));
+        p.wind = self.air().wind;
         p.max_tilt = Some(SHIP_BURN_TILT);
         // A narrow funnel into the arms gate: sideways braking is done high.
         p.approach = SHIP_FUNNEL;
@@ -881,22 +942,25 @@ impl ShipFlight {
         self.est = est;
         let scn = self.sim.scn.clone();
         let t = self.sim.t;
+        let air = self.air();
         let act = match self.phase {
             Phase::BellyFlop => {
                 let healthy = f64::from(self.sim.cluster.healthy()) * scn.ship.engine_max;
                 self.ignition_z = ship_control::ignition_altitude(&scn, &est, healthy);
+                self.choose_bearing(&est);
+                let scn = self.sim.scn.clone();
                 let lead = -est[V + 2].min(0.0) * scn.ship.ignition_time;
                 if est[R + 2] <= self.ignition_z + lead {
                     self.sim.cluster.ignite_all();
                     self.phase = Phase::Flip;
                 }
-                ship_control::unpowered(&scn, &est, self.ignition_z)
+                ship_control::unpowered(&scn, &est, self.ignition_z, &air)
             }
             Phase::Flip => {
                 let limits = self.command_limits();
                 if self.sim.cluster.running() == 0 {
                     // Spinning up: keep the flaps flying, ask for thrust.
-                    let mut a = ship_control::unpowered(&scn, &est, self.ignition_z);
+                    let mut a = ship_control::unpowered(&scn, &est, self.ignition_z, &air);
                     a.thrust_body = [0.0, 0.0, limits.0];
                     a
                 } else if let Guide::Plan { plan, t0 } = &self.guide {
@@ -904,11 +968,15 @@ impl ShipFlight {
                     // to the burn when its engine switch comes.
                     let tau = t - t0;
                     let (xr, ur) = plan.sample(tau);
-                    if plan.switch_time.is_none_or(|s| tau >= s) {
+                    // (The booster's flip is over once it has a plan; its
+                    // engine switch comes later, in the burn.)
+                    if plan.switch_time.is_none_or(|s| tau >= s)
+                        || scn.ship.kind == VehicleKind::Booster
+                    {
                         self.phase = Phase::Burn;
                     }
                     self.follow_switch(t);
-                    ship_control::powered(&scn, &est, (&xr, ur), self.command_limits())
+                    ship_control::powered(&scn, &est, (&xr, ur), self.command_limits(), &air)
                 } else {
                     // No plan yet (or it failed): the scripted flip.
                     let done = quat::tilt(dynamics::attitude(&est)) < FLIP_DONE_TILT
@@ -917,7 +985,7 @@ impl ShipFlight {
                         self.phase = Phase::Burn;
                         self.guide = Guide::None;
                     }
-                    ship_control::flip(&scn, &est, limits)
+                    ship_control::flip(&scn, &est, limits, &air)
                 }
             }
             Phase::Burn => self.burn(&scn, &est, t),
@@ -929,7 +997,20 @@ impl ShipFlight {
                 if lit > 1 && self.command_limits().0 > HOVER_SHARE * weight {
                     self.sim.cluster.shutdown_to(lit - 1);
                 }
-                ship_control::terminal(&scn, &est, self.command_limits())
+                let limits = self.command_limits();
+                if self.config.planned_approach
+                    && let Some(a) = self.approach_step(&scn, &est, t, limits, &air)
+                {
+                    a
+                } else {
+                    ship_control::terminal_shaped(
+                        &scn,
+                        &est,
+                        limits,
+                        &air,
+                        self.config.glide_terminal,
+                    )
+                }
             }
             Phase::Entry | Phase::Done => self.last,
         };
@@ -946,12 +1027,14 @@ impl ShipFlight {
         // did over the step. Taken as exact; real ones drift slowly.
         self.imu_dv = quat::sub(dynamics::velocity(&self.sim.x), v_before);
         self.imu_h = h;
+        self.update_wind();
         if self.sim.outcome.is_some() {
             self.phase = Phase::Done;
         }
     }
 
     fn burn(&mut self, scn: &Scenario, est: &State, t: f64) -> Actuation {
+        let air = self.air();
         match (&self.guide, self.leg) {
             (Guide::Plan { plan, t0 }, Some(leg)) => {
                 let tau = t - t0;
@@ -968,11 +1051,11 @@ impl ShipFlight {
                         self.leg = Some(self.final_leg());
                         self.guide = Guide::None;
                     }
-                    return ship_control::terminal(scn, est, self.command_limits());
+                    return ship_control::terminal(scn, est, self.command_limits(), &air);
                 }
                 let (xr, ur) = plan.sample(tau);
                 self.follow_switch(t);
-                ship_control::powered(scn, est, (&xr, ur), self.command_limits())
+                ship_control::powered(scn, est, (&xr, ur), self.command_limits(), &air)
             }
             _ => {
                 // No plan (yet): brake upright toward the axis. Several lit
@@ -995,9 +1078,15 @@ impl ShipFlight {
                     && est[V + 2] < -scn.mid_gate_speed;
                 if waiting {
                     let limits = self.command_limits();
-                    return ship_control::steady_burn(scn, est, WAIT_THROTTLE * limits.1, limits);
+                    return ship_control::steady_burn(
+                        scn,
+                        est,
+                        WAIT_THROTTLE * limits.1,
+                        limits,
+                        &air,
+                    );
                 }
-                ship_control::terminal(scn, est, self.command_limits())
+                ship_control::terminal(scn, est, self.command_limits(), &air)
             }
         }
     }
@@ -1051,7 +1140,13 @@ impl ShipFlight {
             && !matches!(self.guide, Guide::Plan { .. });
         let lead = if first { self.solve_time } else { 0.0 };
         let x = if lead > 0.0 {
-            predict(&self.sim.scn, &measured, self.last.thrust_body, lead)
+            predict(
+                &self.sim.scn,
+                &measured,
+                self.last.thrust_body,
+                lead,
+                self.air().wind,
+            )
         } else {
             measured
         };
@@ -1074,7 +1169,10 @@ impl ShipFlight {
             // when it gives thrust (it falls meanwhile).
             let spin_up = self.sim.cluster.spin_up_left();
             let (t, x) = if spin_up > 0.0 && self.sim.cluster.running() == 0 {
-                (t + spin_up, predict(&self.sim.scn, &x, [0.0; 3], spin_up))
+                (
+                    t + spin_up,
+                    predict(&self.sim.scn, &x, [0.0; 3], spin_up, self.air().wind),
+                )
             } else {
                 (t, x)
             };
@@ -1106,16 +1204,89 @@ impl ShipFlight {
             None if lit > self.final_engines() => vec![self.final_leg(), self.mid_leg(&x, lit)],
             None => vec![self.final_leg()],
         };
-        let options = legs
+        let mut options: Vec<(Leg, ShipProblem)> = legs
             .into_iter()
             .map(|leg| {
                 let mut scn = self.sim.scn.clone();
                 scn.gate = leg.gate;
                 scn.gate_velocity = leg.gate_velocity;
-                (leg, ShipProblem::new(scn, x, self.leg_limits(leg.engines)))
+                let mut p = ShipProblem::new(scn, x, self.leg_limits(leg.engines));
+                p.wind = self.air().wind;
+                (leg, p)
             })
             .collect();
+        if let Some(one) = self.booster_burn(&x, lit) {
+            // In order: the last engines alone (switch now, as soon as they
+            // can make it; a switch always planned a little later never
+            // came), then the one-burn plan, then an intermediate gate.
+            if hopeless {
+                options.retain(|(l, _)| !(l.last && l.engines < lit));
+            }
+            // On a one-burn plan the leg is the last one: offer the
+            // intermediate gate too, should both fail.
+            if !options.iter().any(|(l, _)| !l.last) {
+                let mid = self.mid_leg(&x, lit);
+                let mut scn = self.sim.scn.clone();
+                scn.gate = mid.gate;
+                scn.gate_velocity = mid.gate_velocity;
+                let mut p = ShipProblem::new(scn, x, self.leg_limits(lit));
+                p.wind = self.air().wind;
+                options.push((mid, p));
+            }
+            let at = options
+                .iter()
+                .position(|(l, _)| !l.last)
+                .unwrap_or(options.len());
+            options.insert(at, one);
+        }
+        if self.config.switch_plan {
+            // Only turns the booster can follow.
+            for (_, p) in &mut options {
+                p.omega_max = scvx::BOOSTER_OMEGA_MAX;
+            }
+        }
         (t, options)
+    }
+
+    /// The booster's landing burn as one plan to the catch gate: every lit
+    /// engine, then its last ones from a node chosen where the old
+    /// intermediate gate would have been reached (M4, D-052), upright from
+    /// that node on. None for the ship, without engines to drop, or
+    /// already below that gate.
+    fn booster_burn(&self, x: &State, lit: u8) -> Option<(Leg, ShipProblem)> {
+        let scn = &self.sim.scn;
+        let last = self.final_engines();
+        if !self.config.switch_plan || scn.ship.kind != VehicleKind::Booster || lit <= last {
+            return None;
+        }
+        let mid = self.mid_leg(x, lit);
+        let (z, sink) = (x[R + 2], -x[V + 2]);
+        let (z_mid, v_mid) = (mid.gate[2], -mid.gate_velocity[2]);
+        if z <= z_mid + 10.0 || sink <= v_mid {
+            return None;
+        }
+        // Brake on every engine from the sink rate now to the old
+        // intermediate gate's speed: at the rate that would reach that gate,
+        // but no gentler than every lit engine at its least thrust can (it
+        // cannot throttle lower; a switch placed later stops it too high and
+        // no plan exists) and no harder than they can at the most. Then on
+        // the last ones from where that leaves it to the catch gate.
+        let g = scn.planet.gravity();
+        let (lo, hi) = self.leg_limits(lit);
+        let reach = (sink * sink - v_mid * v_mid) / (2.0 * (z - z_mid));
+        let brake = reach.clamp(1.1 * (lo / x[M] - g), 0.9 * (hi / x[M] - g));
+        let fast = (sink - v_mid) / brake;
+        let z_switch = z - (sink * sink - v_mid * v_mid) / (2.0 * brake);
+        let slow =
+            2.0 * (z_switch - scn.gate[2]).max(1.0) / (v_mid - scn.gate_velocity[2]).max(1.0);
+        let leg = self.final_leg();
+        let mut p = ShipProblem::new(scn.clone(), *x, (lo, hi));
+        p.wind = self.air().wind;
+        p.late_limits = Some(self.leg_limits(last));
+        let n = p.nodes - 1;
+        p.switch_node = ((fast / (fast + slow) * n as f64).round() as usize).clamp(2, n - 2);
+        p.time_guess = Some(fast + slow);
+        Some((leg, p))
     }
 
     /// Install a plan for `leg`, solved from the measurement at sim time `t0`.
@@ -1278,6 +1449,266 @@ impl ShipFlight {
         x
     }
 
+    /// Feed the wind filter what the vehicle sensed over the step just
+    /// taken: the accelerometers, engine telemetry (the thrust delivered)
+    /// and the surfaces' positions, at the navigation estimate.
+    fn update_wind(&mut self) {
+        let x = self.estimate_now();
+        let att_sigma = self.att_sigma().0;
+        let inputs = WindInputs {
+            scn: &self.sim.scn,
+            x: &x,
+            dv: self.imu_dv,
+            h: self.imu_h,
+            thrust_body: self.sim.cluster.thrust,
+            surfaces: self.sim.flaps,
+            att_sigma,
+            vel_sigma: self.noise.vel_sigma,
+            att_corr: sim::sensor::CORRELATION_TIME,
+            vel_corr: match self.sim.scn.ship.kind {
+                VehicleKind::Ship => NAV_SHIP.1,
+                VehicleKind::Booster => NAV_BOOSTER.1,
+            },
+        };
+        self.wind.update(&inputs);
+    }
+
+    /// Choose, once, the bearing the ship's approach comes from. The belly
+    /// flop steers along its nose (the along-track miss) but cannot cross
+    /// it, so the approach turns until its aim point lies where the drift
+    /// across the track will carry the ship by the ignition height (its
+    /// sideways speed and the estimated wind's drift): `atan2(across,
+    /// |aim|)`, within ±BEARING_MAX of the arms' open side (+x), and the +x
+    /// side itself for a drift under ACROSS_MIN (a still-air flight keeps the
+    /// old geometry). Chosen when the wind estimate settles, or 70 % of the way
+    /// down to the ignition height, whichever is first. The booster steers
+    /// across its fall with its lean and keeps +x. M4.3, D-048.
+    fn choose_bearing(&mut self, est: &State) {
+        if self.bearing_chosen
+            || !self.config.chosen_bearing
+            || self.sim.scn.catch.is_none()
+            || self.sim.scn.ship.kind != VehicleKind::Ship
+        {
+            return;
+        }
+        let e = self.wind.estimate();
+        let settled = e.sigma[0].max(e.sigma[1]) < 2.0;
+        let z = est[R + 2];
+        let start = self.config.position[2];
+        let late = z < self.ignition_z + 0.3 * (start - self.ignition_z).max(0.0);
+        // Not from high up: the drift is predicted with the drag of the air
+        // here, and from orbit's 25 km hand-over the thin air made a
+        // sideways 8 m/s look like 700 m of drift (it bleeds off lower down).
+        if !((settled && z < BEARING_BELOW) || late) {
+            return;
+        }
+        self.bearing_chosen = true;
+        let scn = &self.sim.scn;
+        let (r, v) = (dynamics::position(est), dynamics::velocity(est));
+        let t = ((z - self.ignition_z) / (-v[2]).max(10.0)).max(2.0);
+        // The vehicle's sideways speed relaxes toward the wind's with the
+        // drag time constant across the hull.
+        let rho = scn.density(z);
+        let q = dynamics::attitude(est);
+        let f0 = model::aero::body_force(&scn.ship, rho, q, v).0;
+        let f1 = model::aero::body_force(&scn.ship, rho, q, quat::add(v, [0.0, 1.0, 0.0])).0;
+        let k = (f0[1] - f1[1]).max(1.0);
+        let tau = (est[M] / k).clamp(1.0, t.max(1.0));
+        let drift = t - tau * (1.0 - (-t / tau).exp());
+        let w = self.air().wind;
+        // Across the +x track (y): where the ship will be by ignition. Its
+        // sideways speed relaxes toward the wind's: y0 + v τ (1 − e^(−t/τ))
+        // + w (t − τ (1 − e^(−t/τ))).
+        let relax = tau * (1.0 - (-t / tau).exp());
+        let across = r[1] + v[1] * relax + w[1] * drift;
+        let reach = scn.aim[0].hypot(scn.aim[1]).max(1.0);
+        // A few hundred metres across the track the landing burn takes up
+        // as it always has (turning for them only cost propellant: a flight
+        // from orbit 193 m across ran dry); the approach turns for a drift
+        // it cannot (a crosswind: ~500 m).
+        let psi = if across.abs() < ACROSS_MIN {
+            0.0
+        } else {
+            across.atan2(reach).clamp(-BEARING_MAX, BEARING_MAX)
+        };
+        if psi != 0.0 {
+            self.sim.scn = self.sim.scn.turned(psi);
+        }
+        self.bearing = psi;
+    }
+
+    /// The approach's bearing, rad (0: the +x side).
+    pub fn bearing(&self) -> f64 {
+        self.bearing
+    }
+
+    /// Whether the approach's bearing has been chosen yet.
+    pub fn bearing_chosen(&self) -> bool {
+        self.bearing_chosen
+    }
+
+    /// The approach problem from the estimate `x`: final time `t_f` (0 for a
+    /// search), starting from sideways acceleration `a0`.
+    fn approach_problem(
+        &self,
+        x: &State,
+        t_f: f64,
+        a0: [f64; 2],
+        limits: (f64, f64),
+    ) -> ApproachProblem {
+        let scn = &self.sim.scn;
+        let g = scn.planet.gravity();
+        let nav = if self.noise.pos_sigma >= Noise::HIGH.pos_sigma {
+            NAV_ERROR_HIGH
+        } else if self.noise.pos_sigma > 0.0 {
+            NAV_ERROR_LOW
+        } else {
+            0.0
+        };
+        let c = scn.catch.expect("a tower to approach");
+        ApproachProblem {
+            r0: dynamics::position(x),
+            v0: dynamics::velocity(x),
+            a0,
+            z_catch: scn.rest_cm_z(),
+            t_f,
+            a_min: limits.0 / x[M] * 1.05,
+            a_max: limits.1 / x[M] * 0.9,
+            keep_x: c.mast_x + c.mast_half + scn.ship.radius + 1.0 + 2.0 * nav,
+            base_arm: scn.ship.cm_height,
+            nose_arm: scn.ship.length - scn.ship.cm_height,
+            g,
+        }
+    }
+
+    /// One control step of the planned approach: (re-)plan when there is no
+    /// plan yet or the vehicle has drifted off it, then fly it. None: fly
+    /// the scripted controller (no tower, planning gave up, or the plan is
+    /// over and the vehicle is on the arms).
+    fn approach_step(
+        &mut self,
+        scn: &Scenario,
+        est: &State,
+        t: f64,
+        limits: (f64, f64),
+        air: &Air,
+    ) -> Option<Actuation> {
+        if self.approach_given_up || scn.catch.is_none() || limits.1 * 0.9 <= limits.0 * 1.05 {
+            return None;
+        }
+        let g = scn.planet.gravity();
+        let want = match &self.approach {
+            None => true,
+            Some((plan, t0)) => {
+                let tau = t - t0;
+                if tau >= plan.t_f {
+                    return None;
+                }
+                let (rr, vr, _) = plan.sample(tau);
+                let off = quat::norm(quat::sub(rr, dynamics::position(est)));
+                let slip = quat::norm(quat::sub(vr, dynamics::velocity(est)));
+                (off > approach::REPLAN_OFF || slip > approach::REPLAN_SLIP)
+                    && plan.t_f - tau > 0.5
+                    && tau >= approach::REPLAN_GAP
+            }
+        };
+        if want {
+            let replanned = match &self.approach {
+                None => {
+                    let axis = quat::rotate(dynamics::attitude(est), [0.0, 0.0, 1.0]);
+                    let p = self.approach_problem(est, 0.0, [g * axis[0], g * axis[1]], limits);
+                    self.approach_planner.plan_free(&p, &approach::FINAL_TIMES)
+                }
+                Some((plan, t0)) => {
+                    let tau = t - t0;
+                    let left = plan.t_f - tau;
+                    let cmd = plan.sample(tau).2;
+                    let p = self.approach_problem(est, left, [cmd[0], cmd[1]], limits);
+                    self.approach_planner.plan(&p).or_else(|_| {
+                        self.approach_planner
+                            .plan_free(&p, &[left + 1.0, left + 2.0, left + 4.0])
+                    })
+                }
+            };
+            match replanned {
+                Ok(plan) => {
+                    self.approach = Some((plan, t));
+                    self.approach_plans += 1;
+                }
+                Err(_) => {
+                    // Keep the plan only while still close to it.
+                    let close = self.approach.as_ref().is_some_and(|(plan, t0)| {
+                        let (rr, vr, _) = plan.sample(t - t0);
+                        quat::norm(quat::sub(rr, dynamics::position(est))) < 3.0
+                            && quat::norm(quat::sub(vr, dynamics::velocity(est))) < 1.0
+                    });
+                    if !close {
+                        self.approach = None;
+                        self.approach_given_up = true;
+                        return None;
+                    }
+                }
+            }
+        }
+        let (plan, t0) = self.approach.as_ref()?;
+        let tau = t - t0;
+        let (r, v, a) = plan.sample(tau);
+        Some(ship_control::approach(
+            scn,
+            est,
+            (r, v, a, plan.jerk(tau)),
+            limits,
+            air,
+        ))
+    }
+
+    /// The approach plan being flown and the sim time it starts at.
+    pub fn approach(&self) -> Option<(&ApproachPlan, f64)> {
+        self.approach.as_ref().map(|(p, t0)| (p, *t0))
+    }
+
+    /// "plan" (flying a planned approach), "fallback" (planning gave up:
+    /// the scripted controller), "off" (switched off), or "none" (not in the
+    /// final approach yet).
+    pub fn approach_mode(&self) -> &'static str {
+        if !self.config.planned_approach {
+            "off"
+        } else if self.approach_given_up {
+            "fallback"
+        } else if self.approach.is_some() {
+            "plan"
+        } else {
+            "none"
+        }
+    }
+
+    /// Approach plans made this flight.
+    pub fn approach_plans(&self) -> u32 {
+        self.approach_plans
+    }
+
+    /// Guidance flies with its wind estimate (the configuration's choice).
+    pub fn wind_aware(&self) -> bool {
+        self.config.wind_aware
+    }
+
+    /// Guidance's wind estimate now.
+    pub fn wind_estimate(&self) -> WindEstimate {
+        self.wind.estimate()
+    }
+
+    /// The air as guidance models it: the estimate, or still air when wind
+    /// awareness is off.
+    pub fn air(&self) -> Air {
+        if self.config.wind_aware {
+            Air {
+                wind: self.wind.significant(),
+            }
+        } else {
+            Air::STILL
+        }
+    }
+
     pub fn release(&mut self) {
         self.nav = None;
         self.grabbed = false;
@@ -1302,7 +1733,7 @@ impl ShipFlight {
 /// attitude frozen (the shared model, no flaps, fins or wind), in 20 ms
 /// Euler steps. Only the translation is predicted: holding a gimbal
 /// command for a second would spin the prediction.
-pub fn predict(scn: &Scenario, x: &State, thrust: Vec3, seconds: f64) -> State {
+pub fn predict(scn: &Scenario, x: &State, thrust: Vec3, seconds: f64, wind: Vec3) -> State {
     let mut x = *x;
     let steps = (seconds / 0.02).ceil().max(0.0) as usize;
     if steps == 0 {
@@ -1311,7 +1742,11 @@ pub fn predict(scn: &Scenario, x: &State, thrust: Vec3, seconds: f64) -> State {
     let h = seconds / steps as f64;
     let along = [0.0, 0.0, quat::norm(thrust)];
     for _ in 0..steps {
-        let d = dynamics::f(scn, &x, along, &dynamics::Extra::default());
+        let extra = dynamics::Extra {
+            wind,
+            ..Default::default()
+        };
+        let d = dynamics::f(scn, &x, along, &extra);
         for i in M..V + 3 {
             x[i] += h * d[i];
         }

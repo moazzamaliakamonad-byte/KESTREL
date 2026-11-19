@@ -3,7 +3,7 @@
 Status: approved by the owner's standing delegation (they make no gate
 reviews; decisions are reported). Simulation only.
 
-## What the owner asked for (2026-11-15)
+## Requirements (2026-11-15)
 
 - Continue with M3 (6-DoF, successive convexification, custom solver, benchmark).
 - Make the vehicle like SpaceX's Starship upper stage, researched in depth:
@@ -12,7 +12,7 @@ reviews; decisions are reported). Simulation only.
   then **flips upright** with its engines just before the catch; **cold-gas
   thrusters** for attitude; **several main engines**, not one.
 - **Real scale.** Earth now, with a tower. Also a **Mars** landing on legs:
-  "can't we have simulations for both?" → yes, two scenarios.
+  two scenarios.
 
 ## Research summary (sources read 2026-11-15)
 

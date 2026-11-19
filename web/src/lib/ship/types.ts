@@ -97,6 +97,14 @@ export interface ShipSnapshot {
   heat_flux: number;
   arms: boolean;
   wind: Vec3;
+  /** Guidance's estimate of the steady wind (x, y), m/s, and its 1σ (D-046). */
+  wind_est: [number, number];
+  wind_sigma: [number, number];
+  /** Guidance flies with its wind estimate. */
+  wind_aware: boolean;
+  /** The bearing the approach comes from, rad (0: the +x side), and whether it has been chosen (M4.3). */
+  bearing: number;
+  bearing_chosen: boolean;
   guide: "plan" | "none" | "brake";
   leg_engines: number;
   ignition_z: number;
@@ -196,14 +204,11 @@ export interface FlightConfig {
   wind?: [number, number];
   gust_speed?: number;
   failed?: number[];
-  /** Which convex solver the planner uses (read by the worker, not by the flight). */
-  solver?: PlannerSolver;
+  /** Guidance flies with its wind estimate (default true). */
+  wind_aware?: boolean;
   /** Start from orbit (the ship only). */
   entry?: { range_km: number; gamma_deg: number };
 }
-
-/** Clarabel (the default) or Kestrel's own allocation-free solver (D-041). */
-export type PlannerSolver = "clarabel" | "kestrel";
 
 /** `ShipFlight.plan_json()`. */
 export interface PlanDraw {
