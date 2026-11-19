@@ -536,6 +536,190 @@ fn engine_out_window() {
     }
 }
 
+/// The booster loses engines mid-burn (as clicked on the page): which
+/// losses, when, are caught? Solves take 0.5 s of sim time; frames of
+/// 1/60 s, and 1/15 s (the page at sim speed 2 and 30 fps). Its 13-engine
+/// leg runs about 25-33 s. 320 flights, threaded: `--ignored
+/// --nocapture`. Debug one: `BOARD_SET="two outer" BOARD_ONLY=31,23,15
+/// BOARD_TRACE=1`.
+#[test]
+#[ignore]
+fn booster_engine_out_board() {
+    const SETS: [(&str, &[usize]); 4] = [
+        ("one outer", &[5]),
+        ("two outer", &[5, 9]),
+        ("three outer", &[4, 8, 12]),
+        ("one centre", &[0]),
+    ];
+    let only_set = std::env::var("BOARD_SET").ok();
+    let only = std::env::var("BOARD_ONLY").ok();
+    let mut jobs = Vec::new();
+    for (name, set) in SETS {
+        for (fps, frame) in [(60, FRAME), (15, 1.0 / 15.0)] {
+            for at in [26.0, 27.0, 28.0, 29.0, 30.0, 31.0, 32.0, 33.0] {
+                for seed in [7u64, 11, 23, 31, 42] {
+                    let pick = format!("{at},{seed},{fps}");
+                    if only_set.as_deref().is_some_and(|o| o != name)
+                        || only.as_deref().is_some_and(|o| o != pick)
+                    {
+                        continue;
+                    }
+                    jobs.push((name, set, fps, frame, at, seed));
+                }
+            }
+        }
+    }
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let chunk = jobs.len().div_ceil(threads).max(1);
+    let mut lines: Vec<(String, bool)> = std::thread::scope(|s| {
+        let handles: Vec<_> = jobs
+            .chunks(chunk)
+            .map(|part| {
+                s.spawn(move || {
+                    part.iter()
+                        .map(|&(name, set, fps, frame, at, seed)| {
+                            let r = booster_fail_run(set, at, seed, REPLAN_PERIOD, frame);
+                            (
+                                format!(
+                                    "BOARD {name:11} at {at} s {fps} fps seed {seed:2}: {:?} t {:.1} plans {} failed {} prop {:.0} t",
+                                    r.0, r.1, r.2, r.3, r.4
+                                ),
+                                r.0 == Some(Outcome::Caught),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect()
+    });
+    lines.sort();
+    for (l, _) in &lines {
+        eprintln!("{l}");
+    }
+    for (name, _) in SETS {
+        for fps in [60, 15] {
+            let cell: Vec<_> = lines
+                .iter()
+                .filter(|(l, _)| {
+                    l.contains(&format!("{name:11} ")) && l.contains(&format!(" {fps} fps "))
+                })
+                .collect();
+            let c = cell.iter().filter(|(_, ok)| *ok).count();
+            eprintln!("BOARD {name:11} {fps} fps: caught {c} of {}", cell.len());
+        }
+    }
+    let c = lines.iter().filter(|(_, ok)| *ok).count();
+    eprintln!("BOARD caught {c} of {}", lines.len());
+}
+
+/// One booster flight losing engines `set` at `at` s; the solver takes
+/// `latency` s; frames of `frame` s. (outcome, t, plans, failed, prop t).
+fn booster_fail_run(
+    set: &[usize],
+    at: f64,
+    seed: u64,
+    latency: f64,
+    frame: f64,
+) -> (Option<Outcome>, f64, usize, usize, f64) {
+    let mut f = ShipFlight::new(ShipFlightConfig {
+        seed,
+        lag: 0.3,
+        noise: Noise::LOW,
+        ..ShipFlightConfig::new(Kind::Booster)
+    })
+    .unwrap();
+    f.set_solve_time(latency);
+    let mut pending: Option<Pending> = None;
+    let mut last_request = f64::NEG_INFINITY;
+    let (mut ok, mut bad) = (0, 0);
+    let mut fired = false;
+    let verbose = std::env::var_os("BOARD_TRACE").is_some();
+    while f.phase() != Phase::Done && f.sim().t < 400.0 {
+        f.step(frame);
+        if !fired && f.sim().t >= at {
+            fired = true;
+            let mut any = false;
+            for &i in set {
+                any |= f.fail_engine(i);
+            }
+            if any {
+                f.request_replan();
+            }
+            if verbose {
+                eprintln!(
+                    "   FAIL {set:?} at {:.2}, lit {}",
+                    f.sim().t,
+                    f.sim().cluster.lit()
+                );
+            }
+        }
+        match deliver(&mut f, &mut pending) {
+            Some(true) => {
+                ok += 1;
+                if verbose && let Guide::Plan { plan, t0 } = f.guide() {
+                    let (x0, _) = plan.sample(0.0);
+                    let (x1, _) = plan.sample(f.sim().t - t0);
+                    eprintln!(
+                        "   plan ok at {:.2} (from {t0:.2}) leg {:?} tf {:.1} it {} conv {} start x {:.1} vx {:.1} now-ref x {:.1} vx {:.1}",
+                        f.sim().t,
+                        f.leg().map(|l| (l.engines, l.gate[2] as i32)),
+                        plan.final_time,
+                        plan.iterations,
+                        plan.converged,
+                        x0[1],
+                        x0[4],
+                        x1[1],
+                        x1[4],
+                    );
+                    let path: Vec<String> = (0..8)
+                        .map(|i| {
+                            let (x, _) = plan.sample(plan.final_time * f64::from(i) / 7.0);
+                            let nose = model::quat::rotate(dynamics::attitude(&x), [0.0, 0.0, 1.0]);
+                            let tilt = nose[0].asin().to_degrees();
+                            format!("{:.0}/{:.1}/{:.0}°", x[1], x[4], tilt)
+                        })
+                        .collect();
+                    eprintln!("      path x/vx/thrust-tilt: {}", path.join("  "));
+                    eprintln!("      x0 {:?}", plan.x[0]);
+                }
+            }
+            Some(false) => {
+                bad += 1;
+                if verbose {
+                    eprintln!("   plan FAILED at {:.2}", f.sim().t);
+                }
+            }
+            None => {}
+        }
+        request_after(&mut f, &mut pending, &mut last_request, latency);
+        if verbose && fired {
+            let x = f.sim().x;
+            let (r, v) = (dynamics::position(&x), dynamics::velocity(&x));
+            if (f.sim().t * 2.0).fract() < frame * 2.0 {
+                eprintln!(
+                    "t {:5.1} {:12} r ({:6.1},{:6.1},{:7.1}) v ({:5.1},{:5.1},{:6.1}) lit {} T {:.1} MN",
+                    f.sim().t,
+                    f.phase().label(Kind::Booster),
+                    r[0],
+                    r[1],
+                    r[2],
+                    v[0],
+                    v[1],
+                    v[2],
+                    f.sim().cluster.lit(),
+                    model::quat::norm(f.sim().cluster.thrust) / 1e6
+                );
+            }
+        }
+    }
+    let s = f.sim();
+    (s.outcome, s.t, ok, bad, s.propellant() / 1e3)
+}
+
 /// Something happens (a gust, a failure, a changed setting): guidance asks
 /// for a new plan at once, not only when the ship has drifted.
 #[test]
