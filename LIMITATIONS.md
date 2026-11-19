@@ -632,7 +632,8 @@ turn at most 10°/s. Same build, switch off and on, 2026-11-19 (boards:
 | After | 320 | 99 (18, 18, 18, 18, 16, 11) | 39 | 33 |
 
 Paired on the wind sweep: 15 booster flights caught only after, 2 only
-before. The approach board's loss is seed 27, high noise, into the tower.
+before. The whole sweep after: 163 of 216 (booster 99, ship 64: 18, 16,
+17, 9, 4, 0, unchanged). The approach board's loss is seed 27, high noise, into the tower.
 The ship's flights are the same flight for flight. The cost: in still
 air the booster's flight takes 67.1 s and lands with 31.1 t of
 propellant, against 61.6 s and 37.0 t (mean of 18). The plan switches to

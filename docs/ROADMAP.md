@@ -171,7 +171,7 @@ Not a milestone: getting the finished project public (D-045).
 - [x] History kept as it is (owner's call: the commit email and the
       two early commits that hold `CLAUDE.md` may be public)
 - [ ] Repository created and pushed; Pages source set to "GitHub Actions"
-- [ ] Live link and CI badge at the top of the README; `repository` in
+- [x] Live link and CI badge at the top of the README; `repository` in
       `Cargo.toml`
 
 ## Change log
