@@ -233,6 +233,11 @@ pub struct ShipFlightConfig {
     /// Choose the bearing the approach comes from, toward where the fall is
     /// taking the vehicle (M4.3, D-048).
     pub chosen_bearing: bool,
+    /// The booster plans its landing burn as one: every lit engine, then
+    /// its last ones from a planned node, to the catch gate, before trying
+    /// an intermediate gate; and plans only turns it can follow
+    /// ([`scvx::BOOSTER_OMEGA_MAX`]) (M4, D-052).
+    pub switch_plan: bool,
 }
 
 /// An entry from orbit (*illustrative* numbers, chosen so guidance has
@@ -319,6 +324,7 @@ impl ShipFlightConfig {
             planned_approach: false,
             glide_terminal: true,
             chosen_bearing: true,
+            switch_plan: true,
         }
     }
 
@@ -962,7 +968,11 @@ impl ShipFlight {
                     // to the burn when its engine switch comes.
                     let tau = t - t0;
                     let (xr, ur) = plan.sample(tau);
-                    if plan.switch_time.is_none_or(|s| tau >= s) {
+                    // (The booster's flip is over once it has a plan; its
+                    // engine switch comes later, in the burn.)
+                    if plan.switch_time.is_none_or(|s| tau >= s)
+                        || scn.ship.kind == VehicleKind::Booster
+                    {
                         self.phase = Phase::Burn;
                     }
                     self.follow_switch(t);
@@ -1194,7 +1204,7 @@ impl ShipFlight {
             None if lit > self.final_engines() => vec![self.final_leg(), self.mid_leg(&x, lit)],
             None => vec![self.final_leg()],
         };
-        let options = legs
+        let mut options: Vec<(Leg, ShipProblem)> = legs
             .into_iter()
             .map(|leg| {
                 let mut scn = self.sim.scn.clone();
@@ -1205,7 +1215,78 @@ impl ShipFlight {
                 (leg, p)
             })
             .collect();
+        if let Some(one) = self.booster_burn(&x, lit) {
+            // In order: the last engines alone (switch now, as soon as they
+            // can make it; a switch always planned a little later never
+            // came), then the one-burn plan, then an intermediate gate.
+            if hopeless {
+                options.retain(|(l, _)| !(l.last && l.engines < lit));
+            }
+            // On a one-burn plan the leg is the last one: offer the
+            // intermediate gate too, should both fail.
+            if !options.iter().any(|(l, _)| !l.last) {
+                let mid = self.mid_leg(&x, lit);
+                let mut scn = self.sim.scn.clone();
+                scn.gate = mid.gate;
+                scn.gate_velocity = mid.gate_velocity;
+                let mut p = ShipProblem::new(scn, x, self.leg_limits(lit));
+                p.wind = self.air().wind;
+                options.push((mid, p));
+            }
+            let at = options
+                .iter()
+                .position(|(l, _)| !l.last)
+                .unwrap_or(options.len());
+            options.insert(at, one);
+        }
+        if self.config.switch_plan {
+            // Only turns the booster can follow.
+            for (_, p) in &mut options {
+                p.omega_max = scvx::BOOSTER_OMEGA_MAX;
+            }
+        }
         (t, options)
+    }
+
+    /// The booster's landing burn as one plan to the catch gate: every lit
+    /// engine, then its last ones from a node chosen where the old
+    /// intermediate gate would have been reached (M4, D-052), upright from
+    /// that node on. None for the ship, without engines to drop, or
+    /// already below that gate.
+    fn booster_burn(&self, x: &State, lit: u8) -> Option<(Leg, ShipProblem)> {
+        let scn = &self.sim.scn;
+        let last = self.final_engines();
+        if !self.config.switch_plan || scn.ship.kind != VehicleKind::Booster || lit <= last {
+            return None;
+        }
+        let mid = self.mid_leg(x, lit);
+        let (z, sink) = (x[R + 2], -x[V + 2]);
+        let (z_mid, v_mid) = (mid.gate[2], -mid.gate_velocity[2]);
+        if z <= z_mid + 10.0 || sink <= v_mid {
+            return None;
+        }
+        // Brake on every engine from the sink rate now to the old
+        // intermediate gate's speed: at the rate that would reach that gate,
+        // but no gentler than every lit engine at its least thrust can (it
+        // cannot throttle lower; a switch placed later stops it too high and
+        // no plan exists) and no harder than they can at the most. Then on
+        // the last ones from where that leaves it to the catch gate.
+        let g = scn.planet.gravity();
+        let (lo, hi) = self.leg_limits(lit);
+        let reach = (sink * sink - v_mid * v_mid) / (2.0 * (z - z_mid));
+        let brake = reach.clamp(1.1 * (lo / x[M] - g), 0.9 * (hi / x[M] - g));
+        let fast = (sink - v_mid) / brake;
+        let z_switch = z - (sink * sink - v_mid * v_mid) / (2.0 * brake);
+        let slow =
+            2.0 * (z_switch - scn.gate[2]).max(1.0) / (v_mid - scn.gate_velocity[2]).max(1.0);
+        let leg = self.final_leg();
+        let mut p = ShipProblem::new(scn.clone(), *x, (lo, hi));
+        p.wind = self.air().wind;
+        p.late_limits = Some(self.leg_limits(last));
+        let n = p.nodes - 1;
+        p.switch_node = ((fast / (fast + slow) * n as f64).round() as usize).clamp(2, n - 2);
+        p.time_guess = Some(fast + slow);
+        Some((leg, p))
     }
 
     /// Install a plan for `leg`, solved from the measurement at sim time `t0`.

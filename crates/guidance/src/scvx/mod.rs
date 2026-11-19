@@ -82,7 +82,18 @@ pub struct ShipProblem {
     /// Steady wind the plan flies in, inertial, m/s (guidance's estimate,
     /// D-046; zero: still air).
     pub wind: Vec3,
+    /// First guess of the flight time, s (None: [`cold_time_guess`], which
+    /// assumes the first thrust range throughout).
+    pub time_guess: Option<f64>,
+    /// Largest planned body rate, rad/s.
+    pub omega_max: f64,
 }
+
+/// The booster's largest planned body rate when it plans its burn as one
+/// (rad/s, 10°/s): what it can follow. At the ship's 40°/s its plans asked
+/// for turns its gimbal (30°/s slew) and attitude loop delivered half a
+/// second late, 5-7° behind the plan (M4, D-052).
+pub const BOOSTER_OMEGA_MAX: f64 = 0.174_532_925_199_432_95;
 
 /// The booster's largest planned tilt in the landing burn, rad (15°,
 /// *illustrative*). Without it the optimizer turns the booster broadside
@@ -120,6 +131,8 @@ impl ShipProblem {
             side_speed: (SIDE_SPEED_0, SIDE_SPEED_SLOPE),
             nodes,
             wind: [0.0; 3],
+            time_guess: None,
+            omega_max: OMEGA_MAX,
         }
     }
 
@@ -239,7 +252,7 @@ fn cold_reference(p: &ShipProblem) -> (Vec<State>, Vec<Vec3>, f64) {
     let g = scn.planet.gravity();
     let r0 = dynamics::position(&x0);
     let v0 = dynamics::velocity(&x0);
-    let tf = cold_time_guess(p);
+    let tf = p.time_guess.unwrap_or_else(|| cold_time_guess(p));
     let q0 = dynamics::attitude(&x0);
     let qf = upright_like(q0);
     let k = p.nodes;
@@ -329,7 +342,7 @@ pub fn plan_ship(
             m_dry: scn.dry_mass / units.m,
             t_bounds: &t_bounds,
             tan_gimbal: scn.ship.gimbal_max.tan(),
-            w_max: OMEGA_MAX * units.t,
+            w_max: p.omega_max * units.t,
             floor_z: scn.floor_z / units.l,
             clearance_x: scn.clearance_x.map(|c| c / units.l),
             clearance_dir: scn.approach_dir(),

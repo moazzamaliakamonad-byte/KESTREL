@@ -165,6 +165,94 @@ fn booster_thirteen_engine_burn_plans_from_either_side() {
     }
 }
 
+/// The booster's whole landing burn as one plan (M4, D-052): every lit
+/// engine, then its centre three from a planned node, straight to the
+/// catch gate, as the real booster drops from 13 to 3 within one burn. No
+/// intermediate gate, so no short leg it cannot fly; and the plan reaches
+/// the switch upright, turning no faster than the three engines (a quarter
+/// of the turning authority) can stop within a few degrees.
+#[test]
+fn booster_plans_its_engine_switch_in_one_plan() {
+    let mut p = booster_burn_problem(60.0, -25.0, 0.03);
+    let scn = Scenario::booster();
+    p.scn.gate = scn.gate;
+    p.scn.gate_velocity = scn.gate_velocity;
+    let (lo, hi) = scn.ship.thrust_limits(3);
+    p.late_limits = Some((lo, (0.75 * hi).max(lo * 1.05)));
+    p.switch_node = 7;
+    p.time_guess = Some(26.0);
+    let plan = plan_ship(&p, None, 8).expect("plan");
+    eprintln!(
+        "tf {:.1} it {} conv {} gate {:.1} switch at {:?}",
+        plan.final_time, plan.iterations, plan.converged, plan.gate_error, plan.switch_time
+    );
+    assert!(plan.gate_error < 3.0, "gate error {}", plan.gate_error);
+    let at = &plan.x[p.switch_node];
+    let tilt = quat::tilt(dynamics::attitude(at));
+    let rate = quat::norm(dynamics::rates(at));
+    eprintln!(
+        "at the switch: tilt {:.1}°, turning {:.1}°/s",
+        tilt.to_degrees(),
+        rate.to_degrees()
+    );
+    assert!(
+        tilt < UPRIGHT_TILT + 0.02,
+        "tilt {:.1}° at the switch",
+        tilt.to_degrees()
+    );
+    // The centre three, at their least thrust, stop that turn within 5°.
+    let ship = &p.scn.ship;
+    let (t_min, _) = p.late_limits.unwrap();
+    let j = ship.inertia(at[M])[0];
+    let alpha = ship.cm_height * ship.gimbal_max.tan() * t_min / j;
+    let more = rate * rate / (2.0 * alpha);
+    assert!(
+        more < 5f64.to_radians(),
+        "{:.1}° more lean to stop the turn",
+        more.to_degrees()
+    );
+    check_limits(&p, &plan);
+}
+
+/// Debug aid (`--ignored --nocapture`): a one-burn plan that came back
+/// infeasible in flight (one outer engine lost at 26 s), swept over the
+/// switch node.
+#[test]
+#[ignore]
+fn booster_switch_node_sweep() {
+    let scn = Scenario::booster();
+    let q = quat::normalize([
+        0.9988631937945617,
+        0.0016042326041909854,
+        -0.047625486794985586,
+        -0.0012488105622214768,
+    ]);
+    let x0 = dynamics::state(
+        355784.2442896967,
+        [24.001007147780246, -1.242875227489463, 920.0137115320156],
+        [9.525525834272164, 0.5124508899836808, -128.29389797855117],
+        q,
+        [
+            0.008432696824265258,
+            -0.1302955323766359,
+            -0.0003321058003227733,
+        ],
+    );
+    let mut p = ShipProblem::new(scn, x0, (11.76e6, 26.46e6));
+    p.late_limits = Some((2.94e6, 5.5125e6));
+    p.time_guess = Some(19.867863768025614);
+    for k in [3, 4, 5, 6, 7, 8, 10, 12] {
+        p.switch_node = k;
+        match plan_ship(&p, None, 20) {
+            Ok(pl) => eprintln!(
+                "node {k}: ok tf {:.1} it {} conv {} gate {:.1}",
+                pl.final_time, pl.iterations, pl.converged, pl.gate_error
+            ),
+            Err(e) => eprintln!("node {k}: {e:?}"),
+        }
+    }
+}
+
 #[test]
 fn booster_divert_beyond_reach_is_refused() {
     // 336 m sideways in a nine-second burn at ≤ 15° tilt cannot be done.

@@ -53,6 +53,58 @@ fn request_after(
     if pending.is_none() && f.wants_replan() && t - *last_request >= REPLAN_PERIOD {
         *last_request = t;
         let (t0, options) = f.problem();
+        if std::env::var_os("PLAN_TRACE").is_some() {
+            // Each option on its own: which legs were tried, and how each went.
+            for (leg, p) in &options {
+                let one = plan(&[(*leg, p.clone())]);
+                eprintln!(
+                    "      option @{t0:.2} {} eng to z {:.0}{} from z {:.0} vz {:.0} x {:.1} vx {:.1} tilt {:.1}° rate {:.1}°/s: {}",
+                    leg.engines,
+                    leg.gate[2],
+                    p.late_limits.map_or(String::new(), |_| format!(
+                        " (switch at node {})",
+                        p.switch_node
+                    )),
+                    p.x0[3],
+                    p.x0[6],
+                    p.x0[1],
+                    p.x0[4],
+                    model::quat::tilt(dynamics::attitude(&p.x0)).to_degrees(),
+                    model::quat::norm(dynamics::rates(&p.x0)).to_degrees(),
+                    match &one {
+                        Ok((_, pl)) => format!(
+                            "ok tf {:.1} it {} conv {}",
+                            pl.final_time, pl.iterations, pl.converged
+                        ),
+                        Err(e) => {
+                            // Which limit made it fail: the planned turn
+                            // rate, or the iteration budget?
+                            let mut fast = p.clone();
+                            fast.omega_max = guidance::scvx::OMEGA_MAX;
+                            let a = guidance::scvx::plan_ship(&fast, None, 8);
+                            let b = guidance::scvx::plan_ship(p, None, 20);
+                            let show = |r: &Result<
+                                guidance::scvx::ShipPlan,
+                                guidance::GuidanceError,
+                            >| match r {
+                                Ok(pl) => {
+                                    format!("ok it {} gate {:.1}", pl.iterations, pl.gate_error)
+                                }
+                                Err(e) => format!("{e:?}"),
+                            };
+                            if std::env::var_os("PLAN_DUMP").is_some() && p.late_limits.is_some() {
+                                eprintln!("DUMP {:?}", p);
+                            }
+                            format!(
+                                "{e:?} (at 40°/s: {}; 20 iterations: {})",
+                                show(&a),
+                                show(&b)
+                            )
+                        }
+                    }
+                );
+            }
+        }
         let r = plan(&options);
         let legs = options.iter().map(|(l, _)| *l).collect();
         *pending = Some((t + latency, t0, legs, r));
@@ -628,6 +680,20 @@ fn booster_engine_out_board() {
     eprintln!("BOARD caught {c} of {}", lines.len());
 }
 
+/// Two outer engines lost at 31 s, solves 0.5 s, frames of 1/15 s: lost
+/// on the engine-out board (D-050, D-051) after a 3 s leg to an
+/// intermediate gate left it leaning and turning. Planned as one burn with
+/// the switch to the centre three inside it (D-052), it is caught.
+#[test]
+fn booster_engine_loss_late_in_the_burn_is_caught() {
+    let r = booster_fail_run(&[5, 9], 31.0, 23, REPLAN_PERIOD, 1.0 / 15.0);
+    eprintln!(
+        "{:?} at {:.1} s, {} plans, {} failed",
+        r.outcome, r.t, r.plans, r.failed
+    );
+    assert_eq!(r.outcome, Some(Outcome::Caught));
+}
+
 /// What one engine-out flight did.
 struct FailRun {
     outcome: Option<Outcome>,
@@ -696,12 +762,13 @@ fn booster_fail_run(set: &[usize], at: f64, seed: u64, latency: f64, frame: f64)
                     let (x0, _) = plan.sample(0.0);
                     let (x1, _) = plan.sample(f.sim().t - t0);
                     eprintln!(
-                        "   plan ok at {:.2} (from {t0:.2}) leg {:?} tf {:.1} it {} conv {} start x {:.1} vx {:.1} now-ref x {:.1} vx {:.1}",
+                        "   plan ok at {:.2} (from {t0:.2}) leg {:?} tf {:.1} it {} conv {} switch {:?} start x {:.1} vx {:.1} now-ref x {:.1} vx {:.1}",
                         f.sim().t,
                         f.leg().map(|l| (l.engines, l.gate[2] as i32)),
                         plan.final_time,
                         plan.iterations,
                         plan.converged,
+                        plan.switch_time.map(|s| (s * 10.0).round() / 10.0),
                         x0[1],
                         x0[4],
                         x1[1],
@@ -920,32 +987,26 @@ fn wind_run(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64) -> WindRun {
 }
 
 fn wind_run_with(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64, aware: bool) -> WindRun {
-    wind_run_cfg(kind, wind, noise, seed, aware, false, true, true)
+    wind_run_cfg(ShipFlightConfig {
+        wind_aware: aware,
+        ..wind_config(kind, wind, noise, seed)
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn wind_run_cfg(
-    kind: Kind,
-    wind: [f64; 2],
-    noise: Noise,
-    seed: u64,
-    aware: bool,
-    planned_approach: bool,
-    glide_terminal: bool,
-    chosen_bearing: bool,
-) -> WindRun {
-    let mut f = ShipFlight::new(ShipFlightConfig {
+/// The wind runs' configuration: throttle lag 0.3 s, the switches as they are.
+fn wind_config(kind: Kind, wind: [f64; 2], noise: Noise, seed: u64) -> ShipFlightConfig {
+    ShipFlightConfig {
         seed,
         lag: 0.3,
         noise,
         wind,
-        wind_aware: aware,
-        planned_approach,
-        glide_terminal,
-        chosen_bearing,
         ..ShipFlightConfig::new(kind)
-    })
-    .unwrap();
+    }
+}
+
+fn wind_run_cfg(config: ShipFlightConfig) -> WindRun {
+    let wind = config.wind;
+    let mut f = ShipFlight::new(config).unwrap();
     let mut pending: Option<Pending> = None;
     let mut last_request = f64::NEG_INFINITY;
     let mut gate = None;
@@ -1071,7 +1132,15 @@ fn unaware_flight_matches_today() {
             25.712377419400028,
         ),
     ] {
-        let r = wind_run_cfg(kind, wind, Noise::LOW, 7, false, false, false, false);
+        // Every M4 switch off.
+        let r = wind_run_cfg(ShipFlightConfig {
+            wind_aware: false,
+            planned_approach: false,
+            glide_terminal: false,
+            chosen_bearing: false,
+            switch_plan: false,
+            ..wind_config(kind, wind, Noise::LOW, 7)
+        });
         assert_eq!(r.outcome, Some(Outcome::Caught), "{kind:?}");
         assert_eq!(r.t, t, "{kind:?}");
         assert!((r.left - left).abs() < 1e-9, "{kind:?}: {} t left", r.left);
