@@ -567,6 +567,41 @@ tower before the final approach). Wind sweep with the glide: 146 of 216
 horizontal error in the final approach (`nav_error_by_noise`): ship 0.22
 / 0.94 m RMS, booster 0.28 / 1.07 m, at low / high noise (seeds 7-9).
 
+### Booster engine-out mid-burn (M4)
+
+`booster_engine_out_board` (`crates/wasm/tests/ship_loop.rs`, ignored,
+threaded; 2026-11-19, Kestrel's solver): the booster loses engines as a
+click on the page does (`fail_engine`, then a plan at once) during its
+13-engine leg (about 25-33 s), noise low, throttle lag 0.3 s, solves
+taking 0.5 s of sim time; failure at 26-33 s in 1 s steps, seeds 7, 11,
+23, 31, 42, frames of 1/60 s and of 1/15 s (the page at sim speed 2 and
+30 fps). 40 flights per cell:
+
+| Engines lost | 60 fps | 15 fps |
+| --- | --- | --- |
+| One outer | 39 | 40 |
+| Two outer | 40 | 38 |
+| Three outer | 40 | 37 |
+| One centre | 39 | 40 |
+
+313 of 320. The case found on the page on 2026-11-18 (two outer at 30 s,
+on Clarabel and the M3 code) was caught in all 10 of its flights; the
+page itself was not flown again for this. The 7 losses (4 out of
+propellant, 3 into the tower) failed at 27 s or 31 s. Traced: the
+booster swings sideways on its last legs (out to 40 m past the gate's
+line and back toward the tower), plans start failing, and it either
+hovers until the tanks are empty or drifts into the mast. The swing is a
+loop of the tracking controller and the solve latency: the controller
+leans further than the plan (15° against a planned 5°), the next plan
+has to start from that lean, and so on. When the swing carries it past
+the keep-out (`x ≥ −1 m`), no plan can exist until it is back out.
+
+Tried and not kept (D-050): a price on sideways speed in the planner
+(316 of 320, 5 flights caught only with it and 2 only without; it hardly
+changed the plans it was meant to fix, so not a fix); the keep-out
+loosened when the start is inside it (302 of 320: the plans it made from
+there were poor, and the brake-to-the-axis fallback did better).
+
 ### Solve-time benchmark (M4.4, Kestrel's solver flying)
 
 Same method as the M3 benchmark below (native: `bench_solvers`, the

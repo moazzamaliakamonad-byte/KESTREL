@@ -140,9 +140,14 @@ Four sub-projects, each with its own spec, plan and measurement.
       certificate and best-iterate fallback; the 3-DoF guidance ported;
       boards measured the same (glide board flight for flight, sweep 150
       against Clarabel's 152)
-- [ ] Booster engine-out mid-burn: two outer engines lost at 30 s hit the
-      tower (found 2026-11-18 on the page; one is caught); measure, then
-      fix in 4.2 or 4.3
+- [x] Booster engine-out mid-burn, measured (D-050): the case found on
+      the page (two outer engines lost at 30 s) is caught in all 10
+      flights of a 320-flight board; 313 of 320 in all (one to three
+      outer engines or a centre one, lost at 26-33 s)
+- [ ] The booster's sideways swing on its last legs at 0.5 s solve
+      latency (the 7 losses on that board): the tracking controller
+      leans further than the plan; measure a gentler lean, then the
+      boards
 
 ## Publishing on GitHub
 
@@ -194,3 +199,4 @@ Not a milestone: getting the finished project public (D-045).
   wind sweep 152 of 216.
 - 2026-11-19 — 4.4 done: Kestrel's own solver is the only one that flies
   (D-049).
+- 2026-11-19 — Booster engine-out mid-burn measured: 313 of 320 (D-050).

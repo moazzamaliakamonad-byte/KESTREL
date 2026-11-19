@@ -904,3 +904,28 @@ Template:
   40-iteration cap, where Clarabel reports infeasible; telling marginal
   infeasibility from near-optimality reliably needs a homogeneous
   embedding (Clarabel's method), not looser tolerances.
+
+## D-050 — Booster engine-out mid-burn: measured, guidance unchanged (M4)
+- Date: 2026-11-19
+- Status: accepted
+- Context: ROADMAP: "two outer engines lost at 30 s hit the tower" (seen
+  on the page on 2026-11-18, M3 code on Clarabel). Measure, then fix.
+- Measured: a 320-flight board (`booster_engine_out_board`: one, two or
+  three outer engines or one centre engine lost at 26-33 s, five seeds,
+  0.5 s solves, frames of 1/60 and 1/15 s): 313 caught; that case caught
+  in all 10 of its flights. The 7 losses come from a sideways swing on the
+  last legs: the tracking controller leans further than the plan, the
+  next plan starts from that lean, and with half a second of latency the
+  swing grows; carried past the tower-side keep-out, no plan can exist.
+- Tried, measured, not kept: (1) a quadratic price on sideways speed in
+  the booster's planner, 316 of 320 (5 flights caught only with it, 2 only
+  without), and isolated plans from the traced states barely changed even
+  at 100 times the weight: the plans are bound by attitude and constraints,
+  not under-priced, so this was noise, not a fix. (2) The keep-out
+  loosened (node slack, comfort price) when the start is inside it or
+  within 1 m of its edge, so a plan always exists: 302 of 320. Those
+  plans were poor (one 39 s long, unconverged), and with no plan the
+  existing fallback (brake upright toward the axis) did better.
+- Decision: guidance unchanged; the board stays as an ignored test; the
+  swing is a separate item (the controller's lean), to be measured on
+  every board before any change.
